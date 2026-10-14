@@ -18,23 +18,11 @@ use gpui_kit::{
 use crate::core::attachments::{self, Family, Look, MAX_FILES};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::pb;
-use crate::ui::app::{Dialog, FuwaApp, Target};
+use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
-use crate::ui::overlay::shade;
 use crate::ui::spoilers;
 use crate::ui::theme::{Palette, alpha, radius_xl};
 use crate::ui::widgets::icon;
-
-/// Tailwind's `shadow-2xl`, under a picture opened large.
-fn shadow_2xl() -> Vec<gpui_kit::BoxShadow> {
-    vec![gpui_kit::BoxShadow {
-        color: gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.25 },
-        offset: gpui_kit::point(px(0.0), px(25.0)),
-        blur_radius: px(50.0),
-        spread_radius: px(-12.0),
-        inset: false,
-    }]
-}
 
 /// The most room one picture takes in a message.
 const MEDIA_BOX: (f32, f32) = (420.0, 320.0);
@@ -148,20 +136,14 @@ pub(crate) fn attachments_view(
     let rest: Vec<&pb::Attachment> = files.iter().filter(|f| !shown(f)).collect();
     let tiled = pictures.len() > 1;
     let shown_pictures = pictures.len();
+    let all: std::rc::Rc<Vec<pb::Attachment>> = std::rc::Rc::new(pictures.iter().map(|(_, f)| (*f).clone()).collect());
     let mut out = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
     if !pictures.is_empty() {
         let mut grid = div().flex().flex_wrap().gap(px(6.0)).when(tiled, |el| el.max_w(px(TILE * 2.0 + 6.0)));
         for (n, (place, file)) in pictures.into_iter().enumerate() {
             let (w, h) = if tiled { (TILE, TILE) } else { attachments::fit_box(file.width, file.height, MEDIA_BOX) };
-            let open = Dialog::Picture {
-                key: key.to_owned(),
-                url: file.url.clone(),
-                name: file.filename.clone(),
-                width: file.width,
-                height: file.height,
-                bytes: file.size,
-            };
             let this = this.clone();
+            let (all, url, key) = (all.clone(), file.url.clone(), key.to_owned());
             // A spoiler stays covered until it's clicked: until then nothing of it is drawn or opened.
             let (spoiler, sid) = (file.spoiler, spoiler_id(file).to_owned());
             let shown = spoilers::file_shown(&sid, spoiler);
@@ -194,7 +176,13 @@ pub(crate) fn attachments_view(
                         if spoilers::file_shown(&sid, spoiler) != spoilers::Shown::Revealed {
                             return;
                         }
-                        let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
+                        // With the message's other pictures not still covered, to step through.
+                        let pictures = crate::ui::viewer::viewable_attachments(&all.iter().collect::<Vec<_>>());
+                        let at = pictures
+                            .iter()
+                            .position(|v| v.source == crate::ui::viewer::Source::Url(url.clone()))
+                            .unwrap_or(0);
+                        let _ = this.update(cx, |this, cx| this.view_pictures(&key, pictures, at, window, cx));
                     }
                 })
                 .when(shown != spoilers::Shown::Covered, |el| {
@@ -743,6 +731,25 @@ impl FuwaApp {
             .core
             .shared
             .read(|s| s.instance(&key).and_then(|i| i.channel(&server, &channel).map(|c| c.name.clone())))?;
+        let heading = t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))]);
+        Some(
+            self.drop_sheet(heading, t("chat.files.dropNote"), p, window, cx, |this, paths, cx| {
+                this.add_files(paths, cx)
+            }),
+        )
+    }
+
+    /// The sheet over the window while files are dragged over it, saying where
+    /// they'll go (`heading`); `take` gets the ones dropped anywhere.
+    pub(crate) fn drop_sheet(
+        &self,
+        heading: String,
+        note: String,
+        p: &Palette,
+        window: &Window,
+        cx: &mut Context<Self>,
+        take: impl Fn(&mut Self, Vec<PathBuf>, &mut Context<Self>) + 'static,
+    ) -> AnyElement {
         let size = window.viewport_size();
         let sheet = div()
             .flex()
@@ -797,33 +804,31 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.foreground)
                     .text_center()
-                    .child(t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))])),
+                    .child(heading),
             )
-            .child(div().text_sm().text_color(p.muted_foreground).text_center().child(t("chat.files.dropNote")));
+            .child(div().text_sm().text_color(p.muted_foreground).text_center().child(note));
         let shade = alpha(p.background, 0.6);
-        Some(
-            gpui_kit::deferred(
-                gpui_kit::anchored().position(gpui_kit::point(px(0.0), px(0.0))).child(
-                    div()
-                        .id("drop-overlay")
-                        .w(size.width)
-                        .h(size.height)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .p(px(24.0))
-                        .opacity(0.0)
-                        .drag_over::<ExternalPaths>(move |s, _, _, _| s.opacity(1.0).bg(shade))
-                        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                            cx.stop_propagation();
-                            this.add_files(paths.paths().to_vec(), cx)
-                        }))
-                        .child(sheet),
-                ),
-            )
-            .with_priority(2)
-            .into_any_element(),
+        gpui_kit::deferred(
+            gpui_kit::anchored().position(gpui_kit::point(px(0.0), px(0.0))).child(
+                div()
+                    .id("drop-overlay")
+                    .w(size.width)
+                    .h(size.height)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .p(px(24.0))
+                    .opacity(0.0)
+                    .drag_over::<ExternalPaths>(move |s, _, _, _| s.opacity(1.0).bg(shade))
+                    .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
+                        cx.stop_propagation();
+                        take(this, paths.paths().to_vec(), cx)
+                    }))
+                    .child(sheet),
+            ),
         )
+        .with_priority(2)
+        .into_any_element()
     }
 
     /// Tints the composer while files are dragged over it (the overlay takes the drop).
@@ -872,87 +877,6 @@ impl FuwaApp {
             });
         })
         .detach();
-    }
-
-    /// A picture opened large, over everything.
-    pub(crate) fn render_picture(&self, open: &Dialog, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Dialog::Picture { key, url, name, width, height, bytes } = open else { return div().into_any_element() };
-        let (size, bytes) = ((*width, *height), *bytes);
-        let view = window.viewport_size();
-        let room = (f32::from(view.width) - 160.0, f32::from(view.height) - 180.0);
-        let (w, h) = attachments::fit_box(size.0, size.1, (room.0.max(200.0), room.1.max(200.0)));
-        let (key, url_owned, name_owned) = (key.to_owned(), url.to_owned(), name.to_owned());
-        // The web's caption: white on black at 60%, its buttons lit white at 15% on hover.
-        let round = |id: &'static str, glyph: &str| {
-            let hover = gpui_kit::Hsla { h: 0.0, s: 0.0, l: 1.0, a: 0.15 };
-            div()
-                .id(id)
-                .size(px(32.0))
-                .flex_none()
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .child(icon(glyph).size(px(16.0)))
-        };
-        let white = |a: f32| gpui_kit::Hsla { h: 0.0, s: 0.0, l: 1.0, a };
-        let caption = div()
-            .max_w_full()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .pl(px(16.0))
-            .pr(px(6.0))
-            .py(px(6.0))
-            .rounded_full()
-            .bg(gpui_kit::Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.6 })
-            .text_sm()
-            .text_color(white(1.0))
-            .child(div().min_w_0().truncate().font_weight(FontWeight::BOLD).child(attachments::short_name(name, 48)))
-            .when(bytes > 0, |el| {
-                el.child(div().flex_none().text_color(white(0.7)).child(attachments::format_bytes(bytes)))
-            })
-            .child(
-                round("picture-save", "download")
-                    .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.save_file(key.clone(), url_owned.clone(), name_owned.clone(), bytes, cx)
-                    })),
-            )
-            .child(
-                // It turns a quarter under the pointer (`hover:rotate-90`).
-                round("picture-close", "x")
-                    .hover(|s| s.rotate(radians(std::f32::consts::FRAC_PI_2)))
-                    .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
-            );
-        motion::fade_in(
-            // The web's `bg-black/80 backdrop-blur-sm`.
-            shade("picture-scrim", 0.8, 4.0).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
-                div()
-                    .id("picture-panel")
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(12.0))
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(motion::grow_in(
-                        crate::ui::widgets::picture(url.to_owned())
-                            .w(px(w))
-                            .h(px(h))
-                            .rounded(radius_xl())
-                            .shadow(shadow_2xl())
-                            .object_fit(ObjectFit::Contain),
-                        "picture-zoom",
-                        0.92,
-                    ))
-                    .child(motion::rise(caption, "picture-caption", Duration::from_millis(50), 8.0)),
-            ),
-            "picture-fade",
-            Duration::from_millis(160),
-        )
-        .into_any_element()
     }
 }
 

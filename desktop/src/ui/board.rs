@@ -13,7 +13,7 @@ use chrono::{Local, NaiveDate, TimeZone as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla,
+    AnyElement, AppContext as _, Context, DragMoveEvent, Entity, ExternalPaths, Focusable as _, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Rgba, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px, rgb,
 };
@@ -1874,12 +1874,19 @@ impl FuwaApp {
                 );
             }
             let uploading = self.files_state().uploading;
+            // Pasted or dropped pictures and files join the description's, as the paperclip's do.
+            let mut body = Textarea::new(&self.board.body).appearance(false);
+            if attach {
+                body = body.on_paste(self.paste_to_channel(cx));
+            }
+            let (drop_bg, primary) = (alpha(p.primary, 0.08), p.primary);
             div()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
                 .child(
                     div()
+                        .id("card-body-box")
                         .px(px(12.0))
                         .py(px(8.0))
                         .rounded(radius_xl())
@@ -1887,7 +1894,14 @@ impl FuwaApp {
                         .border_color(alpha(p.primary, 0.6))
                         .bg(p.card)
                         .text_sm()
-                        .child(div().ml(px(-10.0)).child(Textarea::new(&self.board.body).appearance(false))),
+                        .when(attach, |el| {
+                            el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_color(primary))
+                                .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                                    cx.stop_propagation();
+                                    this.add_files(paths.paths().to_vec(), cx)
+                                }))
+                        })
+                        .child(div().ml(px(-10.0)).child(body)),
                 )
                 .when(!kept.is_empty(), |el| el.child(files))
                 .children(self.file_tray(&p, cx))

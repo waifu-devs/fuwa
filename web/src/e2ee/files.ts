@@ -1,7 +1,14 @@
 import { create } from "@bufbuild/protobuf";
-import { SealedFileSchema, type SealedFile } from "@/gen/fuwa/v1/dm_pb";
+import { SealedFileSchema, SealedGifSchema, type SealedFile } from "@/gen/fuwa/v1/dm_pb";
+import { GifProvider } from "@/gen/fuwa/v1/types_pb";
 import { cleanName, MAX_FILE_BYTES, MAX_FILES, plausible } from "@/files/sealed";
 import type { FileRef } from "./vault";
+
+/** The most of a GIF's title kept from a message. */
+const MAX_GIF_TITLE = 200;
+
+/** A provider this app knows how to credit, or none. */
+const knownProvider = (p: GifProvider) => (p === GifProvider.GIPHY || p === GifProvider.KLIPY ? p : GifProvider.UNSPECIFIED);
 
 /** Files as they go inside an encrypted message or a backup part. */
 export function toSealedFiles(files: FileRef[] | undefined): SealedFile[] {
@@ -18,6 +25,7 @@ export function toSealedFiles(files: FileRef[] | undefined): SealedFile[] {
       chunkBytes: f.chunkBytes,
       fileSize: BigInt(f.fileSize),
       spoiler: !!f.spoiler,
+      gif: f.gif && create(SealedGifSchema, { title: f.gif.title, provider: f.gif.provider }),
     }),
   );
 }
@@ -50,6 +58,7 @@ export function filesOf(list: SealedFile[] | undefined): FileRef[] {
       height: Math.min(f.height, 16_384),
       fileSize: Number.isSafeInteger(fileSize) && fileSize >= 0 && fileSize <= Math.min(size, MAX_FILE_BYTES) ? fileSize : 0,
       spoiler: f.spoiler,
+      ...(f.gif ? { gif: { title: f.gif.title.slice(0, MAX_GIF_TITLE), provider: knownProvider(f.gif.provider) } } : {}),
     });
   }
   return out;

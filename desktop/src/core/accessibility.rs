@@ -165,6 +165,68 @@ pub fn high_contrast(t: &Tokens) -> Tokens {
     out
 }
 
+// ───────────────────────── Encryption marks ─────────────────────────
+
+/// What end-to-end encryption is drawn with (the web's `SealColors`): green,
+/// and amber when a safety number changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SealColors {
+    /// A pill or note's own solid surface, and pointed at.
+    pub surface: u32,
+    pub surface_hover: u32,
+    /// Text and icons on that surface.
+    pub ink: u32,
+    /// Its outline, so it stands apart from whatever is behind it.
+    pub edge: u32,
+    /// A mark on its own, on the theme's card or background.
+    pub icon: u32,
+    pub warn_surface: u32,
+    pub warn_surface_hover: u32,
+    pub warn_ink: u32,
+    pub warn_edge: u32,
+    pub warn_icon: u32,
+}
+
+const SEAL_GREEN: u32 = 0x00bc7d;
+const SEAL_AMBER: u32 = 0xfe9a00;
+
+/// The encryption marks in a theme. They sit over see-through panels and
+/// backdrop pictures, so each draws on a solid surface of its own (the
+/// theme's card, tinted), never on what's behind it, with text at 4.5:1
+/// against that surface and lone icons at 3:1 against the card and the
+/// background, whatever the theme. The web's `sealColors` does the same math.
+pub fn seal_colors(t: &Tokens) -> SealColors {
+    let (card, background) = (t.get("card"), t.get("background"));
+    let dark = luminance(card) < luminance(t.get("card-foreground"));
+    let paint = |hue: u32, ink: u32, icon: u32| {
+        let surface = mix(hue, card, 0.14);
+        let surface_hover = mix(hue, card, 0.22);
+        (
+            surface,
+            surface_hover,
+            ensure_contrast(ink, &[surface, surface_hover], 4.5),
+            ensure_contrast(mix(hue, card, 0.45), &[surface], 2.0),
+            ensure_contrast(icon, &[card, background], 3.0),
+        )
+    };
+    let (surface, surface_hover, ink, edge, icon) =
+        paint(SEAL_GREEN, if dark { 0x5ee9b5 } else { 0x007a55 }, if dark { 0x00d492 } else { 0x009966 });
+    let (warn_surface, warn_surface_hover, warn_ink, warn_edge, warn_icon) =
+        paint(SEAL_AMBER, if dark { 0xffd230 } else { 0xbb4d00 }, if dark { 0xffb900 } else { 0xe17100 });
+    SealColors {
+        surface,
+        surface_hover,
+        ink,
+        edge,
+        icon,
+        warn_surface,
+        warn_surface_hover,
+        warn_ink,
+        warn_edge,
+        warn_icon,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,9 +290,62 @@ mod tests {
 
     /// The web app's `lib/accessibility.test.ts` pins the same values, so both apps paint alike.
     #[test]
+    fn seal_marks_read_on_every_theme() {
+        let mut themes: Vec<Tokens> = builtins().iter().flat_map(|t| [t.tokens, high_contrast(&t.tokens)]).collect();
+        // Custom themes can be anything: mid greys, the seal's own green, loud yellow.
+        for (card, fg, background) in
+            [(0x808080, 0xffffff, 0x707070), (0x00bc7d, 0x000000, 0x00bc7d), (0xffff00, 0x000000, 0xffffff)]
+        {
+            let mut t = builtins()[0].tokens;
+            t.set("card", card);
+            t.set("card-foreground", fg);
+            t.set("background", background);
+            themes.push(t);
+        }
+        for t in &themes {
+            let s = seal_colors(t);
+            for (ink, surfaces, icon) in [
+                (s.ink, [s.surface, s.surface_hover], s.icon),
+                (s.warn_ink, [s.warn_surface, s.warn_surface_hover], s.warn_icon),
+            ] {
+                for surface in surfaces {
+                    assert!(contrast(ink, surface) >= 4.5, "{:06x} text", t.get("card"));
+                }
+                assert!(contrast(icon, t.get("card")) >= 3.0 && contrast(icon, t.get("background")) >= 3.0);
+            }
+            assert!(contrast(s.edge, s.surface) >= 2.0);
+        }
+    }
+
+    #[test]
     fn matches_the_web() {
         let shown = |t: Tokens| t.0.map(crate::core::themes::hex).join(" ");
         let all = builtins();
+        let seal = |t: &Tokens| {
+            let s = seal_colors(t);
+            [
+                s.surface,
+                s.surface_hover,
+                s.ink,
+                s.edge,
+                s.icon,
+                s.warn_surface,
+                s.warn_surface_hover,
+                s.warn_ink,
+                s.warn_edge,
+                s.warn_icon,
+            ]
+            .map(crate::core::themes::hex)
+            .join(" ")
+        };
+        assert_eq!(
+            seal(&all[0].tokens),
+            "#dbf6ed #c7f0e2 #007753 #73b9a2 #009966 #fff1db #ffe9c7 #b44a00 #cca870 #e07100"
+        );
+        assert_eq!(
+            seal(&all[1].tokens),
+            "#1b3139 #183e3f #5ee9b5 #166756 #00d492 #3e2c28 #503624 #ffd230 #835419 #ffb900"
+        );
         assert_eq!(
             shown(high_contrast(&all[0].tokens)),
             "#fffafc #3b2330 #ffffff #3b2330 #ffffff #3b2330 #be4d73 #ffffff #fdecf2 #3b2330 #fce6ed #604753 #e3c9d2 #3b2330 #cf4146 #a48c95 #a48c95 #ee6191"

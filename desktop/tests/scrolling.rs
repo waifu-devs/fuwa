@@ -22,7 +22,6 @@ use std::path::Path;
 /// through `widgets::inner_scroll` instead.
 const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("attachments.rs", 1),
-    // A board's lists side by side: a full-screen row over nothing that scrolls.
     ("board.rs", 1),
     ("connect.rs", 2),
     ("context_menu.rs", 2),

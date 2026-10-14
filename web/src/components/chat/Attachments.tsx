@@ -1,4 +1,3 @@
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   ArchiveIcon,
   DownloadIcon,
@@ -10,9 +9,8 @@ import {
   FileTextIcon,
   FileVideoIcon,
   PresentationIcon,
-  XIcon,
 } from "lucide-react";
-import { AnimatePresence, m as motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import type { Attachment } from "@/gen/fuwa/v1/types_pb";
 import { familyOf, fitBox, lookOf, shortName, type FileFamily } from "@/lib/attachments";
@@ -22,6 +20,7 @@ import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { reportError } from "@/lib/reports";
 import { cn } from "@/lib/utils";
+import { ImageViewer, type ViewerPicture } from "@/components/chat/ImageViewer";
 import { SpoilerBadge, SpoilerCover } from "@/components/chat/SpoilerCover";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { attachmentLoader } from "@/voice/fetch";
@@ -111,19 +110,48 @@ function Download({ url, name, className, children }: { url: string; name: strin
  * covered (`SpoilerCover`) until it's clicked.
  */
 export const Attachments = memo(function Attachments({ files, animate }: { files: Attachment[]; animate: boolean }) {
-  const [open, setOpen] = useState<Attachment | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  // Spoilers uncovered here: the viewer steps through those and the pictures that never were covered.
+  const [uncovered, setUncovered] = useState<ReadonlySet<string>>(() => new Set());
   if (!files.length) return null;
+  const keyOf = (f: Attachment) => f.id || f.url;
   const pictures = files.filter((f) => lookOf(f.contentType) === "picture" && shownPicture(f.url));
   const shown = new Set(pictures);
   const rest = files.filter((f) => !shown.has(f));
   const tiled = pictures.length > 1;
+  const viewable = pictures.filter((f) => !f.spoiler || uncovered.has(keyOf(f)));
+  const inViewer: ViewerPicture[] = viewable.map((f) => ({
+    key: keyOf(f),
+    src: shownPicture(f.url),
+    name: f.filename,
+    bytes: Number(f.size),
+    width: f.width,
+    height: f.height,
+    original: shownPicture(f.url),
+    save: () => downloadQuietly(f.url, f.filename),
+  }));
   return (
     <div className="mt-1 flex flex-col gap-1.5">
       {pictures.length > 0 && (
         <div className={cn("flex flex-wrap gap-1.5", tiled && "max-w-[412px]")}>
           {pictures.map((file, n) => (
-            <SpoilerCover key={file.id || file.url} spoiler={file.spoiler} look="media" animate={animate} className="rounded-xl">
-              <Picture file={file} box={tiled ? TILE_BOX : MEDIA_BOX} square={tiled} delay={animate ? n * 0.04 : 0} animate={animate} onOpen={() => setOpen(file)} />
+            <SpoilerCover
+              key={keyOf(file)}
+              spoiler={file.spoiler}
+              look="media"
+              animate={animate}
+              className="rounded-xl"
+              onShown={() => setUncovered((was) => new Set(was).add(keyOf(file)))}
+            >
+              <Picture
+                file={file}
+                box={tiled ? TILE_BOX : MEDIA_BOX}
+                square={tiled}
+                delay={animate ? n * 0.04 : 0}
+                animate={animate}
+                // A covered spoiler can't be clicked (`SpoilerCover`), so this one is in the viewer's list.
+                onOpen={() => setOpen(Math.max(0, viewable.indexOf(file)))}
+              />
             </SpoilerCover>
           ))}
         </div>
@@ -153,7 +181,7 @@ export const Attachments = memo(function Attachments({ files, animate }: { files
           </SpoilerCover>
         );
       })}
-      <Viewer file={open} onClose={() => setOpen(null)} />
+      <ImageViewer pictures={inViewer} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
     </div>
   );
 });
@@ -308,66 +336,6 @@ function FileCard({ file, delay, animate }: { file: Attachment; delay: number; a
       </motion.span>
       <FileLine file={file} />
     </motion.div>
-  );
-}
-
-/** A picture full size over everything, closed with Escape, a click outside or the button. */
-function Viewer({ file, onClose }: { file: Attachment | null; onClose: () => void }) {
-  const lang = useI18n();
-  return (
-    <DialogPrimitive.Root open={!!file} onOpenChange={(open) => !open && onClose()}>
-      <AnimatePresence>
-        {file && (
-          <DialogPrimitive.Portal forceMount>
-            <DialogPrimitive.Overlay asChild forceMount>
-              <motion.div
-                className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-              />
-            </DialogPrimitive.Overlay>
-            <DialogPrimitive.Content asChild forceMount aria-describedby={undefined}>
-              <motion.div
-                className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 p-4 outline-none"
-                onClick={(e) => e.target === e.currentTarget && onClose()}
-              >
-                <DialogPrimitive.Title className="sr-only">{file.filename}</DialogPrimitive.Title>
-                <motion.img
-                  src={shownPicture(file.url)}
-                  alt={file.filename}
-                  initial={{ opacity: 0, scale: 0.92 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 32 }}
-                  className="max-h-[82svh] max-w-full rounded-xl object-contain shadow-2xl"
-                />
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 32, delay: 0.05 }}
-                  className="flex max-w-full items-center gap-2 rounded-full bg-black/60 py-1.5 pr-1.5 pl-4 text-sm text-white"
-                >
-                  <span className="truncate font-bold" title={file.filename}>
-                    {shortName(file.filename, 48)}
-                  </span>
-                  <span className="shrink-0 text-white/70 tabular-nums">{formatBytes(lang, Number(file.size))}</span>
-                  <Download url={file.url} name={file.filename} className="grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-white/15">
-                    <DownloadIcon className="size-4" />
-                  </Download>
-                  <DialogPrimitive.Close className="grid size-8 shrink-0 place-items-center rounded-full transition hover:rotate-90 hover:bg-white/15">
-                    <XIcon className="size-4" />
-                    <span className="sr-only">{lang.t("common.close")}</span>
-                  </DialogPrimitive.Close>
-                </motion.div>
-              </motion.div>
-            </DialogPrimitive.Content>
-          </DialogPrimitive.Portal>
-        )}
-      </AnimatePresence>
-    </DialogPrimitive.Root>
   );
 }
 

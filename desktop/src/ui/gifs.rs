@@ -45,6 +45,23 @@ const MAX_UPLOAD: u64 = 10 * 1024 * 1024;
 /// How long whether GIFs are on is believed.
 const SETTINGS_FOR: Duration = Duration::from_secs(5 * 60);
 
+/// Where a picked GIF goes.
+#[derive(Clone)]
+pub(crate) enum GifPlace {
+    /// A server's own channel: sent as the message's GIF.
+    Channel { key: String, server: String, channel: String },
+    /// A conversation or secure channel: fetched and sealed like a file.
+    Sealed { key: String, id: String },
+}
+
+impl GifPlace {
+    fn into_key(self) -> String {
+        match self {
+            GifPlace::Channel { key, .. } | GifPlace::Sealed { key, .. } => key,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Tab {
     #[default]
@@ -170,15 +187,27 @@ impl Gifs {
 }
 
 impl FuwaApp {
-    /// Where a GIF would go: a server's own channel you may attach files in.
-    pub(crate) fn gif_place(&self) -> Option<(String, String, String)> {
-        if !self.can_attach() {
-            return None;
-        }
+    /// Where a GIF would go: a server's own channel you may attach files in,
+    /// or a conversation or secure channel (where you may attach files), where
+    /// it goes sealed like a file.
+    pub(crate) fn gif_place(&self) -> Option<GifPlace> {
         match self.target()? {
-            Target::Channel { key, server, channel } => Some((key, server, channel)),
-            _ => None,
+            Target::Channel { key, server, channel } => {
+                self.can_attach().then_some(GifPlace::Channel { key, server, channel })
+            }
+            Target::Dm { key, conversation } => Some(GifPlace::Sealed { key, id: conversation }),
+            Target::Secure { key, server, channel } => {
+                let may = self.core.shared.read(|s| {
+                    s.instance(&key).is_some_and(|i| i.access(&server).has_in(&channel, pb::Permission::AttachFiles))
+                });
+                may.then_some(GifPlace::Sealed { key, id: channel })
+            }
         }
+    }
+
+    /// The instance a GIF would go to, where one can.
+    pub(crate) fn gif_key(&self) -> Option<String> {
+        self.gif_place().map(GifPlace::into_key)
     }
 
     /// Asks an instance whether GIFs are on, now and then, and your saved ones the first time.
@@ -215,7 +244,7 @@ impl FuwaApp {
 
     /// The GIF button by the composer, where GIF search is on and you may attach files.
     pub(crate) fn gif_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (key, _, _) = self.gif_place()?;
+        let key = self.gif_key()?;
         self.ask_gifs(&key, cx);
         self.gifs_on(&key)?;
         let open = self.gifs.open;
@@ -279,16 +308,15 @@ impl FuwaApp {
         g.sending = None;
         g.born = Some(Instant::now());
         g.scroll = ScrollHandle::new();
-        let place = self.gif_place();
-        let credit =
-            place.as_ref().map_or("", |(key, _, _)| gifs::provider_name(self.gifs_on(key).unwrap_or_default()));
+        let place = self.gif_key();
+        let credit = place.as_ref().map_or("", |key| gifs::provider_name(self.gifs_on(key).unwrap_or_default()));
         let placeholder = if credit.is_empty() { "Search GIFs".to_owned() } else { format!("Search {credit}") };
         self.gifs.query.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx);
             state.set_value("", window, cx);
             state.focus(window, cx);
         });
-        if let Some((key, _, _)) = place {
+        if let Some(key) = place {
             self.load_categories(&key, cx);
         }
         cx.notify();
@@ -340,7 +368,7 @@ impl FuwaApp {
     }
 
     fn start_gif_search(&mut self, query: String, cx: &mut Context<Self>) {
-        let Some((key, _, _)) = self.gif_place() else { return };
+        let Some(key) = self.gif_key() else { return };
         self.gifs.run += 1;
         self.gifs.scroll = ScrollHandle::new();
         self.gifs.results = Some(Results {
@@ -405,9 +433,11 @@ impl FuwaApp {
         cx.notify();
     }
 
-    /// Sends a tile: a search result is stored on the instance first.
+    /// Sends a tile: a search result is stored on the instance first. In a
+    /// conversation or secure channel it's then fetched and goes sealed, like
+    /// a file, so the instance never learns where it went.
     fn pick_gif(&mut self, tile: Tile, cx: &mut Context<Self>) {
-        let Some((key, server, channel)) = self.gif_place() else { return };
+        let Some(place) = self.gif_place() else { return };
         if self.gifs.sending.is_some() {
             return;
         }
@@ -416,16 +446,32 @@ impl FuwaApp {
         self.run(
             cx,
             async move {
+                let key = match &place {
+                    GifPlace::Channel { key, .. } | GifPlace::Sealed { key, .. } => key.clone(),
+                };
                 let gif = match tile.pick {
                     Pick::Gif(gif) => gif,
                     Pick::Result(id) => core.prepare_gif(&key, pb::prepare_gif_request::From::ResultId(id)).await?,
                 };
-                core.send_gif(&key, &server, &channel, gif).await
+                match place {
+                    GifPlace::Channel { key, server, channel } => {
+                        core.send_gif(&key, &server, &channel, gif).await.map(|()| None)
+                    }
+                    GifPlace::Sealed { key, id } => {
+                        let file = core.fetch_gif(&key, &gif).await?;
+                        Ok(Some((key, id, file)))
+                    }
+                }
             },
             |this, result, cx| {
                 this.gifs.sending = None;
                 match result {
-                    Ok(()) => this.close_gifs(cx),
+                    Ok(sealed) => {
+                        if let Some((key, id, file)) = sealed {
+                            this.send_files_in(key, id.clone(), id, vec![file], String::new(), None, cx);
+                        }
+                        this.close_gifs(cx)
+                    }
                     Err(err) => {
                         this.toast("circle-alert", "Couldn't send that GIF".into(), err.message, None, None, cx)
                     }
@@ -438,7 +484,7 @@ impl FuwaApp {
 
     /// Saves a tile's GIF, or takes it off your saved ones.
     fn toggle_tile(&mut self, tile: Tile, cx: &mut Context<Self>) {
-        let Some((key, _, _)) = self.gif_place() else { return };
+        let Some(key) = self.gif_key() else { return };
         match (tile.stored, tile.pick) {
             (Some(url), _) => self.toggle_saved_gif(key, url, cx),
             (None, Pick::Result(id)) => {
@@ -508,7 +554,7 @@ impl FuwaApp {
 
     /// Uploads a GIF of your own to your saved ones.
     fn upload_gif(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        let Some((key, _, _)) = self.gif_place() else { return };
+        let Some(key) = self.gif_key() else { return };
         self.gifs.uploading = true;
         let core = self.core.clone();
         let k = key.clone();
@@ -555,7 +601,7 @@ impl FuwaApp {
 
     /// The picker, floating over the composer's right end.
     pub(crate) fn gif_panel(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let place = self.gif_place();
+        let place = self.gif_key();
         if place.is_none() {
             self.gifs.open = false;
         }
@@ -565,7 +611,7 @@ impl FuwaApp {
         if !open && going.is_none() {
             return None;
         }
-        let (key, _, _) = place?;
+        let key = place?;
         let credit = gifs::provider_name(self.gifs_on(&key).unwrap_or_default());
         let searching = self.gifs.results.is_some();
         let fresh = self.gifs.born.is_some_and(|t| t.elapsed() < Duration::from_millis(450));
@@ -1173,6 +1219,16 @@ pub(crate) fn gif_in_message(
     let (w, h) = gifs::fit(gif.width, gif.height);
     let group = SharedString::from(format!("gif-msg|{mid}"));
     let credit = gifs::provider_name(gif.provider);
+    // A click opens it in the viewer (the star stops its own clicks).
+    let open = {
+        let name = if gif.title.is_empty() { "GIF".to_owned() } else { gif.title.clone() };
+        let picture = crate::ui::viewer::Viewed::url(&gif.url, &name, gif.width, gif.height);
+        let (this, key) = (this.clone(), key.to_owned());
+        move |_: &gpui_kit::ClickEvent, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            let picture = picture.clone();
+            let _ = this.update(cx, |this, cx| this.view_pictures(&key, vec![picture], 0, window, cx));
+        }
+    };
     let (this, key, url) = (this.clone(), key.to_owned(), gif.url.clone());
     let star = div()
         .id(SharedString::from(format!("gif-msg-star|{mid}")))
@@ -1208,6 +1264,8 @@ pub(crate) fn gif_in_message(
         .rounded(corner(12.0))
         .overflow_hidden()
         .bg(p.muted)
+        .cursor_pointer()
+        .on_click(open)
         // `shadow-sm`.
         .shadow(vec![gpui_kit::BoxShadow {
             color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.05),
