@@ -57,6 +57,7 @@ import {
   addServer,
   applyEvent,
   notificationKey,
+  land,
   removeServer,
   sortChannels,
   withMember,
@@ -1425,12 +1426,10 @@ export const sendMessage = (
       let messages =
         loaded && res.message ? { ...i.messages, [at]: { ...loaded, items: upsertMessage(loaded.items, res.message) } } : i.messages;
       if (shown && res.message) messages = { ...messages, [channelId]: { ...shown, items: upsertMessage(shown.items, res.message) } };
-      return {
-        ...i,
-        users: withSharedAuthors(i.users, [res.message]),
-        pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pending.nonce) },
-        messages,
-      };
+      const next = { ...i, users: withSharedAuthors(i.users, [res.message]), messages };
+      return res.message
+        ? land(next, at, pending.nonce, res.message.id)
+        : { ...next, pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pending.nonce) } };
     });
     // Replying follows a thread unless you unfollowed it once, which only the server knows: ask it again.
     const followed = store.get().instances[key]?.followed[serverId];

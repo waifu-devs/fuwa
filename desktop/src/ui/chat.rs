@@ -234,6 +234,9 @@ pub struct Msg {
     pub mine: bool,
     pub pending: bool,
     pub failed: Option<String>,
+    /// Still sending: the nonce it went with. Sent from here and taken by
+    /// the server: the nonce of the pending message it took the place of, so
+    /// it moves on as that same row (0 for everything else).
     pub nonce: u64,
     pub unreadable: bool,
     /// Not a person: "APP" for what a webhook posted, "BOT" for AutoMod.
@@ -283,6 +286,15 @@ pub struct Msg {
 impl Row {
     fn id(&self) -> String {
         self.id_str().to_owned()
+    }
+
+    /// What its animations go by: a message you sent keeps its pending copy's,
+    /// so taking that copy's place doesn't start its rise over.
+    fn motion_id(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Row::Msg(m) if !m.pending && m.nonce != 0 => format!("p{}", m.nonce).into(),
+            _ => self.id_str().into(),
+        }
     }
 
     pub(crate) fn id_str(&self) -> &str {
@@ -689,7 +701,8 @@ impl FuwaApp {
             (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
-            (pinned, can_pin).hash(&mut h);
+            let landed = if m.author_id == me { crate::core::store::landed_from(i, &m.id) } else { 0 };
+            (pinned, can_pin, landed).hash(&mut h);
             crate::ui::spoilers::revealed_in(&m.id).hash(&mut h);
             if let Some(r) = &reactions {
                 r.digest(&mut h);
@@ -738,7 +751,8 @@ impl FuwaApp {
                         mine: m.author_id == me,
                         pending: false,
                         failed: None,
-                        nonce: 0,
+                        // The pending message it took the place of, if it was sent from here.
+                        nonce: landed,
                         unreadable: false,
                         badge: *badge,
                         embeds: m.embeds.clone(),
@@ -902,7 +916,9 @@ impl FuwaApp {
             if len > list.len && first == list.first {
                 let added = len - list.len;
                 let now = Instant::now();
-                for r in &rows[list.len.saturating_sub(1)..] {
+                // Only the rows after the ones already there: the one that was last stays as it is
+                // (a message of yours there would rise and glow a second time).
+                for r in &rows[list.len.min(rows.len())..] {
                     if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Line(_) | Row::Join(_) | Row::AutoMod(_))
                         && !self.fresh.contains_key(&r.id())
                     {
@@ -946,6 +962,19 @@ impl FuwaApp {
             } else {
                 self.scroller.update(cx, |s, cx| s.reset(len, cx));
             }
+        }
+        // A message you sent that took its pending copy's place is as fresh as that copy was.
+        let landed: Vec<(String, Instant)> = rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Msg(m) if !m.pending && m.nonce != 0 && !self.fresh.contains_key(&m.id) => {
+                    self.fresh.get(&format!("p{}", m.nonce)).map(|at| (m.id.clone(), *at))
+                }
+                _ => None,
+            })
+            .collect();
+        if !landed.is_empty() {
+            Rc::make_mut(&mut self.fresh).extend(landed);
         }
         self.list.target = target;
         self.list.len = len;
@@ -1726,8 +1755,13 @@ pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, window: &mut Wi
         _ => el,
     };
     let el = if is_fresh {
-        motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 12.0)
-            .into_any_element()
+        motion::rise(
+            div().child(el),
+            SharedString::from(format!("rise|{}|{ix}", row.motion_id())),
+            Duration::ZERO,
+            12.0,
+        )
+        .into_any_element()
     } else {
         el
     };
