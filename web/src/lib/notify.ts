@@ -136,10 +136,11 @@ export function onDirectMessage(key: string, conversationId: string, author: Use
 
 /**
  * A message in a secure channel this device just opened: the server never
- * saw what it says, so only the device can tell whether it mentions you.
- * Otherwise it chimes and notifies like any channel's message.
+ * saw what it says, so only the device can tell whether it mentions you (a
+ * reply to one of yours, `answersMe`, counts as one). Otherwise it chimes
+ * and notifies like any channel's message.
  */
-export function onSecureMessage(key: string, serverId: string, channelId: string, authorId: string, content: string, at: number) {
+export function onSecureMessage(key: string, serverId: string, channelId: string, authorId: string, content: string, at: number, answersMe = false) {
   // Do not disturb: nothing chimes or pops up from this instance.
   if (doNotDisturb(key)) return;
   if (Date.now() - at > FRESH_MS) return;
@@ -148,7 +149,12 @@ export function onSecureMessage(key: string, serverId: string, channelId: string
   if (!inst?.me || authorId === inst.me.id) return;
   const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === channelId;
   const settings = effectiveNotifications(inst, serverId, channelId);
-  const mention = pingsMe(inst, serverId, { authorId, content, mentionsEveryone: false, mentionRoleIds: [] }, settings.suppressEveryone);
+  const mention = pingsMe(
+    inst,
+    serverId,
+    { authorId, content, mentionsEveryone: false, mentionRoleIds: [], mentionUserIds: answersMe ? [inst.me.id] : [] },
+    settings.suppressEveryone,
+  );
   const alert = shouldAlert(settings, mention, getPrefs());
   if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
   if (!alert.notify || (!document.hidden && document.hasFocus())) return;

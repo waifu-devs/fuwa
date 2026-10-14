@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "Opened the picture to save from there",
   "menu.message.openThread": "Open thread",
   "menu.message.replyInThread": "Reply in thread",
+  "menu.message.reply": "Reply",
   "menu.message.edit": "Edit message",
   "menu.message.copyText": "Copy text",
   "menu.message.keepOut": "Keep {name} out",

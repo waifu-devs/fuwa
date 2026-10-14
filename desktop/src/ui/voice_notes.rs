@@ -253,9 +253,10 @@ impl FuwaApp {
         let core = self.core.clone();
         match target {
             Target::Dm { key, conversation } => {
+                let reply_to = crate::ui::dm_view::take_replying(&conversation);
                 self.run(
                     cx,
-                    async move { core.send_voice(&key, &conversation, &clip, 0).await },
+                    async move { core.send_voice(&key, &conversation, &clip, reply_to).await },
                     |this, result, cx| {
                         this.voice.sending = false;
                         if let Err(err) = result {

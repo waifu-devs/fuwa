@@ -135,6 +135,14 @@ impl FuwaApp {
                 let can_thread = m.thread.can_thread && !m.editing && !m.keeping_out;
                 let can_edit = m.mine && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
                 let mut primary = Vec::new();
+                if m.enc.as_ref().is_some_and(|e| e.can_reply) && !m.editing {
+                    let (id, in_thread) = (m.id.clone(), thread.is_some());
+                    primary.push(Item::act(
+                        t("workspace.menu.message.reply"),
+                        "reply",
+                        run(move |this, window, cx| this.start_reply(&id, in_thread, window, cx)),
+                    ));
+                }
                 if can_thread {
                     let id = m.id.clone();
                     let open = m.thread.replies.is_some();

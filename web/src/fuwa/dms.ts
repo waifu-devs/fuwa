@@ -67,15 +67,18 @@ const setPending = (key: string, id: string, fn: (list: PendingMessage[]) => Pen
 /** Where a message goes in a secure channel: into a thread (and maybe the channel too). */
 export type ThreadTarget = { thread: number; inChannel: boolean };
 
-/** Sends a message. It shows at once, faded, until the instance has it; failing leaves it with a retry. */
-export async function sendDm(key: string, id: string, text: string, target?: ThreadTarget) {
+/**
+ * Sends a message, answering the line at `replyTo` if it's set. It shows at
+ * once, faded, until the instance has it; failing leaves it with a retry.
+ */
+export async function sendDm(key: string, id: string, text: string, target?: ThreadTarget, replyTo = 0) {
   // Every send counts the same: the instance that keeps the records also gets these counts, so a separate one for
   // thread replies would let it match them against records by time.
   reportUsage("dm.send");
   const nonce = newNonce();
-  setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null, ...target }]);
+  setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null, ...target, ...answering(replyTo) }]);
   try {
-    await ready(key).send(id, { text, ...target });
+    await ready(key).send(id, { text, replyTo, ...target });
     setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
     updateDms(key, (d) => (d.blocked[id] ? { ...d, blocked: { ...d.blocked, [id]: "" } } : d));
   } catch (err) {
@@ -85,11 +88,14 @@ export async function sendDm(key: string, id: string, text: string, target?: Thr
   }
 }
 
+/** A pending message's reply, when it is one. */
+const answering = (replyTo: number): Pick<PendingMessage, "replyTo"> => (replyTo > 0 ? { replyTo } : {});
+
 export const dismissDm = (key: string, id: string, nonce: string) => setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
 
 export async function retryDm(key: string, id: string, pending: PendingMessage) {
   dismissDm(key, id, pending.nonce);
-  await sendDm(key, id, pending.content, pending.thread ? { thread: pending.thread, inChannel: !!pending.inChannel } : undefined);
+  await sendDm(key, id, pending.content, pending.thread ? { thread: pending.thread, inChannel: !!pending.inChannel } : undefined, pending.replyTo);
 }
 
 /** Locks or unlocks a secure channel's thread: a signed line only devices read, counted from people with Manage Messages. */
@@ -182,7 +188,7 @@ async function sendVoice(key: string, id: string, out: Outgoing) {
   clips.set(nonce, out);
   setPending(key, id, (list) => [
     ...list,
-    { nonce, content: "", createdAt: Date.now(), failed: null, voice: { durationMs: clip.durationMs, waveform: clip.waveform } },
+    { nonce, content: "", createdAt: Date.now(), failed: null, voice: { durationMs: clip.durationMs, waveform: clip.waveform }, ...answering(replyTo) },
   ]);
   const started = performance.now();
   try {
@@ -284,7 +290,7 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
  * Files waiting to go, by pending nonce, with which are marked as spoilers
  * and what each already uploaded, so a failed send can try again.
  */
-type OutgoingFiles = { files: File[]; spoilers: boolean[]; text: string; target?: ThreadTarget; uploaded: (FileRef | undefined)[] };
+type OutgoingFiles = { files: File[]; spoilers: boolean[]; text: string; target?: ThreadTarget; replyTo: number; uploaded: (FileRef | undefined)[] };
 const outgoingFiles = new Map<string, OutgoingFiles>();
 
 /** A picture's size in pixels, so its place is kept while it opens; 0s for anything else. */
@@ -312,12 +318,12 @@ export function cantSendFiles(files: File[]): string | null {
  * Sends files (and a caption) in an encrypted conversation or secure
  * channel: each sealed on this device under a key of its own, the sealed
  * bytes uploaded, and the keys, names and types sent inside the encrypted
- * message (with which are spoilers: `spoilers[n]` for `files[n]`). It shows
- * at once, faded, like text.
+ * message (with which are spoilers: `spoilers[n]` for `files[n]`), answering
+ * the line at `replyTo` if it's set. It shows at once, faded, like text.
  */
-export async function sendDmFiles(key: string, id: string, files: File[], text: string, target?: ThreadTarget, spoilers: boolean[] = []) {
+export async function sendDmFiles(key: string, id: string, files: File[], text: string, target?: ThreadTarget, spoilers: boolean[] = [], replyTo = 0) {
   reportUsage("dm.files");
-  await sendFiles(key, id, { files, spoilers, text, target, uploaded: [] });
+  await sendFiles(key, id, { files, spoilers, text, target, replyTo, uploaded: [] });
 }
 
 async function sendFiles(key: string, id: string, out: OutgoingFiles) {
@@ -331,6 +337,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
       createdAt: Date.now(),
       failed: null,
       ...out.target,
+      ...answering(out.replyTo),
       sealed: out.files.map((f, n) => ({ name: cleanName(f.name), size: f.size, spoiler: !!out.spoilers[n] })),
     },
   ]);
@@ -366,7 +373,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
       refs.push(ref);
     }
     try {
-      await dms.send(id, { text: out.text, files: refs, ...out.target });
+      await dms.send(id, { text: out.text, files: refs, replyTo: out.replyTo, ...out.target });
     } catch (err) {
       // Swept (it waited over a day) or otherwise gone: upload them anew next time.
       const code = err instanceof DmError ? null : toFuwaError(err).code;

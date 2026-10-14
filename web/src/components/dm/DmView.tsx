@@ -13,6 +13,7 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  ReplyIcon,
   RotateCwIcon,
   SendHorizontalIcon,
   ShieldAlertIcon,
@@ -26,7 +27,7 @@ import { AnimatePresence, m as motion, useAnimationControls } from "motion/react
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
-import { isMessage, type Item } from "@/e2ee/vault";
+import { isMessage, lineText, type Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
 import {
@@ -48,6 +49,7 @@ import {
   type ThreadTarget,
 } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
+import { clearReplying, setReplying, useReplying } from "@/fuwa/replies";
 import { sentFrom, typed, type TypingTarget } from "@/fuwa/typing";
 import { TypingLine, useConversationNames, useServerNames } from "@/components/chat/TypingLine";
 import type { FuwaError } from "@/fuwa/errors";
@@ -76,6 +78,7 @@ import { comboLabel } from "@/lib/keybinds";
 import { setTitle } from "@/lib/notify";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { copy, toast } from "@/lib/ui";
+import { hideSpoilers } from "@/lib/spoilers";
 import { cn } from "@/lib/utils";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
@@ -364,6 +367,8 @@ export function EncryptedMessages({
   threads,
   pins,
   reacting,
+  place,
+  canReply = true,
 }: {
   instanceKey: string;
   id: string;
@@ -387,7 +392,12 @@ export function EncryptedMessages({
   pins?: PinHooks;
   /** Reactions show on its messages (the instance has them), and whether you may add them. */
   reacting?: Reacting;
+  /** Where its composer's draft is kept, when it isn't `id` (a thread's `{id}#{parent}`): replies and jumps go there. */
+  place?: string;
+  /** Its lines can be answered from its composer (you may write there). */
+  canReply?: boolean;
 }) {
+  const draft = place ?? id;
   const stored = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
   const tally = useFuwa((s) => s.instances[instanceKey]?.dms.reactions[id]);
   const items = stored && (lines ?? stored);
@@ -399,6 +409,8 @@ export function EncryptedMessages({
   const { t } = useI18n();
   const [editing, setEditing] = useState<number | null>(null);
   const list = items ?? NO_ITEMS;
+  // Every line this device opened here, by its place, for the replies that quote them.
+  const bySeq = useMemo(() => new Map((stored ?? NO_ITEMS).map((i) => [i.seq, i])), [stored]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -416,12 +428,13 @@ export function EncryptedMessages({
         prev = { author: "", at: date };
         continue;
       }
-      const first = !prev || prev.author !== item.senderId || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
+      // A reply starts its own group, so its quote sits over a name.
+      const first = !prev || prev.author !== item.senderId || date.getTime() - prev.at.getTime() > GROUP_GAP_MS || item.replyTo > 0;
       out.push({ kind: "item", key: `s${item.seq}`, item, first, date });
       prev = { author: item.senderId, at: date };
     }
     for (const p of pending) {
-      const first = !prev || prev.author !== me.id || p.createdAt - prev.at.getTime() > GROUP_GAP_MS;
+      const first = !prev || prev.author !== me.id || p.createdAt - prev.at.getTime() > GROUP_GAP_MS || !!p.replyTo;
       out.push({ kind: "pending", key: p.nonce, pending: p, first });
       prev = { author: me.id, at: new Date(p.createdAt) };
     }
@@ -448,10 +461,13 @@ export function EncryptedMessages({
       },
       remove: (seq) => deleteDm(instanceKey, id, seq),
       react: (seq, emoji, on) => void reactInConversation(instanceKey, id, seq, emoji, on).catch((err: Error) => toast(err.message)),
+      reply: canReply ? (seq) => setReplying(draft, seq) : undefined,
+      jump: (seq) => requestDmJump(draft, seq),
+      quoteName: (senderId) => (memberOf?.(senderId)?.nickname || displayName(userOf(senderId))),
       reactors: (reaction) => ((reaction as DmReaction).userIds ?? []).map((u) => userOf(u)).filter((u): u is User => !!u),
       who: (reaction) => (reaction as DmReaction).userIds?.map((u) => (u === me.id ? t("chattools.reactions.you") : (memberOf?.(u)?.nickname || displayName(userOf(u))))) ?? [],
     }),
-    [instanceKey, id, me.id, t, memberOf, userOf],
+    [instanceKey, id, me.id, t, memberOf, userOf, canReply, draft],
   );
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -460,7 +476,7 @@ export function EncryptedMessages({
   const [missed, setMissed] = useState(0);
 
   // A pin opened from the header: draw the rows down to it, then bring it into view and let it glow.
-  const jump = useDmJump(id);
+  const jump = useDmJump(draft);
   // Older lines than the conversation opened with stay in this device's vault until asked for.
   const more = useFuwa((s) => !!s.instances[instanceKey]?.dms.more[id]);
   const firstSeq = list[0]?.seq;
@@ -556,6 +572,7 @@ export function EncryptedMessages({
                     pending={row.pending}
                     first={row.first}
                     me={me}
+                    quote={row.pending.replyTo ? <ReplyQuote quoted={bySeq.get(row.pending.replyTo) ?? null} seq={row.pending.replyTo} actions={actions} userOf={userOf} /> : null}
                     onRetry={() => void retryPending(instanceKey, id, row.pending)}
                     onDismiss={() => dismissPending(instanceKey, id, row.pending.nonce)}
                   />
@@ -585,6 +602,8 @@ export function EncryptedMessages({
                   onPin={pins && !item.deleted ? pins.toggle : undefined}
                   reactions={reacting && !item.deleted ? (tally?.[item.seq] ?? NO_REACTIONS) : undefined}
                   canReact={!!reacting?.canAdd}
+                  quoted={item.replyTo > 0 ? (bySeq.get(item.replyTo) ?? null) : undefined}
+                  userOf={userOf}
                 />
               );
             })}
@@ -695,6 +714,12 @@ type DmActions = {
   who: (reaction: ReactionLike) => string[];
   /** Everyone who reacted with an emoji, from this device's tally, for the dialog. */
   reactors: (reaction: ReactionLike) => User[];
+  /** Answers a line from the composer; missing where you can't write. */
+  reply?: (seq: number) => void;
+  /** Brings a line into view (a reply's quote, clicked). */
+  jump: (seq: number) => void;
+  /** Who wrote a quoted line, as shown here. */
+  quoteName: (senderId: string) => string;
 };
 
 /**
@@ -731,6 +756,8 @@ const DmRow = memo(function DmRow({
   onPin,
   reactions,
   canReact,
+  quoted,
+  userOf,
 }: {
   item: Item;
   first: boolean;
@@ -751,6 +778,9 @@ const DmRow = memo(function DmRow({
   /** Its reactions as this device tallied them; undefined where reactions don't show. */
   reactions?: DmReaction[];
   canReact: boolean;
+  /** The line it answers (null: not opened here, or gone); undefined when it isn't a reply. */
+  quoted?: Item | null;
+  userOf: (id: string) => User | undefined;
 }) {
   const [picking, setPicking] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -760,6 +790,7 @@ const DmRow = memo(function DmRow({
     item.deleted || editing
       ? null
       : dmMessageMenu({ instanceKey, conversationId: item.conversation, seq: item.seq, mine }, trigger, {
+          reply: actions.reply ? () => actions.reply!(item.seq) : undefined,
           thread: threads?.canStart(item) ? { open: threads.has(item), go: () => threads.start(item) } : undefined,
           edit: mine && item.kind === "text" ? () => actions.edit(item.seq) : undefined,
           copyText: item.kind === "text" && item.content ? () => copy(t, item.content, t("common.copy.text")) : undefined,
@@ -806,7 +837,15 @@ const DmRow = memo(function DmRow({
       data-dm-seq={item.seq}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
-      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
+      <MessageLine
+        display={display}
+        first={first}
+        author={author}
+        member={member}
+        date={date}
+        instanceKey={instanceKey}
+        above={quoted !== undefined ? <ReplyQuote quoted={quoted} seq={item.replyTo} actions={actions} userOf={userOf} /> : undefined}
+      >
         <DmRowBody item={item} display={display} instanceKey={instanceKey} animate={animate} editing={editing} actions={actions} />
         {pinned && !item.deleted && !editing && <PinMark />}
         {!!reactions?.length && !editing && (
@@ -940,6 +979,11 @@ function DmRowTools({
       ) : (
         <>
           {react}
+          {actions.reply && (
+            <ToolButton label={t("dms-calls.dm.row.reply")} onClick={() => actions.reply!(item.seq)}>
+              <ReplyIcon />
+            </ToolButton>
+          )}
           {item.kind === "text" && !!item.content && <CopyTool text={item.content} />}
           {threads?.canStart(item) && (
             <ToolButton label={threads.has(item) ? t("dms-calls.dm.row.openThread") : t("dms-calls.dm.row.replyInThread")} onClick={() => threads.start(item)}>
@@ -965,6 +1009,43 @@ function DmRowTools({
       )}
     </div>
   );
+}
+
+/**
+ * Over a reply: who wrote the line it answers and the start of what it said,
+ * from what this device opened. Clicking it brings that line into view.
+ */
+function ReplyQuote({ quoted, seq, actions, userOf }: { quoted: Item | null; seq: number; actions: DmActions; userOf: (id: string) => User | undefined }) {
+  const { t } = useI18n();
+  const author = quoted && !quoted.deleted ? userOf(quoted.senderId) : undefined;
+  const text = !quoted ? t("dms-calls.dm.reply.missing") : quoted.deleted ? t("dms-calls.dm.deleted") : quoteText(quoted);
+  return (
+    <button
+      type="button"
+      onClick={() => actions.jump(seq)}
+      title={t("dms-calls.dm.reply.jump")}
+      className="reply-quote group/quote relative mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 text-left text-[0.8rem] leading-5 text-muted-foreground"
+    >
+      <span aria-hidden className="reply-spine" />
+      {author ? (
+        <>
+          <UserAvatar user={author} className="size-4 shrink-0 text-[0.5rem]" />
+          <span className="shrink-0 font-bold text-foreground/80 group-hover/quote:underline">@{actions.quoteName(quoted!.senderId)}</span>
+        </>
+      ) : (
+        <ReplyIcon className="size-3.5 shrink-0" />
+      )}
+      <span className={cn("min-w-0 truncate group-hover/quote:text-foreground", (!quoted || quoted.deleted) && "italic")}>{text}</span>
+    </button>
+  );
+}
+
+/** What a quote shows of a line: one line of its text, without Markdown's marks or what spoilers hide. */
+function quoteText(item: Item): string {
+  return hideSpoilers(lineText(item))
+    .replace(/[*_~`>#|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Copies a message's text, and ticks for a moment. */
@@ -1077,12 +1158,15 @@ function PendingDm({
   pending,
   first,
   me,
+  quote,
   onRetry,
   onDismiss,
 }: {
   pending: PendingMessage;
   first: boolean;
   me: User;
+  /** The quote of the line it answers, if it's a reply. */
+  quote: ReactNode;
   onRetry: () => void;
   onDismiss: () => void;
 }) {
@@ -1096,7 +1180,7 @@ function PendingDm({
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
-      <MessageLine display={display} first={first} author={me} member={undefined} status={t("dms-calls.dm.pending.encrypting")}>
+      <MessageLine display={display} first={first} author={me} member={undefined} status={t("dms-calls.dm.pending.encrypting")} above={quote}>
         {pending.voice ? (
           <VoiceMessage id={`pending:${pending.nonce}`} durationMs={pending.voice.durationMs} waveform={pending.voice.waveform} load={null} pending />
         ) : (
@@ -1178,6 +1262,12 @@ function ComposerBox({
   const serverNames = useServerNames(instanceKey, "serverId" in typing ? typing.serverId : "");
   const conversationNames = useConversationNames(instanceKey, id);
   const nameOf = "conversationId" in typing ? conversationNames : serverNames;
+  // The line this message will answer, chosen from its menu or hover tools.
+  const replyTo = useReplying(draft);
+  const answering = useFuwa((s) => (replyTo ? s.instances[instanceKey]?.dms.items[id]?.find((i) => i.seq === replyTo) : undefined));
+  useEffect(() => {
+    if (replyTo) box.current?.focus();
+  }, [replyTo]);
 
   useEffect(() => {
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
@@ -1216,16 +1306,22 @@ function ComposerBox({
     });
     const target: ThreadTarget | undefined = thread && { thread: thread.parent, inChannel: alsoChannel };
     setAlsoChannel(false);
+    clearReplying(draft);
     if (picked.length) {
       clearPicked(draft);
-      void sendDmFiles(instanceKey, id, picked, content, target, picked.map(isSpoiler));
+      void sendDmFiles(instanceKey, id, picked, content, target, picked.map(isSpoiler), replyTo);
     } else {
-      sendDm(instanceKey, id, content, target).catch((err: unknown) => setError(dmProblem(err)));
+      sendDm(instanceKey, id, content, target, replyTo).catch((err: unknown) => setError(dmProblem(err)));
     }
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
+    if (e.key === "Escape" && replyTo) {
+      e.preventDefault();
+      clearReplying(draft);
+      return;
+    }
     if (sendsMessage(e, sendWith)) {
       e.preventDefault();
       send();
@@ -1236,6 +1332,15 @@ function ComposerBox({
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
       <TypingLine instanceKey={instanceKey} target={typing} nameOf={nameOf} />
       {files && !blocked && <ComposerFiles draft={draft} picked={picked} dropTo={status === "ready" ? dropTo : ""} />}
+      <AnimatePresence initial={false}>
+        {!blocked && replyTo > 0 && (
+          <ReplyBar
+            key="reply"
+            name={answering ? (nameOf(answering.senderId) ?? displayName(undefined)) : ""}
+            onCancel={() => clearReplying(draft)}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence mode="popLayout" initial={false}>
         {blocked ? (
           <BlockedNotice
@@ -1284,7 +1389,10 @@ function ComposerBox({
             {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
-                onSend={(clip) => void sendVoiceDm(instanceKey, id, clip)}
+                onSend={(clip) => {
+                  clearReplying(draft);
+                  void sendVoiceDm(instanceKey, id, clip, replyTo);
+                }}
                 onProblem={setError}
                 disabled={status !== "ready"}
               />
@@ -1315,6 +1423,36 @@ function ComposerFiles({ draft, picked, dropTo }: { draft: string; picked: File[
       {dropTo && <DropOverlay channelName={dropTo} onFiles={takeFiles} note={t("dms-calls.dm.composer.drop")} />}
       <AnimatePresence initial={false}>{picked.length > 0 && <PickedTray key="picked" draft={draft} files={picked} />}</AnimatePresence>
     </>
+  );
+}
+
+/** Over the box while answering a line: whose, and the × that stops. Esc stops too. */
+function ReplyBar({ name, onCancel }: { name: string; onCancel: () => void }) {
+  const { t } = useI18n();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8, height: 0 }}
+      animate={{ opacity: 1, y: 0, height: "auto" }}
+      exit={{ opacity: 0, y: 8, height: 0 }}
+      transition={SPRING}
+      className="overflow-hidden"
+    >
+      <div className="mb-1.5 flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground">
+        <ReplyIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {name ? <T k="dms-calls.dm.reply.to" values={{ name: <b className="text-foreground">{name}</b> }} /> : t("dms-calls.dm.reply.toLine")}
+        </span>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={t("dms-calls.dm.reply.cancel")}
+          title={t("dms-calls.dm.reply.cancel")}
+          className="grid size-5 shrink-0 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </div>
+    </motion.div>
   );
 }
 

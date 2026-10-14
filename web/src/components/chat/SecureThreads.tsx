@@ -269,6 +269,8 @@ export function SecureThreadPanel({
         pendingIn={pendingIn}
         threads={hooks}
         reacting={reacting}
+        place={`${id}#${parent}`}
+        canReply={canSend && (!locked || canModerate)}
       />
       <EncryptedComposer
         instanceKey={instanceKey}

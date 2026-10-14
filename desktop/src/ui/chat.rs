@@ -337,7 +337,8 @@ impl Row {
                 m.voice.as_ref().map(|v| v.digest()).hash(h);
                 m.thread.digest(h);
                 m.can_delete.hash(h);
-                m.enc.as_ref().map(|e| (e.deleted, e.shared, e.files.len(), e.sending.len())).hash(h);
+                m.enc.as_ref().map(|e| (e.deleted, e.shared, e.files.len(), e.sending.len(), e.can_reply)).hash(h);
+                m.enc.as_ref().and_then(|e| e.quote.as_ref()).map(|q| (q.seq, &q.text, q.missing)).hash(h);
                 if let Some(r) = &m.reactions {
                     r.digest(h);
                 }
@@ -1600,10 +1601,12 @@ pub(crate) fn group(rows: &mut [Row]) {
         match row {
             Row::Msg(m) => {
                 let author = m.user.as_ref().map(|u| u.id.clone()).unwrap_or_else(|| m.name.clone());
-                // An agent's answer starts its own group, under who used what.
+                // An agent's answer starts its own group, under who used what; a reply, under its quote.
                 let used = m.agent.as_ref().is_some_and(|a| a.used.is_some());
-                let head =
-                    used || !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
+                let quoted = m.enc.as_ref().is_some_and(|e| e.quote.is_some());
+                let head = used
+                    || quoted
+                    || !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
                 if m.head != head {
                     Rc::make_mut(m).head = head;
                 }
@@ -2236,6 +2239,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     };
 
     let tools = message_tools(m, p, ctx);
+    let quote = m.enc.as_ref().and_then(|e| e.quote.as_ref()).map(|q| reply_quote(&m.id, q, compact, p, ctx));
 
     // The web's .mention-me: the primary at 12% and a 3px bar inside the left edge.
     let ping = alpha(p.primary, 0.12);
@@ -2300,10 +2304,78 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             }
         })
         .when(m.mentions_me, |el| el.child(div().absolute().left_0().top_0().bottom_0().w(px(3.0)).bg(bar)))
-        .children(left)
-        .gap(px(12.0))
-        .child(body)
+        .map(|el| match quote {
+            // A reply's quote sits over the whole line, lined up with its text.
+            Some(quote) => el.flex_col().child(quote).child(div().flex().gap(px(12.0)).children(left).child(body)),
+            None => el.children(left).gap(px(12.0)).child(body),
+        })
         .children(tools)
+        .into_any_element()
+}
+
+/// Over a reply (the web's `ReplyQuote`): who wrote the line it answers and
+/// the start of what it said, a line curling up to it from the avatar.
+/// Clicking it brings that line into view.
+fn reply_quote(id: &str, q: &crate::ui::dm_view::Quote, compact: bool, p: &Palette, ctx: &Rc<RowCtx>) -> AnyElement {
+    let (this, seq, in_thread) = (ctx.this.clone(), q.seq, ctx.thread.is_some());
+    let spine = alpha(p.muted_foreground, 0.35);
+    div()
+        .id(SharedString::from(format!("quote|{id}")))
+        .relative()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .h(px(20.0))
+        .mb(px(2.0))
+        .pl(px(if compact { 84.0 } else { 52.0 }))
+        .min_w_0()
+        .text_size(px(12.8))
+        .line_height(px(20.0))
+        .text_color(p.muted_foreground)
+        .cursor_pointer()
+        .hover(|s| s.text_color(p.foreground))
+        .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("dms-calls.dm.reply.jump")).build(window, cx))
+        .on_click(move |_, _, cx| {
+            let _ = this.update(cx, |this, cx| this.jump_to_line(seq, in_thread, cx));
+        })
+        .when(!compact, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .left(px(20.0))
+                    .top(px(10.0))
+                    .w(px(28.0))
+                    .h(px(10.0))
+                    .border_t_2()
+                    .border_l_2()
+                    .border_color(spine)
+                    .rounded_tl(px(6.0)),
+            )
+        })
+        .map(|el| match &q.who {
+            Some((user, name)) => el.child(avatar(user.as_ref(), 16.0, p)).child(
+                div()
+                    .flex_none()
+                    .max_w(px(200.0))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(alpha(p.foreground, 0.8))
+                    .child(format!("@{name}")),
+            ),
+            None => el.child(icon("reply").size(px(14.0))),
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .when(q.missing, |el| el.italic())
+                .child(q.text.clone()),
+        )
         .into_any_element()
 }
 
@@ -2569,6 +2641,14 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
             let _ = this.update(cx, |this, cx| this.copy_message_text(mid.clone(), text.clone(), cx));
         });
         frame = frame.child(button);
+    }
+    if m.enc.as_ref().is_some_and(|e| e.can_reply) {
+        let (this, mid, in_thread) = (ctx.this.clone(), id.clone(), ctx.thread.is_some());
+        frame = frame.child(tool(format!("reply|{id}"), "reply", t("dms-calls.dm.row.reply"), false, p).on_click(
+            move |_, window, cx| {
+                let _ = this.update(cx, |this, cx| this.start_reply(&mid, in_thread, window, cx));
+            },
+        ));
     }
     if m.thread.can_thread {
         let (this, mid) = (ctx.this.clone(), id.clone());

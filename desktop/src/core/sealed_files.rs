@@ -309,7 +309,8 @@ impl crate::core::Core {
 
     /// Sends files in a conversation or secure channel, with `text`: each sealed on this device
     /// under a key of its own and uploaded, then the keys sent inside an encrypted message.
-    /// `thread` is a secure channel thread's message, and whether the reply goes to the channel too.
+    /// `thread` is a secure channel thread's message, and whether the reply goes to the channel too;
+    /// `reply_to` the line it answers (0: none).
     pub async fn send_dm_files(
         &self,
         key: &str,
@@ -317,6 +318,7 @@ impl crate::core::Core {
         files: Vec<Outgoing>,
         text: String,
         thread: Option<(i64, bool)>,
+        reply_to: i64,
     ) -> Result<(), DmError> {
         let api = self.api(key).ok_or_else(|| DmError("That instance isn't here.".into()))?;
         if let Some(why) = cant_send(&files) {
@@ -360,8 +362,8 @@ impl crate::core::Core {
         }
         let files = to_sealed(&refs);
         let content = match thread {
-            Some((thread, in_channel)) => Content::Reply { text, thread, in_channel, files },
-            None => Content::Files { text, files },
+            Some((thread, in_channel)) => Content::Reply { text, thread, in_channel, files, reply_to },
+            None => Content::Files { text, files, reply_to },
         };
         self.send_dm(key, id, content).await
     }

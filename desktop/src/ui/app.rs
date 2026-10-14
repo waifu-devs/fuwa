@@ -1315,11 +1315,12 @@ impl FuwaApp {
                 );
             }
             Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
+                let reply_to = crate::ui::dm_view::take_replying(&conversation);
                 self.run(
                     cx,
                     {
                         let conversation = conversation.clone();
-                        async move { core.send_dm(&key, &conversation, Content::Text { text, reply_to: 0 }).await }
+                        async move { core.send_dm(&key, &conversation, Content::Text { text, reply_to }).await }
                     },
                     // What went wrong is said under the box, and on the message, which can be sent again.
                     move |_, result, cx| {
