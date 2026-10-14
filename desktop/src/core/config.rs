@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::accessibility::ColorVision;
 use crate::core::keybinds;
+use crate::core::omarchy;
 use crate::core::secrets::Secrets;
 use crate::core::themes::{self, Backdrop, Theme};
 use crate::core::vault::write_json;
@@ -746,8 +747,12 @@ impl Prefs {
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }
-        let known =
-            |id: &str| themes::builtins().iter().any(|t| t.id == id) || self.custom_themes.iter().any(|t| t.id == id);
+        // Omarchy's theme counts while Omarchy is there, even read halfway through a switch.
+        let known = |id: &str| {
+            themes::builtins().iter().any(|t| t.id == id)
+                || self.custom_themes.iter().any(|t| t.id == id)
+                || (id == omarchy::ID && omarchy::installed())
+        };
         if !known(&self.theme) {
             self.theme = "sakura".into();
         }
@@ -774,9 +779,11 @@ impl Prefs {
         self.streamer_mode && self.streamer_hide_personal
     }
 
-    /// Every theme there is to pick: the built-in ones, then the ones made here.
+    /// Every theme there is to pick: the built-in ones, Omarchy's on a
+    /// computer running it, then the ones made here.
     pub fn all_themes(&self) -> Vec<Theme> {
         let mut all = themes::builtins();
+        all.extend(omarchy::theme());
         all.extend(self.custom_themes.iter().cloned());
         all
     }

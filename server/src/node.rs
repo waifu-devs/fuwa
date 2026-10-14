@@ -1701,13 +1701,13 @@ impl NodeDb {
     /// (ms); `None` until an app writes one.
     pub async fn app_settings(&self, account_id: &str) -> Result<Option<(String, i64, i64)>> {
         let conn = self.read()?;
-        Ok(query_one(
+        query_one(
             &conn,
             "SELECT document, version, updated_at FROM app_settings WHERE account_id = ?1",
             [account_id],
             |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?, r.get::<i64>(2)?)),
         )
-        .await?)
+        .await
     }
 
     /// Replaces someone's app settings if they're still at `version` (0 for

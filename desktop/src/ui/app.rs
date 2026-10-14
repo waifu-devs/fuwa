@@ -573,6 +573,30 @@ impl FuwaApp {
         })
         .detach();
 
+        // On Omarchy, switching its theme there switches it here (`core::omarchy`).
+        if crate::core::omarchy::installed() {
+            cx.spawn_in(window, async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(crate::core::omarchy::EVERY).await;
+                    if !cx.background_spawn(async { crate::core::omarchy::changed() }).await {
+                        continue;
+                    }
+                    let went = this.update_in(cx, |this, window, cx| {
+                        let before = pal(cx).background;
+                        theme::apply(&this.prefs, window.appearance(), cx);
+                        if pal(cx).background != before && !cx.reduce_motion() {
+                            this.theme_fade = Some((before, Instant::now()));
+                        }
+                        window.refresh();
+                    });
+                    if went.is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+
         // A camera's new picture, while a call goes on or the camera is being checked.
         let mut pictures = core.videos().changes();
         cx.spawn_in(window, async move |this, cx| {

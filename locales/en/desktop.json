@@ -91,6 +91,7 @@
   "look.large": "Large",
   "look.larger": "Larger",
   "look.followSystem": "Light and dark like my computer",
+  "look.omarchy": "Matches your Omarchy theme, {theme}, and changes with it.",
   "look.followSystemHint": "Switches between a light theme and a dark one when your computer does.",
   "look.textSize": "Text size",
   "look.density": "Message density",

@@ -623,6 +623,9 @@
     everything read from a file or settings checked and clamped; a picture is
     only ever a `/media/` link on an instance), `backgrounds.rs` (background
     pictures kept on an instance, and their bytes for exporting a theme),
+    `omarchy.rs` (Omarchy's theme in use as the `omarchy` theme, on Linux
+    computers running it; looked at every two seconds from `ui/app.rs`, never
+    synced),
     `secrets.rs` (session tokens and the vault key in the system keychain,
     named per data folder, with a 0600 file only where there's no keychain;
     vault files are sealed with XChaCha20-Poly1305 under that key), `permissions.rs`
