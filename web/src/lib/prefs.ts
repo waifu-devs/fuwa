@@ -9,12 +9,14 @@ import { isTag } from "@/i18n/core";
 import { cleanDomain } from "@/lib/links";
 import { DEFAULT_SHARE, SHARE_SURFACES, shareQuality, type ShareFps, type ShareHeight, type ShareSurface } from "@/lib/screen-share";
 import { applyTheme, BUILTIN_THEMES, isDark, type Theme, type ThemeTokens } from "@/lib/themes";
+import { firstStamps, stamp, type Entries, type Stamps } from "@/lib/settings-sync";
 
 /**
- * App settings: how fuwa looks and behaves on this device, for every
- * instance at once. They live in this browser's storage (a config file in
- * the desktop app later) and never reach a server. Account settings, which
- * belong to one instance, live on that instance instead.
+ * App settings: how fuwa looks and behaves, for every instance at once.
+ * They live in this browser's storage, and most of them travel to your other
+ * devices through the instances you're signed in to (lib/settings-sync.ts,
+ * docs/app-settings.md). Account settings, which belong to one instance,
+ * live on that instance instead.
  */
 
 export type Density = "compact" | "default" | "spacious";
@@ -121,6 +123,8 @@ export type Prefs = {
   shareFps: ShareFps;
   /** Sites whose masked links open without asking first (lib/links.ts), by host; their subdomains too. */
   trustedDomains: string[];
+  /** These settings travel to your other devices; this one switch stays on this device. */
+  syncSettings: boolean;
 };
 
 /** Most sites kept in the trusted list. */
@@ -189,6 +193,7 @@ export const DEFAULT_PREFS: Prefs = {
   shareHeight: DEFAULT_SHARE.height,
   shareFps: DEFAULT_SHARE.fps,
   trustedDomains: [],
+  syncSettings: true,
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -271,6 +276,7 @@ function sanitize(p: Prefs): Prefs {
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
         : {},
     shareReports: p.shareReports !== false,
+    syncSettings: p.syncSettings !== false,
     othersEffects: p.othersEffects !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
     trustedDomains: Array.isArray(p.trustedDomains)
@@ -285,6 +291,44 @@ function sanitize(p: Prefs): Prefs {
 let prefs: Prefs = load();
 const listeners = new Set<() => void>();
 
+const STAMPS_KEY = "fuwa:prefs-stamps:v1";
+
+/** When each travelling setting last changed here; a device without any yet starts from what it changed before. */
+function loadStamps(): Stamps {
+  try {
+    const raw = localStorage.getItem(STAMPS_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw) as unknown;
+      if (saved && typeof saved === "object") return saved as Stamps;
+    }
+  } catch {
+    // Read as none.
+  }
+  const first = firstStamps(prefs, defaultPrefs());
+  saveStamps(first);
+  return first;
+}
+
+function saveStamps(next: Stamps) {
+  try {
+    localStorage.setItem(STAMPS_KEY, JSON.stringify(next));
+  } catch {
+    // Kept for now, not remembered.
+  }
+}
+
+let stamps: Stamps = typeof localStorage === "undefined" ? {} : loadStamps();
+const syncListeners = new Set<() => void>();
+
+/** When each travelling setting last changed here (lib/settings-sync.ts). */
+export const getStamps = () => stamps;
+
+/** Hears a travelling setting change on this device, for sending it on. */
+export function subscribeSyncedChanges(listener: () => void) {
+  syncListeners.add(listener);
+  return () => syncListeners.delete(listener);
+}
+
 function emit() {
   for (const l of listeners) l();
 }
@@ -293,7 +337,33 @@ export const getPrefs = () => prefs;
 
 /** Changes some settings, applies them to the page and remembers them on this device. */
 export function setPrefs(patch: Partial<Prefs> | ((p: Prefs) => Partial<Prefs>)) {
-  const changes = typeof patch === "function" ? patch(prefs) : patch;
+  const before = prefs;
+  store(typeof patch === "function" ? patch(prefs) : patch);
+  const next = stamp(before, prefs, stamps, Date.now());
+  if (next !== stamps) {
+    stamps = next;
+    saveStamps(stamps);
+    for (const l of syncListeners) l();
+  }
+}
+
+/** Takes settings from another device, keeping their stamps, without sending them back. */
+export function takeSyncedPrefs(entries: Entries) {
+  const names = Object.keys(entries) as (keyof Stamps)[];
+  if (!names.length) return;
+  stamps = { ...stamps, ...Object.fromEntries(names.map((n) => [n, entries[n]!.at])) };
+  saveStamps(stamps);
+  // A value of the wrong kind is left out: this device keeps its own until the setting changes again.
+  const changes: Record<string, unknown> = {};
+  for (const n of names) if (sameKind(entries[n]!.value, DEFAULT_PREFS[n])) changes[n] = entries[n]!.value;
+  if (changes.sounds) changes.sounds = { ...prefs.sounds, ...(changes.sounds as Partial<Prefs["sounds"]>) };
+  store(changes as Partial<Prefs>);
+}
+
+const sameKind = (value: unknown, like: unknown) =>
+  Array.isArray(like) ? Array.isArray(value) : typeof value === typeof like && (value === null) === (like === null) && !Array.isArray(value);
+
+function store(changes: Partial<Prefs>) {
   prefs = sanitize({ ...prefs, ...changes });
   try {
     localStorage.setItem(KEY, JSON.stringify(prefs));
@@ -446,6 +516,7 @@ export function watchSystem() {
   dark.addEventListener("change", again);
   motion.addEventListener("change", again);
   window.addEventListener("storage", (e) => {
+    if (e.key === STAMPS_KEY) stamps = loadStamps();
     if (e.key !== KEY) return;
     prefs = load();
     again();

@@ -52,6 +52,15 @@ service AccountService {
   // named twice keeps its first place and empty folders are forgotten.
   rpc SetServerArrangement(SetServerArrangementRequest) returns (SetServerArrangementResponse);
 
+  // Your app settings (theme, backdrop, fonts, shortcuts...), kept so every
+  // device you sign in on gets them (docs/app-settings.md). The instance
+  // never reads them: apps write one JSON document, each setting stamped
+  // with when it changed, and merge their own with it.
+  rpc GetAppSettings(GetAppSettingsRequest) returns (GetAppSettingsResponse);
+  // Replaces the document if it's still at `version`; otherwise
+  // FAILED_PRECONDITION, and the app reads it again, merges and retries.
+  rpc SetAppSettings(SetAppSettingsRequest) returns (SetAppSettingsResponse);
+
   // Everything this instance keeps about you, as one JSON document sent in
   // pieces: your account, sessions, settings, servers and every message you
   // wrote.
@@ -193,6 +202,30 @@ message SetServerArrangementRequest {
 message SetServerArrangementResponse {
   // As stored, after dropping what doesn't apply.
   repeated ServerRailItem items = 1;
+  google.protobuf.Timestamp updated_at = 2;
+}
+
+message GetAppSettingsRequest {}
+
+message GetAppSettingsResponse {
+  // JSON, as an app last wrote it; empty until one does.
+  string document = 1;
+  // Goes up with every change; 0 until the first.
+  uint64 version = 2;
+  // When it last changed, unset if never.
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+message SetAppSettingsRequest {
+  // A JSON object of at most 1 MiB; empty forgets them.
+  string document = 1;
+  // The version this was merged from (0 for none yet).
+  uint64 version = 2;
+}
+
+message SetAppSettingsResponse {
+  // The new version.
+  uint64 version = 1;
   google.protobuf.Timestamp updated_at = 2;
 }
 

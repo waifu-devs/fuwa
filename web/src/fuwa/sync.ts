@@ -58,6 +58,7 @@ import {
 } from "./saved";
 import { i18n } from "@/i18n/i18n";
 import { instanceHas } from "@/lib/compat";
+import { pullAppSettings } from "./app-settings";
 import {
   addServer,
   applyEvent,
@@ -388,6 +389,8 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed(null))),
     );
     patchInstance(key, { rail });
+    // Your app settings, as your other devices left them (docs/app-settings.md); never holds up the rest.
+    void pullAppSettings(key);
     // The instance's own profile effects and decorations, listed again whenever the Node says they changed.
     let itemsAt = stampKey(store.get().instances[key]?.node?.profileItemsAt);
     const items = yield* listProfileItems(api);

@@ -901,14 +901,21 @@
     what's in each is data built in `components/menus/`, from the same
     actions and permission checks as the buttons. Later features add items
     with `extendMenu` (`lib/context-menu.ts`) instead of editing the menus.
-  - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
-    every instance (theme, density, keybinds, streamer mode...). Settings of
-    an instance or a server live on that instance instead.
+  - `src/lib/prefs.ts`: app settings, which belong to the person and apply to
+    every instance (theme, density, keybinds, streamer mode...). Kept on the
+    device, and most of them travel to the person's other devices
+    (docs/app-settings.md): `lib/settings-sync.ts` (pure: which settings, the
+    document, stamps and merging) and `fuwa/app-settings.ts`, through every
+    instance they're signed in to (`AccountService.Get/SetAppSettings`,
+    node.db's `app_settings`, a JSON document the instance never reads, written
+    only from the version it was merged from). A new setting goes in
+    `SYNCED` unless it belongs to the screen or hardware. Settings of an
+    instance or a server live on that instance instead.
     Fonts (the app's and code's: the bundled one, the system's, one installed
     on the computer or an imported file) are `lib/fonts.ts` (pure) and
     `lib/font-files.ts` (imported files in IndexedDB, put on the page as
-    FontFaces), picked in `settings/app/Fonts.tsx`; like every app setting,
-    they never reach an instance.
+    FontFaces), picked in `settings/app/Fonts.tsx`; an imported file never
+    leaves the device (only the other picks travel, docs/app-settings.md).
   - Themes (`docs/themes.md` is the format every app shares): built-ins in
     `src/lib/themes.ts` (copied from waifu.dev), custom themes and theme files
     in `lib/theme-file.ts`, the backdrop (picture and effect) in
@@ -1192,8 +1199,8 @@
 - The desktop app and the web app are two faces of one client: a feature,
   setting or fix in one belongs in the other too, and the desktop's core
   mirrors `web/src/fuwa` and `web/src/e2ee` file for file where it can. Its
-  settings are this computer's and apply to every instance, like
-  `web/src/lib/prefs.ts`. Pictures in messages show as links, as on the web.
+  settings apply to every instance and travel like `web/src/lib/prefs.ts`'s,
+  under the web's names (docs/app-settings.md). Pictures in messages show as links, as on the web.
 - In the desktop app, GPUI gives a scroll-wheel event to every scrolling box
   under the pointer, not only the front one. Anything floating over a page
   that takes the mouse (menus, pickers, cards, panels over the chat)

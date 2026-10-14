@@ -173,6 +173,7 @@ function appSections(t: I18n["t"]): SettingsSection[] {
       icon: CodeXmlIcon,
       description: t("settings.nav.advancedAbout"),
       settings: [
+        { id: "sync-settings", label: t("appsettings.advanced.sync"), keywords: "sync devices cloud backup" },
         { id: "share-reports", label: t("appsettings.advanced.reports"), keywords: "anonymous reports telemetry crash errors performance privacy" },
         { id: "developer-mode", label: t("appsettings.advanced.developer"), keywords: "copy id" },
       ],

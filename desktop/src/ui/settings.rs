@@ -220,6 +220,7 @@ fn app_sections() -> Vec<Section> {
         ]),
         Section::new(Page::Advanced, "code-xml", t("settings.nav.advanced"), t("settings.nav.advancedAbout"), "").with(
             vec![
+                ("sync-settings", t("appsettings.advanced.sync"), "sync devices instances cloud same everywhere"),
                 (
                     "share-reports",
                     t("appsettings.advanced.reports"),

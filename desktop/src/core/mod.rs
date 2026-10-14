@@ -14,6 +14,7 @@ pub mod account;
 pub mod account_settings;
 pub mod accounts;
 pub mod api;
+pub mod app_settings;
 pub mod arrange;
 pub mod attachments;
 pub mod backgrounds;
@@ -65,6 +66,7 @@ pub mod secrets;
 pub mod secure_threads;
 pub mod server_admin;
 pub mod server_pages;
+pub mod settings_sync;
 pub mod shared;
 pub mod sounds;
 pub mod spoilers;
@@ -429,6 +431,10 @@ pub struct Core {
     kept: Mutex<HashMap<String, Vec<config::SavedAccount>>>,
     /// Follows every instance over its separate streams, even one with live connections.
     separate_streams: std::sync::atomic::AtomicBool,
+    /// Itself, for tasks started from `&self` that outlive the call.
+    this: std::sync::OnceLock<std::sync::Weak<Core>>,
+    /// App settings on every device (`app_settings.rs`).
+    settings: app_settings::SyncState,
 }
 
 /// Messages per page, as the web app reads them.
@@ -514,7 +520,10 @@ impl Core {
             idle: presence::Idle::new(),
             kept: Mutex::new(HashMap::new()),
             separate_streams: std::sync::atomic::AtomicBool::new(false),
+            this: std::sync::OnceLock::new(),
+            settings: app_settings::SyncState::default(),
         });
+        let _ = core.this.set(Arc::downgrade(&core));
         core.listen_for_games(game_activity);
         let idle = core.idle.clone();
         core.runtime.spawn(async move {
@@ -583,12 +592,28 @@ impl Core {
     }
 
     pub fn set_prefs(&self, f: impl FnOnce(&mut Prefs)) {
-        let (prefs, language_changed) = {
+        self.change_prefs(f, true);
+    }
+
+    /// Changes the app's settings. A change made here (`stamp`) stamps the
+    /// synced settings it touched and sends them to your instances; one
+    /// taken from another device (`app_settings.rs`) carries its own stamps.
+    pub(crate) fn change_prefs(&self, f: impl FnOnce(&mut Prefs), stamp: bool) {
+        let (prefs, language_changed, synced, sync_turned_on) = {
             let mut prefs = self.shared.prefs.lock();
             let language = prefs.language.clone();
-            f(Arc::make_mut(&mut prefs));
-            (prefs.clone(), prefs.language != language)
+            let was_syncing = prefs.sync_settings;
+            let before = stamp.then(|| settings_sync::values(&prefs));
+            let p = Arc::make_mut(&mut prefs);
+            f(p);
+            let synced = before.is_some_and(|before| settings_sync::stamp(&before, p, dms::now_ms()));
+            (prefs.clone(), prefs.language != language, synced, !was_syncing && prefs.sync_settings)
         };
+        if sync_turned_on {
+            self.sync_app_settings_everywhere(true);
+        } else if synced && prefs.sync_settings {
+            self.app_settings_changed();
+        }
         if language_changed {
             i18n::set_language(prefs.language.as_deref());
         }

@@ -272,6 +272,8 @@ pub struct ListSync {
 pub struct FuwaApp {
     pub core: Arc<Core>,
     pub prefs: Prefs,
+    /// `Core::settings_taken` when `prefs` was last read: another device's settings come in through it.
+    prefs_taken: u64,
     pub nav: Nav,
     /// The channel last opened in each server ("key|server").
     pub channel_of: HashMap<String, String>,
@@ -502,6 +504,8 @@ impl FuwaApp {
                 // A text field's caret blinks on in the background (every blink draws its
                 // part again), so it lets go of focus there and takes it back on return.
                 if window.is_window_active() {
+                    // What other devices changed without an event: app settings, your profile.
+                    this.core.window_focused();
                     if let Some(handle) = this.unfocused.take()
                         && window.focused(cx).is_none_or(|now| now == this.focus)
                     {
@@ -646,6 +650,7 @@ impl FuwaApp {
 
         let first = core.shared.read(|s| s.order.first().cloned());
         let mut app = Self {
+            prefs_taken: core.settings_taken(),
             core,
             prefs,
             nav: Nav::Home { dm: None },
@@ -757,6 +762,18 @@ impl FuwaApp {
 
     fn on_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _timed = crate::ui::perf::time("store change");
+        // Settings from another device (core::app_settings) show at once, as a change here would.
+        let taken = self.core.settings_taken();
+        if taken != self.prefs_taken {
+            self.prefs_taken = taken;
+            let before = pal(cx).background;
+            self.prefs = self.core.prefs();
+            theme::apply(&self.prefs, window.appearance(), cx);
+            if pal(cx).background != before && !cx.reduce_motion() {
+                self.theme_fade = Some((before, Instant::now()));
+            }
+            window.refresh();
+        }
         // A server that went away (left, removed) takes you home.
         let gone = match &self.nav {
             Nav::Server { key, server } => {

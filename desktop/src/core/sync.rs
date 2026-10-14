@@ -157,6 +157,11 @@ async fn follow_instance(
     if let Some(engine) = core.engines.lock().get(key) {
         engine.followed.send_replace(ids);
     }
+    // App settings kept on the instance (docs/app-settings.md), now that you're known here.
+    {
+        let (core, key) = (core.clone(), key.to_owned());
+        tokio::spawn(async move { core.sync_app_settings(&key, true).await });
+    }
 
     // The instance's name, sign-up options and announcement change without an event.
     let refresh = {

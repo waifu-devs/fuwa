@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppBackdrop } from "@/components/Backdrop";
 import { refreshOnFocus } from "@/fuwa/actions";
+import { sendAppSettingsOnChange } from "@/fuwa/app-settings";
 import { reportTarget, restore } from "@/fuwa/sync";
 import { startReports } from "@/lib/reports";
 import { watchUnread } from "@/lib/notify";
@@ -20,6 +21,7 @@ watchSystem();
 restore();
 watchUnread();
 refreshOnFocus();
+sendAppSettingsOnChange();
 startReports(reportTarget);
 
 function App() {

@@ -39,6 +39,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0025_featured_servers.sql"),
     include_str!("../migrations/node/0026_agent_endpoints.sql"),
     include_str!("../migrations/node/0027_profile_item_pictures.sql"),
+    include_str!("../migrations/node/0028_app_settings.sql"),
 ];
 
 /// Notes that the instance's profile items changed now (`Node.profile_items_at`).
@@ -1694,6 +1695,52 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── App settings ─────────────────────────
+
+    /// Someone's app settings document, its version and when it changed
+    /// (ms); `None` until an app writes one.
+    pub async fn app_settings(&self, account_id: &str) -> Result<Option<(String, i64, i64)>> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT document, version, updated_at FROM app_settings WHERE account_id = ?1",
+            [account_id],
+            |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?, r.get::<i64>(2)?)),
+        )
+        .await?)
+    }
+
+    /// Replaces someone's app settings if they're still at `version` (0 for
+    /// none yet); an empty document forgets them. The new version and when
+    /// (ms), or `None` when another write got there first.
+    pub async fn set_app_settings(&self, account_id: &str, document: &str, version: i64) -> Result<Option<(i64, i64)>> {
+        let now = now_ms();
+        db::write(&self.db, async |conn| {
+            // Both go through the same row, so racing writes clash and the
+            // loser, run again, finds the version moved on.
+            let changed = if version == 0 {
+                conn.execute(
+                    "INSERT INTO app_settings (account_id, document, version, updated_at) VALUES (?1, ?2, 1, ?3)
+                     ON CONFLICT (account_id) DO NOTHING",
+                    (account_id, document, now),
+                )
+                .await?
+            } else {
+                conn.execute(
+                    "UPDATE app_settings SET document = ?2, version = version + 1, updated_at = ?4
+                     WHERE account_id = ?1 AND version = ?3",
+                    (account_id, document, version, now),
+                )
+                .await?
+            };
+            if changed == 0 {
+                return Ok(None);
+            }
+            Ok(Some((version + 1, now)))
+        })
+        .await
+    }
+
     // ───────────────────────── Server arrangement ─────────────────────────
 
     /// How someone arranged their servers, and when (ms), as stored: it can
@@ -2462,6 +2509,7 @@ impl NodeDb {
                 "notification_settings",
                 "upload_days",
                 "server_arrangements",
+                "app_settings",
                 "attachment_days",
                 "saved_gifs",
                 "presence_settings",

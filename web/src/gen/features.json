@@ -36,6 +36,7 @@
     { "id": "economy-games", "date": "2026-10-13", "title": "Earning currency by playing games" },
     { "id": "profile-effect-media", "date": "2026-10-13", "title": "Pictures and shaders in profile effects" },
     { "id": "boards", "date": "2026-10-14", "title": "Boards: channels of cards" },
-    { "id": "link-previews", "date": "2026-10-14", "title": "Link previews" }
+    { "id": "link-previews", "date": "2026-10-14", "title": "Link previews" },
+    { "id": "app-settings-sync", "date": "2026-10-14", "title": "App settings on every device" }
   ]
 }
