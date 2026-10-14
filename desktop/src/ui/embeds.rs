@@ -19,6 +19,7 @@ use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha};
+use crate::ui::viewer::{Source, Viewed};
 
 /// Only links a browser should open: http(s).
 fn safe(url: &str) -> Option<&str> {
@@ -50,15 +51,18 @@ pub fn embeds(
     p: &Palette,
     animate: bool,
     hide: Option<&WeakEntity<FuwaApp>>,
+    this: &WeakEntity<FuwaApp>,
+    key: &str,
 ) -> AnyElement {
     let mut list = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
     for (n, embed) in embeds.iter().enumerate() {
         let id = format!("{message}|{n}");
+        let opens = Opens { this: this.clone(), key: key.to_owned(), pictures: pictures_of(embed) };
         let (card, from) = if embed.preview {
-            let Some(card) = preview(&id, message, embed, p, hide) else { continue };
+            let Some(card) = preview(&id, message, embed, p, hide, &opens) else { continue };
             (card, (0.0, 6.0))
         } else {
-            (card(&id, embed, p, animate), (-10.0, 0.0))
+            (card(&id, embed, p, animate, &opens), (-10.0, 0.0))
         };
         list = list.child(if animate {
             slide_in(card, SharedString::from(format!("embed|{id}")), Duration::from_millis(80 + 60 * n as u64), from)
@@ -88,10 +92,40 @@ fn slide_in(card: Stateful<gpui_kit::Div>, id: SharedString, delay: Duration, fr
     .into_any_element()
 }
 
-/// A picture that opens `url` when clicked.
-fn picture_link(id: String, picture: impl IntoElement, url: &str) -> Stateful<gpui_kit::Div> {
-    let url = url.to_owned();
-    div().id(SharedString::from(id)).cursor_pointer().on_click(move |_, _, cx| cx.open_url(&url)).child(picture)
+/// An embed's pictures as the viewer shows them, the big one first.
+fn pictures_of(embed: &pb::Embed) -> Vec<Viewed> {
+    let fallback = if embed.title.is_empty() { t("chat.viewer.view") } else { embed.title.clone() };
+    let mut out: Vec<Viewed> = Vec::new();
+    for url in [safe(&embed.image_url), safe(&embed.thumbnail_url)].into_iter().flatten() {
+        if !out.iter().any(|v| v.source == Source::Url(url.to_owned())) {
+            out.push(Viewed::url(url, &crate::ui::viewer::name_of(url, &fallback), 0, 0));
+        }
+    }
+    out
+}
+
+/// What opens an embed's pictures in the viewer.
+struct Opens {
+    this: WeakEntity<FuwaApp>,
+    key: String,
+    pictures: Vec<Viewed>,
+}
+
+impl Opens {
+    /// `picture`, opening the viewer on `url` when clicked.
+    fn wrap(&self, id: String, picture: impl IntoElement, url: &str) -> Stateful<gpui_kit::Div> {
+        let (this, key, pictures) = (self.this.clone(), self.key.clone(), self.pictures.clone());
+        let at = pictures.iter().position(|v| v.source == Source::Url(url.to_owned())).unwrap_or(0);
+        div()
+            .id(SharedString::from(id))
+            .cursor_pointer()
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                let pictures = pictures.clone();
+                let _ = this.update(cx, |this, cx| this.view_pictures(&key, pictures, at, window, cx));
+            })
+            .child(picture)
+    }
 }
 
 /// A link preview (the web's `LinkPreview`): the site small on top, the
@@ -104,6 +138,7 @@ fn preview(
     embed: &pb::Embed,
     p: &Palette,
     hide: Option<&WeakEntity<FuwaApp>>,
+    opens: &Opens,
 ) -> Option<Stateful<gpui_kit::Div>> {
     let url = safe(&embed.url)?;
     let words = !embed.title.is_empty() || !embed.description.is_empty();
@@ -146,7 +181,7 @@ fn preview(
     });
     let card = div().id(SharedString::from(format!("embed-card|{id}"))).group(group).relative().text_sm();
     if !words {
-        // Only a picture: itself, linking to the page, at its own size but no
+        // Only a picture: itself, opening in the viewer (whose "open the original" goes to it), at its own size but no
         // wider than the card or taller than 320px (the web's `max-h-80
         // max-w-full`). Rows, so neither it nor its link stretches wider than
         // it is, and both may shrink to the card.
@@ -155,7 +190,7 @@ fn preview(
             .max_h(px(320.0))
             .rounded(radius)
             .object_fit(ObjectFit::Contain);
-        let link = picture_link(format!("preview-picture|{id}"), picture, url).flex().items_start().min_w_0();
+        let link = opens.wrap(format!("preview-picture|{id}"), picture, image?).flex().items_start().min_w_0();
         return Some(card.max_w(px(448.0)).flex().items_start().child(link).children(hide));
     }
     let mut text = div().flex_1().min_w_0().flex().flex_col().gap(px(2.0));
@@ -189,11 +224,11 @@ fn preview(
         );
     }
     let thumbnail = safe(&embed.thumbnail_url).map(|url| {
-        crate::ui::widgets::picture(url.to_owned())
+        let picture = crate::ui::widgets::picture(url.to_owned())
             .size(px(64.0))
-            .flex_none()
             .rounded(crate::ui::theme::radius_lg())
-            .object_fit(ObjectFit::Cover)
+            .object_fit(ObjectFit::Cover);
+        opens.wrap(format!("preview-thumb|{id}"), picture, url).flex_none()
     });
     let image = image.map(|image| {
         let picture = crate::ui::widgets::picture(image.to_owned())
@@ -201,7 +236,7 @@ fn preview(
             .max_h(px(288.0))
             .rounded(crate::ui::theme::radius_lg())
             .object_fit(ObjectFit::Cover);
-        picture_link(format!("preview-picture|{id}"), picture, url).mt(px(8.0))
+        opens.wrap(format!("preview-picture|{id}"), picture, image).mt(px(8.0))
     });
     let edge: Hsla = if embed.color != 0 { rgb(embed.color as u32).into() } else { p.border.into() };
     // The webhook card's shape (a 4px edge, `rounded-xl`, the card at 70%), plainer: no wash, no lift.
@@ -250,7 +285,7 @@ impl FuwaApp {
     }
 }
 
-fn card(id: &str, embed: &pb::Embed, p: &Palette, animate: bool) -> Stateful<gpui_kit::Div> {
+fn card(id: &str, embed: &pb::Embed, p: &Palette, animate: bool, opens: &Opens) -> Stateful<gpui_kit::Div> {
     let edge: Hsla = if embed.color != 0 { rgb(embed.color as u32).into() } else { p.border.into() };
     let mut text = div().flex_1().min_w_0().flex().flex_col().gap(px(4.0));
     if !embed.title.is_empty() {
@@ -293,19 +328,19 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette, animate: bool) -> Stateful<gpu
         text = text.child(fields);
     }
     let thumbnail = safe(&embed.thumbnail_url).map(|url| {
-        crate::ui::widgets::picture(url.to_owned())
+        let picture = crate::ui::widgets::picture(url.to_owned())
             .size(px(64.0))
-            .flex_none()
             .rounded(crate::ui::theme::radius_lg())
-            .object_fit(ObjectFit::Cover)
+            .object_fit(ObjectFit::Cover);
+        opens.wrap(format!("embed-thumb|{id}"), picture, url).flex_none()
     });
     let image = safe(&embed.image_url).map(|url| {
-        crate::ui::widgets::picture(url.to_owned())
+        let picture = crate::ui::widgets::picture(url.to_owned())
             .w_full()
             .max_h(px(288.0))
-            .mt(px(8.0))
             .rounded(crate::ui::theme::radius_lg())
-            .object_fit(ObjectFit::Cover)
+            .object_fit(ObjectFit::Cover);
+        opens.wrap(format!("embed-picture|{id}"), picture, url).w_full().mt(px(8.0))
     });
     // The web's card: a 4px coloured edge, `rounded-xl`, the card at 70% (drawn
     // solid, since GPUI would draw the shadow through a see-through fill).

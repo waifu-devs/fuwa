@@ -112,6 +112,7 @@ mod typing;
 mod update;
 mod user_menu;
 mod video;
+mod viewer;
 mod voice_notes;
 mod voice_stage;
 mod wgsl;
