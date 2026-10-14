@@ -6,12 +6,15 @@ on:
     types: [opened, synchronize, reopened, closed]
   push:
     branches: [master]
+  # The merge queue: each pull request is tested on top of master and the pull
+  # requests ahead of it before it merges, so master only gets green commits.
+  merge_group:
   # Actions > CI > Run workflow runs everything, the slow jobs included.
   workflow_dispatch:
 
 # One run per pull request: a new push stops the run for the old one, and merging
-# stops it too, since master's own run then tests the merged code. Runs on master
-# all finish, so each commit there gets its result.
+# stops it too, since its "CI passed" was already green (master requires it).
+# Runs on master and in the merge queue all finish, so each commit gets its result.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -43,6 +46,8 @@ jobs:
             pull_request) .github/scripts/changes.sh pr "$PR" >> "$GITHUB_OUTPUT" ;;
             # The image check is for pull requests: on master, Publish image builds it.
             push) .github/scripts/changes.sh since "$BEFORE" | sed 's/^docker=.*/docker=false/' >> "$GITHUB_OUTPUT" ;;
+            # Everything the queued pull requests change, against the master they merge into.
+            merge_group) .github/scripts/changes.sh since "$QUEUE_BASE" >> "$GITHUB_OUTPUT" ;;
             *) .github/scripts/changes.sh all >> "$GITHUB_OUTPUT" ;;
           esac
           cat "$GITHUB_OUTPUT"
@@ -51,6 +56,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
           BEFORE: ${{ github.event.before }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
           GH_TOKEN: ${{ github.token }}
 
   server:
@@ -81,6 +87,7 @@ jobs:
           test -z "$(git status --porcelain -- src/gen)"
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
+          toolchain: 1.99.0 # rust-toolchain.toml
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       # Only master saves the cache, which every pull request starts from; a pull
@@ -130,6 +137,7 @@ jobs:
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libasound2-dev libvpx-dev
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
+          toolchain: 1.99.0 # rust-toolchain.toml
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -226,6 +234,8 @@ jobs:
       - name: Packs as it would publish
         run: npm pack --dry-run
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.0 # rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: sdk
