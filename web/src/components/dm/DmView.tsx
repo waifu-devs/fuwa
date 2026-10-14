@@ -80,7 +80,7 @@ import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import { PendingFiles, SealedFiles } from "@/components/dm/SealedFiles";
 import { EncryptedAttach, PickedTray } from "@/components/dm/EncryptedFiles";
-import { clearPicked, pickFiles, usePicked } from "@/components/dm/use-picked";
+import { clearPicked, isSpoiler, pickFiles, usePicked } from "@/components/dm/use-picked";
 import { DropOverlay } from "@/components/chat/ComposerFiles";
 
 /** Messages from one person closer together than this share a header. */
@@ -1208,7 +1208,7 @@ function ComposerBox({
     setAlsoChannel(false);
     if (picked.length) {
       clearPicked(draft);
-      void sendDmFiles(instanceKey, id, picked, content, target);
+      void sendDmFiles(instanceKey, id, picked, content, target, picked.map(isSpoiler));
     } else {
       sendDm(instanceKey, id, content, target).catch((err: unknown) => setError(dmProblem(err)));
     }

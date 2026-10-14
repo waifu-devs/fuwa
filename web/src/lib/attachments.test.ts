@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
 import type { I18n } from "../i18n/i18n.ts";
-import { cantAdd, extensionOf, familyOf, fitBox, localLook, lookOf, MAX_FILES, shortName } from "./attachments.ts";
+import { cantAdd, extensionOf, familyOf, fitBox, localLook, lookOf, MAX_FILES, readyFiles, shortName } from "./attachments.ts";
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
 
@@ -53,4 +53,19 @@ test("pictures keep their shape in their box", () => {
 test("at most ten files go at once", () => {
   assert.equal(cantAdd(t, 0, MAX_FILES), "");
   assert.match(cantAdd(t, 9, 2), /up to 10/);
+});
+
+test("files go marked as spoilers only when picked as one, and only once uploaded", () => {
+  const file = (url: string) => ({ url, spoiler: false });
+  const sent = readyFiles([
+    { done: file("a"), spoiler: true },
+    { done: file("b"), spoiler: false },
+    { done: null, spoiler: true },
+    { done: { url: "c", spoiler: true }, spoiler: false },
+  ]);
+  assert.deepEqual(sent, [
+    { url: "a", spoiler: true },
+    { url: "b", spoiler: false },
+    { url: "c", spoiler: false },
+  ]);
 });

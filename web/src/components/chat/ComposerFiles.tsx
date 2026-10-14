@@ -1,8 +1,11 @@
-import { CheckIcon, PaperclipIcon, RotateCwIcon, UploadIcon, XIcon } from "lucide-react";
+import { CheckIcon, EyeOffIcon, PaperclipIcon, RotateCwIcon, UploadIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
-import { addFiles, removeFile, retryFile, type Staged } from "@/components/chat/staged";
+import { SpoilerBadge } from "@/components/chat/SpoilerCover";
+import { addFiles, removeFile, retryFile, toggleSpoiler, type Staged } from "@/components/chat/staged";
+import { useFuwa } from "@/fuwa/store";
+import { instanceHas } from "@/lib/compat";
 import { SPRING } from "@/lib/motion";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
@@ -43,9 +46,13 @@ export function AttachButton({ where, disabled }: { where: Where; disabled?: boo
   );
 }
 
-/** The files going with the next message, each with how far its upload got. */
+/**
+ * The files going with the next message, each with how far its upload got,
+ * and (where the instance takes them) a switch to send it as a spoiler.
+ */
 export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }) {
   const { t } = useI18n();
+  const spoilersHere = useFuwa((s) => instanceHas(s.instances[where.instanceKey]?.node?.versions, "spoiler-files"));
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -58,17 +65,18 @@ export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }
     >
       <AnimatePresence initial={false} mode="popLayout">
         {staged.map((s) => (
-          <StagedCard key={s.id} where={where} staged={s} />
+          <StagedCard key={s.id} where={where} staged={s} spoilers={spoilersHere} />
         ))}
       </AnimatePresence>
     </motion.div>
   );
 }
 
-function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
+function StagedCard({ where, staged, spoilers }: { where: Where; staged: Staged; spoilers: boolean }) {
   const lang = useI18n();
   const { t } = lang;
   const { file, preview, sent, done, failed } = staged;
+  const spoiler = spoilers && staged.spoiler;
   return (
     <motion.div
       layout
@@ -84,12 +92,35 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
       title={failed ?? t("chat.files.nameAndSize", { name: file.name, size: formatBytes(lang, file.size) })}
     >
       {preview ? (
-        <img src={preview} alt="" className={cn("absolute inset-0 size-full object-cover transition-opacity duration-300", !done && "opacity-60")} />
+        <img
+          src={preview}
+          alt=""
+          className={cn(
+            "absolute inset-0 size-full object-cover transition-[opacity,filter,scale] duration-300 motion-reduce:transition-none",
+            !done && "opacity-60",
+            spoiler && "scale-125 blur-xl",
+          )}
+        />
       ) : (
         <div className="flex flex-1 items-center justify-center pt-1">
-          <FileBadge name={file.name} />
+          <FileBadge name={file.name} className={cn("transition-[filter] duration-300 motion-reduce:transition-none", spoiler && "blur-[6px]")} />
         </div>
       )}
+      {/* Marked as a spoiler: covered here as it will be for whoever reads it. */}
+      <AnimatePresence>
+        {spoiler && (
+          <motion.span
+            key="spoiler"
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.6 }}
+            transition={SPRING}
+            className="pointer-events-none absolute inset-x-0 top-7 flex justify-center"
+          >
+            <SpoilerBadge className="px-2 py-0.5 text-[0.6rem]" />
+          </motion.span>
+        )}
+      </AnimatePresence>
       <div className={cn("relative mt-auto px-2 pb-1.5", preview && "bg-gradient-to-t from-black/70 to-transparent pt-4 text-white")}>
         <p className="truncate text-[0.7rem] font-bold">{shortName(file.name, 22)}</p>
         <p className={cn("truncate text-[0.65rem] tabular-nums", preview ? "text-white/75" : "text-muted-foreground", failed && "text-destructive")}>
@@ -127,6 +158,22 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
           >
             <RotateCwIcon className="size-3.5" />
           </button>
+        )}
+        {spoilers && (
+          <motion.button
+            type="button"
+            aria-label={t(staged.spoiler ? "chat.files.unspoiler" : "chat.files.spoiler", { name: file.name })}
+            title={t(staged.spoiler ? "chat.files.unspoiler" : "chat.files.spoiler", { name: file.name })}
+            aria-pressed={staged.spoiler}
+            onClick={() => toggleSpoiler(where.channelId, staged.id)}
+            whileTap={{ scale: 0.85 }}
+            className={cn(
+              "grid size-6 place-items-center rounded-full shadow-sm transition-colors",
+              staged.spoiler ? "bg-primary text-primary-foreground" : "bg-card/90 text-foreground hover:text-primary",
+            )}
+          >
+            <EyeOffIcon className="size-3.5" />
+          </motion.button>
         )}
         <button
           type="button"

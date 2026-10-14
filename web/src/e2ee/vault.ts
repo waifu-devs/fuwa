@@ -112,6 +112,8 @@ export type FileRef = {
   height: number;
   /** Its size before padding, as the sender said (0: unknown). */
   fileSize: number;
+  /** Marked as a spoiler: shown covered until it's clicked. */
+  spoiler?: boolean;
 };
 
 /** A voice message's sealed file and what it sounds like, from inside the encrypted message. */

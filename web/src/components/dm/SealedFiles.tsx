@@ -2,6 +2,7 @@ import { DownloadIcon, EyeIcon, LoaderCircleIcon, LockKeyholeIcon, PlayIcon, Shi
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
+import { SpoilerBadge, SpoilerCover } from "@/components/chat/SpoilerCover";
 import type { FileRef } from "@/e2ee/vault";
 import { animated, sniff, type Preview } from "@/files/sealed";
 import { openDmFile } from "@/fuwa/dms";
@@ -61,7 +62,8 @@ function useBlobUrl(opened: Opened | null): string | null {
  * instance and opened on this device; pictures and videos show inline once
  * opened (small ones by themselves, when they come on screen), and only
  * when their own bytes say they're a type that's safe to draw. Everything
- * else is a card to download.
+ * else is a card to download. A file marked as a spoiler stays covered until
+ * it's clicked (it may still open behind the cover, so uncovering is quick).
  */
 export const SealedFiles = memo(function SealedFiles({ instanceKey, files, animate }: { instanceKey: string; files: FileRef[]; animate: boolean }) {
   if (!files.length) return null;
@@ -133,62 +135,67 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
 
   if (opened?.preview && url) {
     const size = fitBox(file.width, file.height, MEDIA_BOX);
+    // The same cover as the card's below, so uncovering one stays uncovered once it opens.
     return (
-      <motion.div {...enterWith} className="group/sealed relative max-w-full" style={{ width: size.width }}>
-        <Shown file={file} opened={opened} url={url} size={size} />
-        <button
-          type="button"
-          onClick={() => save(opened.blob, file.name)}
-          aria-label={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
-          title={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
-          className="absolute top-2 right-2 grid size-8 place-items-center rounded-lg bg-black/55 text-white opacity-0 shadow transition group-hover/sealed:opacity-100 hover:scale-110 focus-visible:opacity-100"
-        >
-          <DownloadIcon className="size-4" />
-        </button>
-      </motion.div>
+      <SpoilerCover spoiler={!!file.spoiler} look="media" animate={animate} className="self-start rounded-xl">
+        <motion.div {...enterWith} className="group/sealed relative max-w-full" style={{ width: size.width }}>
+          <Shown file={file} opened={opened} url={url} size={size} />
+          <button
+            type="button"
+            onClick={() => save(opened.blob, file.name)}
+            aria-label={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
+            title={lang.t("dms-calls.dm.sealed.download", { name: file.name })}
+            className="absolute top-2 right-2 grid size-8 place-items-center rounded-lg bg-black/55 text-white opacity-0 shadow transition group-hover/sealed:opacity-100 hover:scale-110 focus-visible:opacity-100"
+          >
+            <DownloadIcon className="size-4" />
+          </button>
+        </motion.div>
+      </SpoilerCover>
     );
   }
 
   const size = opened ? opened.blob.size : file.fileSize;
   const busy = state.at === "opening";
   return (
-    <motion.div
-      ref={place}
-      {...enterWith}
-      className={cn("flex w-full max-w-sm items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2.5", state.at === "failed" && "border-destructive/50")}
-    >
-      <span className="relative">
-        <FileBadge name={file.name} />
-        <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
-          <LockKeyholeIcon className="size-2.5" />
+    <SpoilerCover spoiler={!!file.spoiler} look="card" animate={animate} className="w-full max-w-sm rounded-xl">
+      <motion.div
+        ref={place}
+        {...enterWith}
+        className={cn("flex w-full max-w-sm items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2.5", state.at === "failed" && "border-destructive/50")}
+      >
+        <span className="relative">
+          <FileBadge name={file.name} />
+          <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
+            <LockKeyholeIcon className="size-2.5" />
+          </span>
         </span>
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold" title={file.name}>
-          {shortName(file.name, 48)}
-        </p>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.p
-            key={state.at}
-            initial={{ opacity: 0, y: 3 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -3 }}
-            transition={{ duration: 0.15 }}
-            className={cn("truncate text-xs tabular-nums", state.at === "failed" ? "text-destructive" : "text-muted-foreground")}
-          >
-            <Status state={state} size={size} />
-          </motion.p>
-        </AnimatePresence>
-      </div>
-      {hinted && !opened && (
-        <CardButton label={lang.t("dms-calls.dm.sealed.show", { name: file.name })} onClick={() => void open()} disabled={busy}>
-          {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <EyeIcon className="size-4" />}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold" title={file.name}>
+            {shortName(file.name, 48)}
+          </p>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.p
+              key={state.at}
+              initial={{ opacity: 0, y: 3 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -3 }}
+              transition={{ duration: 0.15 }}
+              className={cn("truncate text-xs tabular-nums", state.at === "failed" ? "text-destructive" : "text-muted-foreground")}
+            >
+              <Status state={state} size={size} />
+            </motion.p>
+          </AnimatePresence>
+        </div>
+        {hinted && !opened && (
+          <CardButton label={lang.t("dms-calls.dm.sealed.show", { name: file.name })} onClick={() => void open()} disabled={busy}>
+            {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <EyeIcon className="size-4" />}
+          </CardButton>
+        )}
+        <CardButton label={lang.t("dms-calls.dm.sealed.download", { name: file.name })} onClick={() => void download()} disabled={busy}>
+          <DownloadIcon className="size-4" />
         </CardButton>
-      )}
-      <CardButton label={lang.t("dms-calls.dm.sealed.download", { name: file.name })} onClick={() => void download()} disabled={busy}>
-        <DownloadIcon className="size-4" />
-      </CardButton>
-    </motion.div>
+      </motion.div>
+    </SpoilerCover>
   );
 }
 
@@ -282,8 +289,11 @@ function Still({ url, name, width, height }: { url: string; name: string; width:
   );
 }
 
-/** Files on their way in an encrypted message: sealed and uploaded on this device before it's sent. */
-export function PendingFiles({ files }: { files: { name: string; size: number }[] }) {
+/**
+ * Files on their way in an encrypted message: sealed and uploaded on this
+ * device before it's sent. One marked as a spoiler says so, its name blurred.
+ */
+export function PendingFiles({ files }: { files: { name: string; size: number; spoiler?: boolean }[] }) {
   const lang = useI18n();
   return (
     <div className="mt-1 flex flex-col gap-1.5">
@@ -291,9 +301,10 @@ export function PendingFiles({ files }: { files: { name: string; size: number }[
         <div key={n} className="relative flex w-full max-w-sm items-center gap-3 overflow-hidden rounded-xl border bg-muted/40 px-3 py-2.5">
           <FileBadge name={file.name} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold">{shortName(file.name, 48)}</p>
+            <p className={cn("truncate text-sm font-bold", file.spoiler && "blur-[4px] select-none")}>{shortName(file.name, 48)}</p>
             <p className="truncate text-xs text-muted-foreground tabular-nums">{formatBytes(lang, file.size)}</p>
           </div>
+          {file.spoiler && <SpoilerBadge className="shrink-0 px-2 py-0.5 text-[0.6rem]" />}
           <LockKeyholeIcon className="size-4 shrink-0 text-emerald-500" />
         </div>
       ))}

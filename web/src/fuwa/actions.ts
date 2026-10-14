@@ -1396,7 +1396,7 @@ export const sendMessage = (
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
-    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height, voice: f.voice }));
+    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height, voice: f.voice, spoiler: f.spoiler }));
     // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
     const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
     const res = yield* call((signal) =>

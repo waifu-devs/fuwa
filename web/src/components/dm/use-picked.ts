@@ -38,3 +38,16 @@ export function pickFiles(draft: string, files: File[]) {
 }
 
 export const clearPicked = (draft: string) => setPicked(draft, []);
+
+/** Picked files marked as spoilers. Kept by the file itself, so it goes when the file does. */
+const spoilers = new WeakSet<File>();
+
+export const isSpoiler = (file: File) => spoilers.has(file);
+
+/** Marks a picked file as a spoiler, or stops marking it. Inside the encryption, so every instance takes it. */
+export function toggleSpoiler(draft: string, file: File) {
+  if (spoilers.has(file)) spoilers.delete(file);
+  else spoilers.add(file);
+  // A new list, so the tray draws it again.
+  setPicked(draft, [...(picked.get(draft) ?? NONE)]);
+}

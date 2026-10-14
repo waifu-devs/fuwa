@@ -1,4 +1,4 @@
-import { ArchiveIcon, ArchiveRestoreIcon, CalendarIcon, CheckIcon, ColumnsIcon, PencilIcon, PlusIcon, TagIcon, Trash2Icon, UsersIcon, XIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarIcon, CheckIcon, ColumnsIcon, EyeOffIcon, PencilIcon, PlusIcon, TagIcon, Trash2Icon, UsersIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Permission, type Attachment, type BoardColumn, type BoardLabel, type Card, type Channel, type Emoji, type Message } from "@/gen/fuwa/v1/types_pb";
@@ -507,6 +507,7 @@ function BodyEditor({
               >
                 <FileBadge name={file.filename} className="size-5" />
                 <span className="max-w-40 truncate font-bold">{file.filename}</span>
+                {file.spoiler && <EyeOffIcon aria-label={t("chat.files.spoilerBadge")} className="size-3 shrink-0 text-muted-foreground" />}
                 <button
                   type="button"
                   aria-label={t("chattools.board.removeFile", { name: file.filename })}

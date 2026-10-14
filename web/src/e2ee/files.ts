@@ -17,6 +17,7 @@ export function toSealedFiles(files: FileRef[] | undefined): SealedFile[] {
       height: f.height,
       chunkBytes: f.chunkBytes,
       fileSize: BigInt(f.fileSize),
+      spoiler: !!f.spoiler,
     }),
   );
 }
@@ -48,6 +49,7 @@ export function filesOf(list: SealedFile[] | undefined): FileRef[] {
       width: Math.min(f.width, 16_384),
       height: Math.min(f.height, 16_384),
       fileSize: Number.isSafeInteger(fileSize) && fileSize >= 0 && fileSize <= Math.min(size, MAX_FILE_BYTES) ? fileSize : 0,
+      spoiler: f.spoiler,
     });
   }
   return out;

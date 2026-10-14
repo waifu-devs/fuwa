@@ -1292,6 +1292,10 @@ message Attachment {
   // Set when the file is a voice message recorded in the app (Ogg Opus,
   // the message's only file): apps show a player instead of a file.
   VoiceNote voice = 8;
+  // A spoiler, as its sender marked it: apps cover a picture or video
+  // (blurred) and a file's name until the reader clicks it, and leave it out
+  // of previews and notifications. Kept as sent.
+  bool spoiler = 9;
 }
 
 // What a voice message looks like before it plays, from the sending app.

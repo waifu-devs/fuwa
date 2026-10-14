@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { create } from "@bufbuild/protobuf";
 import { AttachmentSchema, type Attachment } from "@/gen/fuwa/v1/types_pb";
 import { runCancelable, uploadAttachment } from "@/fuwa/actions";
-import { cantAdd, localLook, MAX_FILES, type FileLook } from "@/lib/attachments";
+import { cantAdd, localLook, MAX_FILES, readyFiles, type FileLook } from "@/lib/attachments";
 import { reportError, reportTiming } from "@/lib/reports";
 import { toast } from "@/lib/ui";
 import { i18n } from "@/i18n/i18n";
@@ -23,6 +23,8 @@ export type Staged = {
   /** Uploaded, ready to send. */
   done: Attachment | null;
   failed: string | null;
+  /** Marked as a spoiler: it goes covered, until each reader uncovers it. */
+  spoiler: boolean;
   cancel: () => void;
 };
 
@@ -118,6 +120,7 @@ export function addFiles(key: string, serverId: string, channelId: string, files
       sent: 0,
       done: null,
       failed: null,
+      spoiler: false,
       cancel: () => {},
     };
     set(channelId, (list) => [...list, staged]);
@@ -139,10 +142,16 @@ export function removeFile(channelId: string, id: string) {
   set(channelId, (list) => list.filter((s) => s.id !== id));
 }
 
+/** Marks a file as a spoiler, or stops marking it (where the instance takes spoiler files). */
+export function toggleSpoiler(channelId: string, id: string) {
+  const staged = (byChannel.get(channelId) ?? NONE).find((s) => s.id === id);
+  if (staged) patch(channelId, id, { spoiler: !staged.spoiler });
+}
+
 /** The uploaded files, for the message being sent, leaving the channel's tray empty. */
 export function takeFiles(channelId: string): Attachment[] {
   const list = byChannel.get(channelId) ?? NONE;
   for (const staged of list) if (staged.preview) URL.revokeObjectURL(staged.preview);
   set(channelId, () => NONE);
-  return list.flatMap((s) => (s.done ? [s.done] : []));
+  return readyFiles(list);
 }

@@ -280,8 +280,11 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
 
 // ───────────────────────── Files ─────────────────────────
 
-/** Files waiting to go, by pending nonce, with what each already uploaded, so a failed send can try again. */
-type OutgoingFiles = { files: File[]; text: string; target?: ThreadTarget; uploaded: (FileRef | undefined)[] };
+/**
+ * Files waiting to go, by pending nonce, with which are marked as spoilers
+ * and what each already uploaded, so a failed send can try again.
+ */
+type OutgoingFiles = { files: File[]; spoilers: boolean[]; text: string; target?: ThreadTarget; uploaded: (FileRef | undefined)[] };
 const outgoingFiles = new Map<string, OutgoingFiles>();
 
 /** A picture's size in pixels, so its place is kept while it opens; 0s for anything else. */
@@ -309,11 +312,12 @@ export function cantSendFiles(files: File[]): string | null {
  * Sends files (and a caption) in an encrypted conversation or secure
  * channel: each sealed on this device under a key of its own, the sealed
  * bytes uploaded, and the keys, names and types sent inside the encrypted
- * message. It shows at once, faded, like text.
+ * message (with which are spoilers: `spoilers[n]` for `files[n]`). It shows
+ * at once, faded, like text.
  */
-export async function sendDmFiles(key: string, id: string, files: File[], text: string, target?: ThreadTarget) {
+export async function sendDmFiles(key: string, id: string, files: File[], text: string, target?: ThreadTarget, spoilers: boolean[] = []) {
   reportUsage("dm.files");
-  await sendFiles(key, id, { files, text, target, uploaded: [] });
+  await sendFiles(key, id, { files, spoilers, text, target, uploaded: [] });
 }
 
 async function sendFiles(key: string, id: string, out: OutgoingFiles) {
@@ -327,7 +331,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
       createdAt: Date.now(),
       failed: null,
       ...out.target,
-      sealed: out.files.map((f) => ({ name: cleanName(f.name), size: f.size })),
+      sealed: out.files.map((f, n) => ({ name: cleanName(f.name), size: f.size, spoiler: !!out.spoilers[n] })),
     },
   ]);
   const started = performance.now();
@@ -353,6 +357,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
           width: size.width,
           height: size.height,
           fileSize: file.size,
+          spoiler: !!out.spoilers[n],
         };
         out.uploaded[n] = ref;
         // This device already has it: no need to fetch it back to show it.

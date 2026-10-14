@@ -162,6 +162,9 @@ pub struct FileRef {
     pub height: u32,
     /// Its size before padding, as the sender said (0: unknown).
     pub file_size: i64,
+    /// Marked as a spoiler by its sender: covered until it's clicked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spoiler: bool,
 }
 
 /// A voice message's sealed file and what was said about it.

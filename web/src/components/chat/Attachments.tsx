@@ -22,6 +22,7 @@ import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { reportError } from "@/lib/reports";
 import { cn } from "@/lib/utils";
+import { SpoilerBadge, SpoilerCover } from "@/components/chat/SpoilerCover";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { attachmentLoader } from "@/voice/fetch";
 
@@ -106,7 +107,8 @@ function Download({ url, name, className, children }: { url: string; name: strin
  * The files a message came with: pictures shown (in a grid when there are
  * several), videos and audio with players, anything else as a card to
  * download. Only files on a fuwa instance load; each keeps its box before
- * it loads, so the list never jumps.
+ * it loads, so the list never jumps. A file marked as a spoiler stays
+ * covered (`SpoilerCover`) until it's clicked.
  */
 export const Attachments = memo(function Attachments({ files, animate }: { files: Attachment[]; animate: boolean }) {
   const [open, setOpen] = useState<Attachment | null>(null);
@@ -120,17 +122,36 @@ export const Attachments = memo(function Attachments({ files, animate }: { files
       {pictures.length > 0 && (
         <div className={cn("flex flex-wrap gap-1.5", tiled && "max-w-[412px]")}>
           {pictures.map((file, n) => (
-            <Picture key={file.id || file.url} file={file} box={tiled ? TILE_BOX : MEDIA_BOX} square={tiled} delay={animate ? n * 0.04 : 0} animate={animate} onOpen={() => setOpen(file)} />
+            <SpoilerCover key={file.id || file.url} spoiler={file.spoiler} look="media" animate={animate} className="rounded-xl">
+              <Picture file={file} box={tiled ? TILE_BOX : MEDIA_BOX} square={tiled} delay={animate ? n * 0.04 : 0} animate={animate} onOpen={() => setOpen(file)} />
+            </SpoilerCover>
           ))}
         </div>
       )}
       {rest.map((file, n) => {
         const look = lookOf(file.contentType);
         const delay = animate ? (pictures.length + n) * 0.04 : 0;
-        if (look === "video" && shownPicture(file.url)) return <Video key={file.id || file.url} file={file} delay={delay} animate={animate} />;
-        if (look === "audio" && file.voice && shownPicture(file.url)) return <Voice key={file.id || file.url} file={file} delay={delay} animate={animate} />;
-        if (look === "audio" && shownPicture(file.url)) return <Audio key={file.id || file.url} file={file} delay={delay} animate={animate} />;
-        return <FileCard key={file.id || file.url} file={file} delay={delay} animate={animate} />;
+        const key = file.id || file.url;
+        if (look === "video" && shownPicture(file.url)) {
+          return (
+            <SpoilerCover key={key} spoiler={file.spoiler} look="media" animate={animate} className="self-start rounded-xl">
+              <Video file={file} delay={delay} animate={animate} />
+            </SpoilerCover>
+          );
+        }
+        const voice = look === "audio" && !!file.voice && !!shownPicture(file.url);
+        const audio = look === "audio" && !file.voice && !!shownPicture(file.url);
+        return (
+          <SpoilerCover key={key} spoiler={file.spoiler} look="card" animate={animate} className={cn("w-full rounded-2xl", voice ? "max-w-[22rem]" : "max-w-md")}>
+            {voice ? (
+              <Voice file={file} delay={delay} animate={animate} />
+            ) : audio ? (
+              <Audio file={file} delay={delay} animate={animate} />
+            ) : (
+              <FileCard file={file} delay={delay} animate={animate} />
+            )}
+          </SpoilerCover>
+        );
       })}
       <Viewer file={open} onClose={() => setOpen(null)} />
     </div>
@@ -350,7 +371,10 @@ function Viewer({ file, onClose }: { file: Attachment | null; onClose: () => voi
   );
 }
 
-/** Files on their way with a message: named, not loaded (they're served once it's sent). */
+/**
+ * Files on their way with a message: named, not loaded (they're served once
+ * it's sent). One marked as a spoiler says so, its name blurred.
+ */
 export function PendingFiles({ files }: { files: Attachment[] }) {
   if (!files.length) return null;
   return (
@@ -361,7 +385,8 @@ export function PendingFiles({ files }: { files: Attachment[] }) {
         ) : (
         <span key={file.url} className="flex max-w-60 items-center gap-2 rounded-xl border bg-card/70 py-1.5 pr-3 pl-1.5 text-xs">
           <FileBadge name={file.filename} className="size-7 rounded-lg [&_svg]:size-4" />
-          <span className="truncate font-bold">{shortName(file.filename, 28)}</span>
+          <span className={cn("truncate font-bold", file.spoiler && "blur-[3px] select-none")}>{shortName(file.filename, 28)}</span>
+          {file.spoiler && <SpoilerBadge className="-my-0.5 -mr-1.5 shrink-0 px-2 py-0.5 text-[0.6rem]" />}
         </span>
         ),
       )}
