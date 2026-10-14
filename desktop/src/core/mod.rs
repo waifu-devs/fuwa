@@ -79,6 +79,7 @@ mod sync;
 pub mod themes;
 pub mod threads;
 pub mod timestamps;
+pub mod typing;
 pub mod updates;
 pub mod vault;
 pub mod voice;
@@ -229,6 +230,9 @@ pub struct Shared {
     /// The app's settings, here so the encryption engine can tell whether a
     /// message should notify. Shared, so reading them doesn't copy them.
     prefs: Arc<Mutex<Arc<Prefs>>>,
+    /// Who's typing where (`typing.rs`), apart from the store so a typing
+    /// line doesn't build the message list again.
+    typing: Arc<Mutex<typing::Typing>>,
 }
 
 impl Shared {
@@ -475,6 +479,7 @@ impl Core {
             changes: Arc::new(Mutex::new(Changes::default())),
             notices: notices_tx,
             prefs: Arc::new(Mutex::new(Arc::new(prefs.clone()))),
+            typing: Arc::new(Mutex::new(typing::Typing::default())),
         };
         // Only you can open the app's folders.
         vault::private_dir(&paths.config)?;
@@ -1183,6 +1188,7 @@ impl Core {
         thread: Option<&threads::ThreadTarget>,
     ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
+        self.typing_sent(&typing::Place::channel(key, channel_id, thread.map_or("", |t| t.thread_id.as_str())));
         let at = thread.map_or_else(|| channel_id.to_owned(), |t| threads::thread_key(&t.thread_id));
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1424,6 +1430,13 @@ impl Core {
 
     pub async fn send_dm(&self, key: &str, id: &str, content: Content) -> Result<(), DmError> {
         let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
+        match &content {
+            Content::Text { .. } | Content::Voice(_) | Content::Files { .. } => {
+                self.typing_sent(&typing::Place::dm(key, id))
+            }
+            Content::Reply { thread, .. } => self.typing_sent(&typing::Place::channel(key, id, &thread.to_string())),
+            _ => {}
+        }
         // A new message shows dimmed until it's sent, and stays (with why) if it can't be; an edit changes the one already there.
         let (text, thread, in_channel) = match &content {
             Content::Text { text, .. } => (Some(text.clone()), 0, false),

@@ -287,9 +287,10 @@ function accountSections(t: I18n["t"], me: User, where: string, linkedIssuer: st
       label: t("settings.nav.privacy"),
       icon: DatabaseIcon,
       description: t("settings.nav.privacyAbout", { instance: where }),
-      keywords: "export download delete account gdpr activity rich presence game playing status",
+      keywords: "export download delete account gdpr activity rich presence game playing status typing",
       settings: [
         { id: "activity-sharing", label: t("settings.nav.activity"), keywords: "rich presence activity game playing listening discord share" },
+        { id: "typing", label: t("accountsettings.privacy.typing"), keywords: "typing indicator is typing writing dots" },
         { id: "export", label: t("settings.nav.export"), keywords: "export json" },
         { id: "delete-account", label: t("settings.nav.deleteAccount"), keywords: "remove close" },
       ],

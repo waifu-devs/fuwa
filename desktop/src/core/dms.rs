@@ -712,6 +712,8 @@ impl DmEngine {
         match event {
             Payload::ConversationOpened(c) => self.add(c),
             Payload::RecordAdded(record) => {
+                let place = crate::core::typing::Place::dm(&self.key, &record.conversation_id);
+                self.shared.typing_stopped(&place, &record.sender_id);
                 if let Some(mut c) = self.conversation(&record.conversation_id) {
                     c.last_sequence = record.sequence;
                     c.updated_at = record.created_at;
@@ -737,6 +739,10 @@ impl DmEngine {
                 }
             }),
             Payload::PinUpdated(_) => {}
+            // Never kept: shown for a while, apart from the store (`typing.rs`).
+            Payload::Typing(t) => {
+                self.shared.typing_started(crate::core::typing::Place::dm(&self.key, &t.conversation_id), &t.user_id)
+            }
         }
     }
 

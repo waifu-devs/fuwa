@@ -72,6 +72,7 @@ pub const SYNCED: &[&str] = &[
     "customKeybinds",
     "developerMode",
     "shareReports",
+    "sendTyping",
     "inputMode",
     "pttRelease",
     "userVolumes",
@@ -232,6 +233,7 @@ pub fn value(p: &Prefs, name: &str) -> Option<Value> {
         "customKeybinds" => serde_json::to_value(&p.custom_keybinds).ok()?,
         "developerMode" => json!(p.developer_mode),
         "shareReports" => json!(p.share_reports),
+        "sendTyping" => json!(p.send_typing),
         "inputMode" => serde_json::to_value(p.input_mode).ok()?,
         "pttRelease" => json!(p.ptt_release),
         "userVolumes" => serde_json::to_value(&p.user_volumes).ok()?,
@@ -424,6 +426,7 @@ pub fn apply(p: &mut Prefs, name: &str, v: &Value) -> bool {
         }
         "developerMode" => set!(p.developer_mode, flag),
         "shareReports" => set!(p.share_reports, flag),
+        "sendTyping" => set!(p.send_typing, flag),
         "inputMode" => set!(p.input_mode, serde_json::from_value::<InputMode>(v.clone()).ok()),
         "pttRelease" => set!(p.ptt_release, number(v, 0.0, 2000.0).map(|n| n as u16)),
         "userVolumes" => {
@@ -586,6 +589,7 @@ mod tests {
             custom_keybinds: vec![CustomKeybind { id: "a1".into(), action: "search".into(), combo: "Alt+S".into() }],
             developer_mode: true,
             share_reports: false,
+            send_typing: false,
             input_mode: InputMode::Ptt,
             ptt_release: 500,
             user_volumes: [("fuwa.chat/01ABC".to_owned(), 150)].into(),

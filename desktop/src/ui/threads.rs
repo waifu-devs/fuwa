@@ -118,7 +118,11 @@ impl Threads {
         let subs = vec![
             cx.subscribe_in(&reply, window, |this: &mut FuwaApp, _, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { shift: false, .. } => this.send_reply(window, cx),
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                InputEvent::Change => {
+                    this.typed_in_thread(cx);
+                    cx.notify()
+                }
+                InputEvent::Focus | InputEvent::Blur => cx.notify(),
                 _ => {}
             }),
             cx.subscribe_in(&query, window, |this: &mut FuwaApp, _, event: &InputEvent, _, cx| {
@@ -862,9 +866,18 @@ impl FuwaApp {
         let ring = motion::follow("thread-reply-ring", if focused { 1.0 } else { 0.0 }, window, cx);
         let ready = motion::follow("thread-reply-send", if typed { 1.0 } else { 0.0 }, window, cx);
         let also = self.threads.also;
+        let typing = self
+            .threads
+            .open
+            .as_ref()
+            .map(|o| (crate::core::typing::Place::channel(&o.key, &o.channel, &o.id), Some(o.server.clone())));
+        let tag = self.threads.open.as_ref().map_or(String::new(), |o| format!("thread|{}", o.id));
+        let typing = self.typing_line(&tag, typing, &p, window, cx);
         // The web's composer card (`.composer`), lit while focused.
         div()
             .flex_none()
+            .relative()
+            .children(typing)
             .px(px(16.0))
             .pb(px(12.0))
             .flex()

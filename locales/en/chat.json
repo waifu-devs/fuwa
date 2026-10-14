@@ -290,5 +290,10 @@
   "secure.dialog.resetAbout": "If the channel's encryption stops working for everyone, start it over. Messages already read stay on the devices that read them.",
   "secure.resetAsk": "Start over for everyone?",
   "secure.reset": "Start encryption over",
-  "threads.jumpTooFar": "That message is too far back to jump to"
+  "threads.jumpTooFar": "That message is too far back to jump to",
+  "typing.one": "{name} is typing",
+  "typing.two": "{first} and {second} are typing",
+  "typing.three": "{first}, {second} and {third} are typing",
+  "typing.several": "Several people are typing",
+  "typing.someone": "Someone"
 }

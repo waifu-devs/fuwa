@@ -107,6 +107,7 @@ pub mod text;
 pub mod theme;
 pub(crate) mod threads;
 mod timestamps;
+mod typing;
 mod update;
 mod user_menu;
 mod video;

@@ -371,7 +371,7 @@ fn account_sections(me: &pb::User, place: &str, issuer: &str) -> Vec<Section> {
             "database",
             t("settings.nav.privacy"),
             at("settings.nav.privacyAbout"),
-            "export download delete account gdpr activity rich presence game playing status",
+            "export download delete account gdpr activity rich presence game playing status typing",
         )
         .with(vec![
             (
@@ -379,6 +379,7 @@ fn account_sections(me: &pb::User, place: &str, issuer: &str) -> Vec<Section> {
                 t("settings.nav.activity"),
                 "rich presence activity game playing listening discord share",
             ),
+            ("typing-indicator", t("accountsettings.privacy.typing"), "typing indicator writing dots"),
             ("export", t("settings.nav.export"), "export json"),
             ("delete-account", t("settings.nav.deleteAccount"), "remove close"),
         ]),

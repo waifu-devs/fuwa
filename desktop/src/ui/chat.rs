@@ -1499,11 +1499,21 @@ impl FuwaApp {
         if let Some(gate) = &gate {
             self.tick_gate(gate, cx);
         }
+        let typing = match self.target() {
+            Some(Target::Channel { key, server, channel }) => {
+                Some((crate::core::typing::Place::channel(&key, &channel, ""), Some(server)))
+            }
+            _ => None,
+        };
+        // Under the pickers, which open over it.
+        let tag = typing.as_ref().map_or(String::new(), |(place, _)| place.room.clone());
+        let typing = self.typing_line(&tag, typing, &p, window, cx);
         div()
             .flex_none()
             .relative()
             .px(px(16.0))
             .pb(px(12.0))
+            .children(typing)
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, None, &p, cx)))
             .when_some(mentions_going, |el, (picker, t)| el.child(self.picker_list(picker, Some(t), &p, cx)))
             .children(commands_list)

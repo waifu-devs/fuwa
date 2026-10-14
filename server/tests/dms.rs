@@ -885,3 +885,87 @@ async fn pins_name_records_and_never_their_content() {
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
 }
+
+/// Typing in a conversation reaches the others watching it, once per burst,
+/// and never someone who blocked the typist; outsiders can't say they type.
+#[tokio::test]
+async fn typing_reaches_the_others_but_never_who_blocked_you() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = Channel::from_shared(format!("http://{}", instance.addr)).unwrap().connect().await.unwrap();
+    let mut dms = Dms::new(channel.clone());
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    let juan = sign_up(&channel, "juan").await;
+    let mika = sign_up(&channel, "mika").await;
+    let rin = sign_up(&channel, "rin").await;
+    let sid = servers
+        .create_server(authed(
+            &juan.token,
+            pb::CreateServerRequest { name: "Typing".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    servers
+        .join_server(authed(&mika.token, pb::JoinServerRequest { server_id: sid, ..Default::default() }))
+        .await
+        .unwrap();
+    let cid = dms
+        .open_conversation(authed(&juan.token, pb::OpenConversationRequest { user_id: mika.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .conversation
+        .unwrap()
+        .id;
+    let typing =
+        |person: &Person| authed(&person.token, pb::SendConversationTypingRequest { conversation_id: cid.clone() });
+    let mut watch = dms.watch(authed(&mika.token, pb::WatchRequest {})).await.unwrap().into_inner();
+    assert!(watch.next().await.unwrap().unwrap().ready);
+    let mut own = dms.watch(authed(&juan.token, pb::WatchRequest {})).await.unwrap().into_inner();
+    assert!(own.next().await.unwrap().unwrap().ready);
+
+    dms.send_conversation_typing(typing(&juan)).await.unwrap();
+    dms.send_conversation_typing(typing(&juan)).await.unwrap();
+    let event = watch.next().await.unwrap().unwrap().event.unwrap();
+    let Some(Payload::Typing(typing_now)) = event.payload else { panic!("{event:?}") };
+    assert_eq!((typing_now.conversation_id.as_str(), typing_now.user_id.as_str()), (cid.as_str(), juan.id.as_str()));
+    assert!(no_typing(&mut watch).await, "the second signal was folded into the first");
+    assert!(no_typing(&mut own).await, "the typist isn't told of their own typing");
+
+    // Someone outside the conversation can't type in it.
+    let outsider = dms.send_conversation_typing(typing(&rin)).await.unwrap_err();
+    assert_eq!(outsider.code(), Code::NotFound);
+
+    // Once mika blocks juan, juan's typing never reaches mika, and juan isn't told.
+    pb::friend_service_client::FriendServiceClient::new(channel.clone())
+        .block_user(authed(&mika.token, pb::BlockUserRequest { user_id: juan.id.clone() }))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(3_100)).await;
+    dms.send_conversation_typing(typing(&juan)).await.unwrap();
+    assert!(no_typing(&mut watch).await, "blocked");
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+/// Whether half a second goes by without a typing event on `stream`.
+async fn no_typing(stream: &mut tonic::Streaming<pb::WatchResponse>) -> bool {
+    let wait = tokio::time::sleep(std::time::Duration::from_millis(500));
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            _ = &mut wait => return true,
+            next = stream.next() => match next {
+                Some(Ok(pb::WatchResponse { event: Some(pb::DirectMessageEvent { payload: Some(Payload::Typing(_)) }), .. })) => {
+                    return false;
+                }
+                Some(Ok(_)) => continue,
+                _ => return true,
+            },
+        }
+    }
+}

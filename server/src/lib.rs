@@ -46,6 +46,7 @@ pub mod sso;
 pub mod streams;
 pub mod telemetry;
 pub mod twofactor;
+pub mod typing;
 pub mod voice;
 pub mod web;
 pub mod webhooks;

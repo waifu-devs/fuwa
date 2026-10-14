@@ -43,6 +43,7 @@ export const SYNCED = [
   "customKeybinds",
   "developerMode",
   "shareReports",
+  "sendTyping",
   "inputMode",
   "pttRelease",
   "userVolumes",

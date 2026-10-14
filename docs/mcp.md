@@ -87,6 +87,7 @@ can't do in the apps' API, it can't do here.
 | `send_message`, `update_message`, `delete_message` | `MessageService.SendMessage`, `UpdateMessage`, `DeleteMessage` |
 | `pin_message`, `list_pins` | `MessageService.PinMessage`, `ListPins` |
 | `react`, `list_reactors` | `MessageService.React`, `ListReactors` |
+| `send_typing` | `MessageService.SendTyping` ([docs/typing.md](typing.md)) |
 | `set_live_tile`, `end_live_tile`, `list_live_tiles` | `LiveTileService.SetLiveTile`, `EndLiveTile`, `ListLiveTiles` ([docs/live-tiles.md](live-tiles.md)) |
 | `list_events` | `EventService.ListEvents` (a cursor, see below) |
 | `list_members` | `ServerService.ListMembers`, a page at a time |

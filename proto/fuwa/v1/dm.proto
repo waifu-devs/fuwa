@@ -78,6 +78,13 @@ service DirectMessageService {
   // listening; anything from before then, read with ListConversations and
   // ListRecords. A response with nothing set is a heartbeat.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Says the caller is typing in a conversation (docs/typing.md): the
+  // others watching it get `typing` and show them as typing for 10 seconds,
+  // or until a record from them arrives. At most one per person and
+  // conversation every 3 seconds goes out; the rest are dropped. It carries
+  // nothing of what's typed, and someone who blocked the caller never gets
+  // it.
+  rpc SendConversationTyping(SendConversationTypingRequest) returns (SendConversationTypingResponse);
 
   // Message backup: what the account's devices read here and in secure
   // channels, encrypted on the device with a recovery key the instance never
@@ -356,8 +363,22 @@ message DirectMessageEvent {
     DmCall call_updated = 4;
     // A record was pinned or unpinned.
     DmPinUpdated pin_updated = 5;
+    // Someone else in the conversation is typing (SendConversationTyping).
+    // Not kept: it's only ever sent live.
+    DmTyping typing = 6;
   }
 }
+
+message DmTyping {
+  string conversation_id = 1;
+  string user_id = 2;
+}
+
+message SendConversationTypingRequest {
+  string conversation_id = 1;
+}
+
+message SendConversationTypingResponse {}
 
 // A pinned record in a conversation.
 // A pinned record. The instance keeps which record is pinned and when, never

@@ -48,6 +48,8 @@ import {
   type ThreadTarget,
 } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
+import { sentFrom, typed, type TypingTarget } from "@/fuwa/typing";
+import { TypingLine, useConversationNames, useServerNames } from "@/components/chat/TypingLine";
 import type { FuwaError } from "@/fuwa/errors";
 import { doneDmJump, loadDmPins, pinDm, requestDmJump, useDmJump, useDmPins } from "@/fuwa/pins";
 import { DmPinsButton, PinMark } from "@/components/chat/Pins";
@@ -158,6 +160,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             voice
             files
             dropTo={`@${them}`}
+            typing={{ conversationId: conversation.id }}
           />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
@@ -1132,6 +1135,8 @@ type ComposerProps = {
   action?: ReactNode;
   /** In a secure channel's thread: the thread's message, and the channel's name for "Also send to #channel". */
   thread?: { parent: number; channelName: string };
+  /** Where typing here is shown and said: the conversation, or the secure channel (and thread). */
+  typing: TypingTarget;
 };
 
 /**
@@ -1157,6 +1162,7 @@ function ComposerBox({
   voice = false,
   files = false,
   dropTo = "",
+  typing,
 }: ComposerProps & { draft: string }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const stuck = blockedText(useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? ""));
@@ -1169,6 +1175,9 @@ function ComposerBox({
   const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);
   const { t } = useI18n();
+  const serverNames = useServerNames(instanceKey, "serverId" in typing ? typing.serverId : "");
+  const conversationNames = useConversationNames(instanceKey, id);
+  const nameOf = "conversationId" in typing ? conversationNames : serverNames;
 
   useEffect(() => {
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
@@ -1195,6 +1204,7 @@ function ComposerBox({
     if (!ready) return;
     setText("");
     drafts.delete(draft);
+    sentFrom(instanceKey, typing);
     setError(null);
     void seal.start({ rotate: [0, -16, 10, 0], scale: [1, 1.3, 1], transition: { duration: 0.45 } });
     void plane.start({
@@ -1224,6 +1234,7 @@ function ComposerBox({
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+      <TypingLine instanceKey={instanceKey} target={typing} nameOf={nameOf} />
       {files && !blocked && <ComposerFiles draft={draft} picked={picked} dropTo={status === "ready" ? dropTo : ""} />}
       <AnimatePresence mode="popLayout" initial={false}>
         {blocked ? (
@@ -1255,7 +1266,11 @@ function ComposerBox({
               data-composer
               rows={1}
               value={text}
-              onChange={(e) => write(e.target.value)}
+              onChange={(e) => {
+                write(e.target.value);
+                // Only typing says so, never a draft coming back.
+                if (e.target.value) typed(instanceKey, typing);
+              }}
               onKeyDown={onKeyDown}
               placeholder={placeholder}
               aria-label={placeholder}

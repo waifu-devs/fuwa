@@ -467,6 +467,7 @@ impl FuwaApp {
                     InputEvent::Change => {
                         this.update_picker(cx);
                         this.update_commands(cx);
+                        this.typed_in_composer(cx);
                         cx.notify()
                     }
                     InputEvent::Focus | InputEvent::Blur => cx.notify(),
