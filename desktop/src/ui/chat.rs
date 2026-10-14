@@ -1380,6 +1380,11 @@ impl FuwaApp {
         } else if recording {
             self.recording_bar(&p, cx)
         } else {
+            // Pasted pictures and files join the ones picked with the paperclip.
+            let mut box_ = Textarea::new(&self.composer).appearance(false).text_size(px(15.2)).line_height(px(24.0));
+            if self.can_attach() {
+                box_ = box_.on_paste(self.paste_to_channel(cx));
+            }
             // The editor keeps 10px of its own on the left and 8px above and below its
             // 24px lines; the web's box has 6px above and below and nothing at the side.
             div()
@@ -1392,7 +1397,7 @@ impl FuwaApp {
                     gpui_kit::MouseButton::Right,
                     self.right_click(crate::ui::context_menu::MenuOf::Composer, cx),
                 )
-                .child(Textarea::new(&self.composer).appearance(false).text_size(px(15.2)).line_height(px(24.0)))
+                .child(box_)
                 .into_any_element()
         };
         let hint = self.composer_hint(&p);

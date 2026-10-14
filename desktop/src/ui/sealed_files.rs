@@ -537,31 +537,26 @@ impl FuwaApp {
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let read = cx
-                .background_executor()
-                .spawn(async move {
-                    paths
-                        .into_iter()
-                        .filter_map(|path| {
-                            let bytes = std::fs::read(&path).ok()?;
-                            let name = path.file_name()?.to_string_lossy().into_owned();
-                            let content_type = attachments::content_type_of(&name).to_owned();
-                            Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await;
-            let _ = this.update(cx, |_, cx| {
-                PICKED.with(|p| {
-                    let mut p = p.borrow_mut();
-                    let list = p.entry(place.clone()).or_default();
-                    list.extend(read);
-                    list.truncate(sealed_files::MAX_FILES);
-                });
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.add_sealed_files(place, paths, cx));
         })
         .detach();
+    }
+
+    /// Adds files to the next message in `place`, up to what one can carry (the
+    /// web's `pickFiles`): any that can't go are left out, and why is said.
+    pub(crate) fn add_picked(&mut self, place: String, read: Vec<Outgoing>, cx: &mut Context<Self>) {
+        if read.is_empty() {
+            return;
+        }
+        let mut next = picked(&place);
+        next.extend(read);
+        if let Some(why) = sealed_files::cant_send(&next) {
+            self.toast("paperclip", why, String::new(), None, None, cx);
+        }
+        next.retain(|f| sealed_files::cant_send(std::slice::from_ref(f)).is_none());
+        next.truncate(sealed_files::MAX_FILES);
+        PICKED.with(|p| p.borrow_mut().insert(place, next));
+        cx.notify();
     }
 
     /// The files waiting to go (the web's `PickedTray`), each with a way to take it out.

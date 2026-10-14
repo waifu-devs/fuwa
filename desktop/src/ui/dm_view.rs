@@ -1005,6 +1005,16 @@ impl FuwaApp {
                     action: None,
                     files: true,
                     thread: None,
+                    drop_to: Some(t_with(
+                        "chat.files.dropToPerson",
+                        &[(
+                            "name",
+                            Arg::Str(&format!(
+                                "@{}",
+                                partner.as_ref().map_or_else(|| t("dms-calls.dm.view.untitled"), user_name)
+                            )),
+                        )],
+                    )),
                 },
                 window,
                 cx,
@@ -1275,6 +1285,8 @@ pub(crate) struct Composer {
     pub files: bool,
     /// In a secure channel's thread: the thread's message, and the channel's name for "Also send to #channel".
     pub thread: Option<(i64, String)>,
+    /// Where files dropped on the window go, said over it ("Drop to send in …"), if they come here.
+    pub drop_to: Option<String>,
 }
 
 impl Composer {
@@ -1559,6 +1571,11 @@ impl FuwaApp {
         let field: AnyElement = if recording {
             self.recording_bar(&p, cx)
         } else {
+            // Pasted pictures and files join the ones picked, sealed on this device like them.
+            let mut box_ = Textarea::new(&input).appearance(false).text_size(px(15.2)).line_height(px(24.0));
+            if c.files && ready {
+                box_ = box_.on_paste(self.paste_to_sealed(place.clone(), cx));
+            }
             div()
                 .id("composer-field")
                 .flex_1()
@@ -1569,7 +1586,7 @@ impl FuwaApp {
                     gpui_kit::MouseButton::Right,
                     self.right_click(crate::ui::context_menu::MenuOf::Composer, cx),
                 )
-                .child(Textarea::new(&input).appearance(false).text_size(px(15.2)).line_height(px(24.0)))
+                .child(box_)
                 .into_any_element()
         };
         let lock = div()
@@ -1675,6 +1692,22 @@ impl FuwaApp {
             _ => None,
         };
         let typing = self.typing_line(&place, typing, &p, window, cx);
+        // Files dragged over the window go with the next message here, as on the web: not
+        // from a thread's box, whose channel's box takes them.
+        let drop = match &c.drop_to {
+            Some(heading) if c.files && ready && !recording && self.dialog.is_none() => {
+                let place = place.clone();
+                Some(self.drop_sheet(
+                    heading.clone(),
+                    t("dms-calls.dm.composer.drop"),
+                    &p,
+                    window,
+                    cx,
+                    move |this, paths, cx| this.add_sealed_files(place.clone(), paths, cx),
+                ))
+            }
+            _ => None,
+        };
         div()
             .flex_none()
             .relative()
@@ -1684,6 +1717,7 @@ impl FuwaApp {
             .children(time_panel)
             .child(self.shaken(card))
             .child(footer)
+            .children(drop)
             .into_any_element()
     }
 }

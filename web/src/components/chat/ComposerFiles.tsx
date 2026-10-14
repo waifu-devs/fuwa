@@ -9,6 +9,7 @@ import { instanceHas } from "@/lib/compat";
 import { SPRING } from "@/lib/motion";
 import { shortName } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
+import { filesIn } from "@/lib/pasted";
 import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
@@ -231,7 +232,7 @@ export function DropOverlay({
       setOver(false);
       if (e.defaultPrevented || !files(e)) return;
       e.preventDefault();
-      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      const dropped = filesIn(e.dataTransfer);
       if (onFiles) onFiles(dropped);
       else if (where) addFiles(where.instanceKey, where.serverId, where.channelId, dropped);
     };
