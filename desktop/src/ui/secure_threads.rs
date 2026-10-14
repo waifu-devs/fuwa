@@ -12,7 +12,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::core::dms::{Content, DmPending, DmStatus};
@@ -129,7 +129,7 @@ impl FuwaApp {
         let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
         let who = |id: &str| Who {
             name: i.display_name(Some(server), id),
-            color: i.name_color(server, id).map(|c| rgb(c).into()),
+            color: i.name_color(server, id).map(|c| crate::ui::theme::role(c).into()),
             user: i.users.get(id).cloned(),
         };
         let items = i.dms.items.get(channel).map(|v| v.as_slice()).unwrap_or_default();
@@ -408,7 +408,7 @@ impl FuwaApp {
             let message = items.iter().find(|m| m.seq == parent && m.kind == ItemKind::Text && !m.deleted).cloned();
             let author = message.as_ref().map(|m| Who {
                 name: i.display_name(Some(server), &m.sender_id),
-                color: i.name_color(server, &m.sender_id).map(|c| rgb(c).into()),
+                color: i.name_color(server, &m.sender_id).map(|c| crate::ui::theme::role(c).into()),
                 user: i.users.get(&m.sender_id).cloned(),
             });
             let thread = org.threads.get(&parent).cloned();

@@ -364,7 +364,7 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
             match (&chip.kind[..], chip.color) {
                 ("role", _) if chip.deleted => (p.muted_foreground.into(), p.muted.into(), None),
                 ("role", Some(c)) => {
-                    let c = gpui_kit::rgb(c);
+                    let c = crate::ui::theme::role(c);
                     (c.into(), alpha(c, if chip.mine { 0.24 } else { 0.15 }), chip.mine.then(|| alpha(c, 0.4)))
                 }
                 ("user", _) if chip.mine => (p.primary.into(), alpha(p.primary, 0.25), Some(alpha(p.primary, 0.4))),

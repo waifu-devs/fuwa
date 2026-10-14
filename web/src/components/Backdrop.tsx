@@ -6,7 +6,7 @@ import { CUSTOM, hasBackdrop, isShader, type Backdrop, type Effect, type ShaderE
 import { shaderId, type CustomShader } from "@/lib/effects/custom";
 import type { Colors, Painter, Source } from "@/lib/effects/gpu";
 import { useShaderStatus } from "@/lib/effects/status";
-import { activeBackdrop, activeTheme, reduceMotion, usePrefs } from "@/lib/prefs";
+import { activeBackdrop, shownTheme, reduceMotion, usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import type { ThemeTokens } from "@/lib/themes";
 import { useUi } from "@/lib/ui";
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
  */
 export function AppBackdrop() {
   const backdrop = usePrefs(activeBackdrop);
-  const tokens = usePrefs((p) => activeTheme(p).variant.tokens);
+  const tokens = usePrefs((p) => shownTheme(p).variant.tokens);
   const still = usePrefs(reduceMotion);
   const covered = useUi((u) => u.settings !== null);
   const visible = usePageVisible();

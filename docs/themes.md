@@ -47,6 +47,49 @@ channel sidebar `mix(card, background, 0.55)`, the chat `background`. A theme
 is dark when its background's luminance (`0.2126 r + 0.7152 g + 0.0722 b`,
 0 to 255) is under 128.
 
+## Accessibility
+
+Settings, Accessibility changes how any theme is painted, never the theme
+itself (exports and previews keep its own colors). The math is
+`web/src/lib/accessibility.ts`, and the desktop's `core/accessibility.rs`
+does the same; each app's tests pin the same outputs.
+
+**High contrast** (`highContrast`) paints each token through
+`highContrastTokens`. `ensure(c, against, r)` keeps `c` if its WCAG
+contrast with every color in `against` is at least `r`; otherwise it mixes
+it toward black or white, whichever stands out more against them, by the
+least amount (16 halvings) that reaches `r`, or gives black or white if
+nothing does. A theme is dark here when its background's WCAG luminance is
+under its foreground's.
+
+```
+background, card, popover = mix(black (dark) or white (light), token, 0.5)
+foreground = ensure(foreground, [background, card], 12)
+card-foreground = ensure(card-foreground, [card], 12); popover-foreground likewise
+primary = ensure(primary, [background, card], 4.5)
+primary-foreground = ensure(primary-foreground, [primary], 7)
+secondary-foreground = ensure(secondary-foreground, [secondary], 7)
+muted-foreground = ensure(muted-foreground, [background, card, muted], 7)
+accent = ensure(accent, [background], 1.5); accent-foreground = ensure(it, [accent], 7)
+destructive = ensure(destructive, [background, card], 4.5)
+border, input, ring = ensure(each, [background, card], 3)
+secondary, muted unchanged
+```
+
+The surfaces are then made from these as usual, the backdrop's `panels`
+counts as 100 (solid), and the web app draws focus rings thicker.
+
+**Color blindness** (`colorVision`: `off`, `protanopia`, `deuteranopia`,
+`tritanopia`, with `colorVisionStrength`, 0 to 100 %) corrects colors by
+daltonizing, in sRGB: `M = I + s · SHIFT · (I − SEEN)`, where `SEEN` is how
+that kind sees colors (Machado, Oliveira and Fernandes 2009, severity 1),
+`SHIFT` moves what's lost into channels that can be seen (protan and deutan
+`[[0,0,0],[0.7,1,0],[0.7,0,1]]`, tritan `[[1,0,0.7],[0,1,0.7],[0,0,0]]`)
+and `s` is the strength. The web app puts `M` on the whole page (an SVG
+`feColorMatrix`, after the Saturation filter), so pictures change too; the
+desktop applies it to its palette and to role colors and name tints, after
+saturation.
+
 ## Built-in themes
 
 The same five as waifu.dev (`packages/domain/src/themes.ts` in

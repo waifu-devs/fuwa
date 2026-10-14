@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePageVisible } from "@/hooks/use-page-visible";
 import type { Colors, Painter } from "@/lib/effects/gpu";
 import type { EffectShader as Shader } from "@/lib/effects/profile";
-import { activeTheme, usePrefs } from "@/lib/prefs";
+import { shownTheme, usePrefs } from "@/lib/prefs";
 import type { ThemeTokens } from "@/lib/themes";
 
 /**
@@ -27,7 +27,7 @@ export function EffectShader({ shader, color, still }: { shader: Shader; color?:
   const [out, setOut] = useState(false);
   const [seen, setSeen] = useState(false);
   const visible = usePageVisible();
-  const tokens = usePrefs((p) => activeTheme(p).variant.tokens);
+  const tokens = usePrefs((p) => shownTheme(p).variant.tokens);
   const colors = cardColors(tokens, color);
   const options = { source: { custom: shader.code }, intensity: shader.intensity * 100, speed: shader.speed * 100, colors, still };
   const latest = useRef(options);

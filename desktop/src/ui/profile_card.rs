@@ -1305,7 +1305,8 @@ fn chip_changes(
 }
 
 pub(crate) fn role_dot(role: &pb::Role, p: &Palette) -> gpui_kit::Div {
-    let color: Hsla = role.color.map(|c| rgb(c as u32).into()).unwrap_or(alpha(p.muted_foreground, 0.5));
+    let color: Hsla =
+        role.color.map(|c| crate::ui::theme::role(c as u32).into()).unwrap_or(alpha(p.muted_foreground, 0.5));
     div().flex_none().size(px(12.0)).rounded_full().bg(color)
 }
 

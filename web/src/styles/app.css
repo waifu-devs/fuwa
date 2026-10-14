@@ -761,8 +761,11 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 @keyframes emoji-in { from { opacity: 0; transform: scale(0.6) translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .emoji-cell > * { transition: none; } .emoji-cell-in { animation: none; } }
 
-/* Accessibility: calmer colors, links always underlined, motion off everywhere. */
+/* Accessibility: calmer colors, colors corrected for color blindness (lib/accessibility.ts), high contrast, links always underlined, motion off everywhere. */
 :root[data-desaturated] { filter: saturate(var(--saturation)); }
+:root[data-color-vision] { filter: url(#fuwa-color-vision); }
+:root[data-desaturated][data-color-vision] { filter: saturate(var(--saturation)) url(#fuwa-color-vision); }
+:root[data-high-contrast] :focus-visible { outline: 3px solid var(--ring) !important; outline-offset: 2px; }
 :root[data-underline-links] :where(.markdown, .markdown-inline) a { text-decoration-color: currentColor; }
 :root[data-reduce-motion] *,
 :root[data-reduce-motion] *::before,

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use gpui_kit::component::{Theme as KitTheme, ThemeMode};
 use gpui_kit::{App, Hsla, Pixels, Rgba, SharedString, WindowAppearance, px, rgb};
 
+use crate::core::accessibility::{self, Matrix};
 use crate::core::config::{FontPick, MotionChoice, Prefs};
 use crate::core::themes::{self, Backdrop, Theme};
 
@@ -306,6 +307,73 @@ impl Palette {
     }
 }
 
+impl Palette {
+    /// The palette through the color blindness correction (`core::accessibility`).
+    pub fn seen(mut self, m: &Matrix) -> Self {
+        if *m == accessibility::color_vision_matrix(accessibility::ColorVision::Off, 1.0) {
+            return self;
+        }
+        let rgb = |c: Rgba| -> Rgba {
+            let [r, g, b] = accessibility::apply(m, [c.r, c.g, c.b]);
+            Rgba { r, g, b, a: c.a }
+        };
+        for c in [
+            &mut self.background,
+            &mut self.foreground,
+            &mut self.card,
+            &mut self.card_foreground,
+            &mut self.primary,
+            &mut self.primary_foreground,
+            &mut self.secondary,
+            &mut self.muted,
+            &mut self.muted_foreground,
+            &mut self.accent,
+            &mut self.destructive,
+            &mut self.border,
+            &mut self.rail,
+            &mut self.sidebar,
+            &mut self.glow,
+            &mut self.success,
+        ] {
+            *c = rgb(*c);
+        }
+        let hsla = |h: Hsla| -> Hsla { rgb(h.to_rgb()).into() };
+        self.chat_surface = hsla(self.chat_surface);
+        self.side_surface = hsla(self.side_surface);
+        self.rail_surface = hsla(self.rail_surface);
+        self
+    }
+
+    fn success_hex(&self) -> u32 {
+        let ch = |v: f32| (v * 255.0).round() as u32;
+        (ch(self.success.r) << 16) | (ch(self.success.g) << 8) | ch(self.success.b)
+    }
+}
+
+/// How colors that aren't the theme's (role colors, tints) are shown: the
+/// Saturation and Color blindness settings, as the palette has them.
+struct Shown {
+    saturation: f32,
+    vision: Matrix,
+}
+
+static SHOWN: parking_lot::RwLock<Shown> =
+    parking_lot::const_rwlock(Shown { saturation: 1.0, vision: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] });
+
+/// A color from a server or a person (a role's, a name's tint) as the
+/// settings show it, like the web's filter over the whole page.
+pub fn shown(c: Rgba) -> Rgba {
+    let s = SHOWN.read();
+    let c = if s.saturation >= 0.999 { c } else { saturate(c, s.saturation) };
+    let [r, g, b] = accessibility::apply(&s.vision, [c.r, c.g, c.b]);
+    Rgba { r, g, b, a: c.a }
+}
+
+/// A role's color (`0xrrggbb`) as the settings show it.
+pub fn role(c: u32) -> Rgba {
+    shown(rgb(c))
+}
+
 /// The palette in use, kept as a global so views can read it.
 pub struct Current(pub Palette);
 
@@ -350,9 +418,16 @@ pub fn backdrop(cx: &App) -> std::sync::Arc<Backdrop> {
 /// Applies the app's settings: the theme (or the system's light or dark
 /// pick), its backdrop, the font, the text size, and whether things move.
 pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
-    let theme = prefs.active_theme(system_dark(appearance));
+    let theme = prefs.shown_theme(system_dark(appearance));
     let backdrop = prefs.active_backdrop(&theme);
-    let p = Palette::of(&theme).over(&backdrop).saturated(f32::from(prefs.saturation) / 100.0);
+    let saturation = f32::from(prefs.saturation) / 100.0;
+    let vision = accessibility::color_vision_matrix(prefs.color_vision, f32::from(prefs.color_vision_strength) / 100.0);
+    *SHOWN.write() = Shown { saturation, vision };
+    let mut p = Palette::of(&theme);
+    if prefs.high_contrast {
+        p.success = rgba(accessibility::ensure_contrast(p.success_hex(), &[theme.tokens.get("background")], 4.5));
+    }
+    let p = p.over(&backdrop).saturated(saturation).seen(&vision);
     let dark = p.dark;
     CHAT_FONT.store(u32::from(prefs.chat_font_size.clamp(12, 20)), Ordering::Relaxed);
     ROLE_NAMES.store(prefs.role_colors == crate::core::config::RoleColors::Names, Ordering::Relaxed);

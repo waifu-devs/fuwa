@@ -41,7 +41,7 @@
   "nav.backdrop": "Fondo",
   "nav.backdropAbout": "Una imagen y un efecto detrás de la app, en este dispositivo.",
   "nav.accessibility": "Accesibilidad",
-  "nav.accessibilityAbout": "Movimiento, color y enlaces, para todas las instancias en este dispositivo.",
+  "nav.accessibilityAbout": "Movimiento, color, contraste y enlaces, para todas las instancias en este dispositivo.",
   "nav.reduceMotion": "Reducir el movimiento",
   "nav.underlineLinks": "Subrayar los enlaces",
   "nav.chat": "Chat",

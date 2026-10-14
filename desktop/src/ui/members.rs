@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnimationExt as _, Context, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::core::i18n::t;
@@ -455,7 +455,9 @@ fn heading(
                 .line_height(px(16.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.muted_foreground)
-                .when_some(color, |el, c| el.child(div().flex_none().size(px(8.0)).rounded_full().bg(rgb(c))))
+                .when_some(color, |el, c| {
+                    el.child(div().flex_none().size(px(8.0)).rounded_full().bg(crate::ui::theme::role(c)))
+                })
                 .child(label),
         )
         .into_any_element()
@@ -485,7 +487,7 @@ fn member_row(
     let color: Hsla = row
         .color
         .filter(|_| crate::ui::theme::role_names())
-        .map(|c| rgb(c).into())
+        .map(|c| crate::ui::theme::role(c).into())
         .unwrap_or(crate::ui::widgets::name_tint(&row.user.id, p));
     let beside = row.color.filter(|_| crate::ui::theme::role_beside());
     let uid = user.id.clone();
@@ -577,7 +579,7 @@ fn member_row(
                                     .rounded_full()
                                     .border_2()
                                     .border_color(p.background)
-                                    .bg(rgb(c)),
+                                    .bg(crate::ui::theme::role(c)),
                             )
                         })
                         .when(row.owner, |el| {

@@ -147,6 +147,12 @@ fn app_sections() -> Vec<Section> {
         .with(vec![
             ("reduce-motion", t("settings.nav.reduceMotion"), "animation"),
             ("saturation", t("appsettings.accessibility.saturation"), "color grey"),
+            (
+                "color-vision",
+                t("appsettings.accessibility.colorVision"),
+                "colorblind colourblind daltonism protanopia deuteranopia tritanopia filter",
+            ),
+            ("high-contrast", t("appsettings.accessibility.contrastToggle"), "contrast legibility focus"),
             ("role-colors", t("appsettings.accessibility.roleColors"), "names colour tint dot"),
             ("others-effects", t("appsettings.accessibility.effects"), "animation sparkles others cards"),
             ("underline-links", t("settings.nav.underlineLinks"), ""),
