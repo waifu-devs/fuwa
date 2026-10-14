@@ -126,7 +126,8 @@ impl FuwaApp {
                         t("chattools.reactions.add"),
                         "face-slightly-smiling-plus",
                         run(move |this, window, cx| {
-                            let at = window.mouse_position();
+                            // Out of the spot right-clicked, as the + under the message does.
+                            let at = this.picked_from.unwrap_or_else(|| window.mouse_position());
                             this.open_react_picker(id.clone(), standard_only, at, window, cx);
                         }),
                     ));

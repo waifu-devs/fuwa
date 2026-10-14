@@ -372,6 +372,8 @@ pub struct FuwaApp {
     pub menu: Option<Menu>,
     /// The open right-click menu.
     pub(crate) context: Option<crate::ui::context_menu::ContextMenu>,
+    /// While a menu item runs, where its menu was opened: what it acts on is there, not under the pointer.
+    pub(crate) picked_from: Option<gpui_kit::Point<gpui_kit::Pixels>>,
     /// What the pointer is over that has a right-click menu, for Shift+F10 and the Menu key.
     pub(crate) hover_target: Option<crate::ui::context_menu::MenuOf>,
     /// A picture right-clicked in a message, as (message, which of its files), for its menu.
@@ -740,6 +742,7 @@ impl FuwaApp {
             picked_roles: Vec::new(),
             menu: None,
             context: None,
+            picked_from: None,
             hover_target: None,
             right_picture: None,
             welcome: None,

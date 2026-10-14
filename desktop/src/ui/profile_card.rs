@@ -81,17 +81,19 @@ pub fn mark(user_id: &str, side: Side) -> impl IntoElement {
     canvas(move |bounds, _, _| remember(&user, side, bounds), |_, _, _, _| {}).absolute().inset_0()
 }
 
-/// Where the card for `user` goes: beside the opener under the pointer, else
-/// the one drawn last, else the pointer itself.
-fn anchor_for(user: &str, mouse: Point<Pixels>) -> (Bounds<Pixels>, Side) {
+/// Where the card for `user` goes: beside their opener at `at` (the pointer,
+/// or where a menu was opened), else by `at` itself. Never by one of their
+/// openers somewhere else: a mention or a voter has no mark of its own, and
+/// the card went beside their name in the member list or a message far away.
+fn anchor_for(user: &str, at: Point<Pixels>) -> (Bounds<Pixels>, Side) {
     PLACES.with(|places| {
         let (_, marks) = &*places.borrow();
-        let mine = marks.iter().filter(|m| m.user == user);
-        let under = mine.clone().filter(|m| m.bounds.contains(&mouse)).max_by_key(|m| m.n);
-        under
-            .or_else(|| mine.max_by_key(|m| m.n))
+        marks
+            .iter()
+            .filter(|m| m.user == user && m.bounds.contains(&at))
+            .max_by_key(|m| m.n)
             .map(|m| (m.bounds, m.side))
-            .unwrap_or((Bounds::new(mouse, gpui_kit::size(px(1.0), px(1.0))), Side::Right))
+            .unwrap_or((Bounds::new(at, gpui_kit::size(px(1.0), px(1.0))), Side::Right))
     })
 }
 
@@ -240,7 +242,8 @@ impl FuwaApp {
         if self.people.closed.take().is_some_and(|(u, at)| u == user_id && at.elapsed() < Duration::from_millis(300)) {
             return false;
         }
-        self.people.anchor = Some(anchor_for(user_id, window.mouse_position()));
+        let at = self.picked_from.unwrap_or_else(|| window.mouse_position());
+        self.people.anchor = Some(anchor_for(user_id, at));
         self.people.opened = Instant::now();
         self.people.roles_menu = None;
         true
@@ -1321,8 +1324,12 @@ mod tests {
         remember("u1", Side::Left, bounds(10.0, 10.0));
         remember("u1", Side::Right, bounds(10.0, 200.0));
         assert_eq!(anchor_for("u1", at(20.0, 15.0)), (bounds(10.0, 10.0), Side::Left));
-        // Nothing under the pointer: the one drawn last.
-        assert_eq!(anchor_for("u1", at(600.0, 600.0)), (bounds(10.0, 200.0), Side::Right));
+        // Nothing of theirs under the pointer (a mention, a voter): by the pointer, not by
+        // their name somewhere else.
+        assert_eq!(
+            anchor_for("u1", at(600.0, 600.0)),
+            (Bounds::new(at(600.0, 600.0), gpui_kit::size(px(1.0), px(1.0))), Side::Right)
+        );
         // Someone never drawn: the pointer.
         assert_eq!(anchor_for("nobody", at(5.0, 6.0)).0.origin, at(5.0, 6.0));
     }

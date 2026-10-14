@@ -431,6 +431,7 @@ impl FuwaApp {
             cx.notify();
             return;
         }
+        self.picked_from = self.context.as_ref().map(|m| m.at);
         match item.kind {
             Kind::Act(f) => {
                 self.context = None;
@@ -444,6 +445,7 @@ impl FuwaApp {
             }
             Kind::Sub(_) | Kind::Emojis(_) => {}
         }
+        self.picked_from = None;
         cx.notify();
     }
 
