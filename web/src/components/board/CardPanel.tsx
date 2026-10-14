@@ -10,7 +10,7 @@ import { Attachments, FileBadge } from "@/components/chat/Attachments";
 import { AttachButton, StagedTray } from "@/components/chat/ComposerFiles";
 import { Composer } from "@/components/chat/Composer";
 import { MessageBody, MessageList, type MessageListHandle } from "@/components/chat/MessageList";
-import { takeFiles, useStaged } from "@/components/chat/staged";
+import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SwapText } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { T, useI18n } from "@/i18n/react";
 import { colorCss, ms, TITLE_MAX, ASSIGNEES_MAX } from "@/lib/board";
 import { displayName } from "@/lib/format";
 import { SPRING } from "@/lib/motion";
+import { filesIn } from "@/lib/pasted";
 import { hasIn } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -487,6 +488,25 @@ function BodyEditor({
         onKeyDown={(e) => {
           if (e.key === "Escape") onDone();
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
+        }}
+        // Pasted or dropped pictures and files join the description's, as the paperclip's do.
+        onPaste={(e) => {
+          const pasted = filesIn(e.clipboardData);
+          if (!pasted.length || !canAttach) return;
+          e.preventDefault();
+          addFiles(where.instanceKey, where.serverId, where.channelId, pasted);
+        }}
+        onDragOver={(e) => {
+          if (!canAttach || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          const dropped = filesIn(e.dataTransfer);
+          if (!dropped.length || !canAttach) return;
+          // Taken here, so the comments' drop sheet leaves it be.
+          e.preventDefault();
+          addFiles(where.instanceKey, where.serverId, where.channelId, dropped);
         }}
         aria-label={t("chattools.board.description")}
         placeholder={t("chattools.board.descriptionPlaceholder")}

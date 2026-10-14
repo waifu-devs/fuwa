@@ -155,15 +155,11 @@ pub enum Dialog {
         server: String,
         channel: String,
     },
-    /// A picture from a message, opened large.
+    /// Pictures from a message, opened large (`viewer.rs`), `at` the one shown.
     Picture {
         key: String,
-        url: String,
-        name: String,
-        width: i32,
-        height: i32,
-        /// The file's size in bytes, as its message says.
-        bytes: i64,
+        pictures: Vec<crate::ui::viewer::Viewed>,
+        at: usize,
     },
     /// Who voted for each answer of a public poll.
     PollVoters {

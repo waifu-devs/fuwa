@@ -43,19 +43,26 @@ impl FuwaApp {
                 }
                 if let Some(file) = picture.and_then(|n| m.attachments.get(n)).cloned() {
                     let key = self.target().map(|t| t.key().to_owned()).unwrap_or_default();
-                    let open = Dialog::Picture {
-                        key: key.clone(),
-                        url: file.url.clone(),
-                        name: file.filename.clone(),
-                        width: file.width,
-                        height: file.height,
-                        bytes: file.size,
-                    };
+                    // With the message's other shown pictures, to step through.
+                    let shown: Vec<&pb::Attachment> = m
+                        .attachments
+                        .iter()
+                        .filter(|f| {
+                            crate::core::attachments::look_of(&f.content_type)
+                                == crate::core::attachments::Look::Picture
+                        })
+                        .collect();
+                    let pictures = crate::ui::viewer::viewable_attachments(&shown);
+                    let at = pictures
+                        .iter()
+                        .position(|v| v.source == crate::ui::viewer::Source::Url(file.url.clone()))
+                        .unwrap_or(0);
                     let (url, name, bytes) = (file.url.clone(), file.filename.clone(), file.size);
+                    let open_key = key.clone();
                     target.push(Item::act(
                         "Open picture",
                         "image",
-                        run(move |this, window, cx| this.open_dialog(open.clone(), window, cx)),
+                        run(move |this, window, cx| this.view_pictures(&open_key, pictures.clone(), at, window, cx)),
                     ));
                     target.push(Item::act(
                         "Save picture",
