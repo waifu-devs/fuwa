@@ -89,6 +89,11 @@ pub(crate) enum MenuOf {
     RailAdd,
     /// The message box (the web's composer menu).
     Composer,
+    /// A card on a board, or the board's pickers (`board.rs`).
+    Board {
+        channel: String,
+        menu: crate::ui::board::BoardMenu,
+    },
     /// A reaction chip under a message, for someone who can clear it (`reactions.rs`).
     Reaction {
         msg: String,
@@ -113,6 +118,7 @@ impl MenuOf {
             MenuOf::RailAdd => "rail-add".into(),
             MenuOf::Composer => "composer".into(),
             MenuOf::Reaction { msg, .. } => format!("msg|{msg}"),
+            MenuOf::Board { channel, menu, .. } => format!("board|{channel}|{menu:?}"),
         }
     }
 }

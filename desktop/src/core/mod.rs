@@ -19,6 +19,7 @@ pub mod arrange;
 pub mod attachments;
 pub mod backgrounds;
 pub mod backup;
+pub mod board;
 pub mod calls;
 pub mod commands;
 pub mod compat;

@@ -752,42 +752,7 @@ impl FuwaApp {
                 },
             )));
 
-        // New replies keep the panel at the bottom, as the channel does.
-        let len = self.threads.rows.len();
-        if len != self.threads.drawn {
-            let max = self.threads.scroll.max_offset();
-            let at_end = self.threads.drawn == 0 || f32::from(max.y) + f32::from(self.threads.scroll.offset().y) < 80.0;
-            if at_end {
-                self.threads.scroll.scroll_to_bottom();
-            }
-            self.threads.drawn = len;
-        }
-        let ctx = self.row_ctx(Some(open.id.clone()), cx);
-        let rows = self.threads.rows.clone();
-        let body = div()
-            .id(SharedString::from(format!("thread-rows|{}", open.id)))
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.threads.scroll)
-            .child(
-                // Short threads sit at the bottom, by the box, as the channel's messages do.
-                div()
-                    .min_h_full()
-                    .flex()
-                    .flex_col()
-                    .justify_end()
-                    .pt(px(12.0))
-                    .pb(px(12.0))
-                    .when(loading, |el| el.child(crate::ui::chat_rows::skeleton(2, &p)))
-                    .when(!loading, |el| {
-                        el.children(
-                            rows.iter()
-                                .enumerate()
-                                .map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, window, cx)),
-                        )
-                    }),
-            );
+        let body = self.thread_rows(&open, loading, &p, window, cx);
 
         let reply = self.reply_box(&p, window, cx);
         Some(
@@ -811,8 +776,57 @@ impl FuwaApp {
         )
     }
 
+    /// The open thread's message and replies, scrolling, kept at the bottom as replies come.
+    pub(crate) fn thread_rows(
+        &mut self,
+        open: &Open,
+        loading: bool,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = *p;
+        // New replies keep the panel at the bottom, as the channel does.
+        let len = self.threads.rows.len();
+        if len != self.threads.drawn {
+            let max = self.threads.scroll.max_offset();
+            let at_end = self.threads.drawn == 0 || f32::from(max.y) + f32::from(self.threads.scroll.offset().y) < 80.0;
+            if at_end {
+                self.threads.scroll.scroll_to_bottom();
+            }
+            self.threads.drawn = len;
+        }
+        let ctx = self.row_ctx(Some(open.id.clone()), cx);
+        let rows = self.threads.rows.clone();
+        div()
+            .id(SharedString::from(format!("thread-rows|{}", open.id)))
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.threads.scroll)
+            .child(
+                // Short threads sit at the bottom, by the box, as the channel's messages do.
+                div()
+                    .min_h_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .pt(px(12.0))
+                    .pb(px(12.0))
+                    .when(loading, |el| el.child(crate::ui::chat_rows::skeleton(2, &p)))
+                    .when(!loading, |el| {
+                        el.children(
+                            rows.iter()
+                                .enumerate()
+                                .map(|(ix, row)| crate::ui::chat::render_row(row, ix, &ctx, window, cx)),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
     /// Where you answer in the open thread, and whether the channel sees it too.
-    fn reply_box(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn reply_box(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = *p;
         if let Some(why) = self.thread_blocked() {
             return div()
@@ -834,10 +848,14 @@ impl FuwaApp {
                 )
                 .into_any_element();
         }
+        // "Also send to #channel", except on a board, whose cards' comments stay with them.
         let channel = self.threads.open.as_ref().and_then(|o| {
-            self.core
-                .shared
-                .read(|s| s.instance(&o.key).and_then(|i| i.channel(&o.server, &o.channel)).map(|c| c.name.clone()))
+            self.core.shared.read(|s| {
+                s.instance(&o.key)
+                    .and_then(|i| i.channel(&o.server, &o.channel))
+                    .filter(|c| c.r#type != pb::ChannelType::Board as i32)
+                    .map(|c| c.name.clone())
+            })
         });
         let focused = self.threads.reply.read(cx).focus_handle(cx).is_focused(window);
         let typed = !self.threads.reply.read(cx).value().trim().is_empty();
