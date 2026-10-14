@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { COLOR_VISIONS, colorVisionMatrix, feColorMatrix, highContrastTokens, type ColorVision } from "@/lib/accessibility";
 import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { loadFontFile, sweepFontFiles } from "@/lib/font-files";
@@ -6,7 +7,7 @@ import { DEFAULT_FONT, fontStack, sanitizeFont, type FontPick } from "@/lib/font
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { isTag } from "@/i18n/core";
 import { DEFAULT_SHARE, SHARE_SURFACES, shareQuality, type ShareFps, type ShareHeight, type ShareSurface } from "@/lib/screen-share";
-import { applyTheme, BUILTIN_THEMES, isDark, type Theme } from "@/lib/themes";
+import { applyTheme, BUILTIN_THEMES, isDark, type Theme, type ThemeTokens } from "@/lib/themes";
 
 /**
  * App settings: how fuwa looks and behaves on this device, for every
@@ -55,6 +56,11 @@ export type Prefs = {
   othersEffects: boolean;
   /** Color saturation, in percent. */
   saturation: number;
+  /** Colors corrected for a kind of color blindness (lib/accessibility.ts), and how strongly, in percent. */
+  colorVision: ColorVision;
+  colorVisionStrength: number;
+  /** Every theme in its high contrast version, over solid panels. */
+  highContrast: boolean;
   underlineLinks: boolean;
   roleColors: RoleColors;
   /** The app's language: "auto" follows the browser's, or a language tag from locales/. */
@@ -132,6 +138,9 @@ export const DEFAULT_PREFS: Prefs = {
   reduceMotion: "system",
   othersEffects: true,
   saturation: 100,
+  colorVision: "off",
+  colorVisionStrength: 100,
+  highContrast: false,
   underlineLinks: false,
   roleColors: "names",
   language: "auto",
@@ -226,6 +235,9 @@ function sanitize(p: Prefs): Prefs {
     zoom: clamp(p.zoom, 80, 150, d.zoom),
     reduceMotion: oneOf(p.reduceMotion, ["system", "always", "never"], d.reduceMotion),
     saturation: clamp(p.saturation, 0, 100, d.saturation),
+    colorVision: oneOf(p.colorVision, COLOR_VISIONS, d.colorVision),
+    colorVisionStrength: clamp(p.colorVisionStrength, 0, 100, d.colorVisionStrength),
+    highContrast: p.highContrast === true,
     roleColors: oneOf(p.roleColors, ["names", "beside", "off"], d.roleColors),
     // A language this build doesn't ship stays picked (a newer build may have it) and shows as English.
     language: typeof p.language === "string" && (p.language === "auto" || isTag(p.language)) ? p.language : d.language,
@@ -299,16 +311,35 @@ export const allThemes = (p: Prefs = prefs): (Theme | CustomTheme)[] => [...BUIL
 export const themeById = (id: string, p: Prefs = prefs): Theme | CustomTheme =>
   allThemes(p).find((t) => t.id === id) ?? BUILTIN_THEMES[0]!;
 
-/** The theme on screen now: the picked one, or the light or dark pick when following the system. */
+/** The theme picked now: the picked one, or the light or dark pick when following the system. */
 export function activeTheme(p: Prefs = prefs): Theme | CustomTheme {
   if (!p.followSystem) return themeById(p.theme, p);
   return themeById(systemDark() ? p.darkTheme : p.lightTheme, p);
 }
 
-/** What's behind the app now: the theme's own backdrop, or the app's. */
+/**
+ * The last high contrast tokens and solid backdrop, made again only when
+ * what they come from changes, so `usePrefs` selectors see the same objects.
+ */
+let contrasted: { from: ThemeTokens; to: ThemeTokens } | null = null;
+let solid: { from: Backdrop; to: Backdrop } | null = null;
+
+/** The theme as it's painted: the active one, in high contrast when that's on. */
+export function shownTheme(p: Prefs = prefs): Theme | CustomTheme {
+  const theme = activeTheme(p);
+  if (!p.highContrast) return theme;
+  const from = theme.variant.tokens;
+  if (contrasted?.from !== from) contrasted = { from, to: highContrastTokens(from) };
+  return { ...theme, variant: { ...theme.variant, tokens: contrasted.to } };
+}
+
+/** What's behind the app now: the theme's own backdrop, or the app's; under solid panels in high contrast. */
 export function activeBackdrop(p: Prefs = prefs): Backdrop {
   const theme = activeTheme(p);
-  return ("backdrop" in theme && theme.backdrop) || p.backdrop;
+  const backdrop = ("backdrop" in theme && theme.backdrop) || p.backdrop;
+  if (!p.highContrast) return backdrop;
+  if (solid?.from !== backdrop) solid = { from: backdrop, to: { ...backdrop, panels: 100 } };
+  return solid.to;
 }
 
 export const lightThemes = (p: Prefs = prefs) => allThemes(p).filter((t) => !isDark(t));
@@ -345,7 +376,7 @@ export function reduceMotion(p: Prefs = prefs): boolean {
 export function applyPrefs() {
   if (typeof document === "undefined") return;
   const p = prefs;
-  applyTheme(activeTheme(p));
+  applyTheme(shownTheme(p));
   const root = document.documentElement;
   // Everything is sized in rem, so the root size zooms the whole app.
   root.style.fontSize = p.zoom === 100 ? "" : `${(16 * p.zoom) / 100}px`;
@@ -359,7 +390,34 @@ export function applyPrefs() {
   root.style.setProperty("--saturation", `${p.saturation}%`);
   toggleData(root, "desaturated", p.saturation < 100);
   toggleData(root, "underlineLinks", p.underlineLinks);
+  toggleData(root, "highContrast", p.highContrast);
+  applyColorVision(root, p);
   toggleData(root, "reduceMotion", reduceMotion(p));
+}
+
+const COLOR_FILTER = "fuwa-color-vision";
+
+/** Corrects every color on the page for the color blindness picked, with an SVG filter on the root (app.css). */
+function applyColorVision(root: HTMLElement, p: Prefs) {
+  const on = p.colorVision !== "off" && p.colorVisionStrength > 0;
+  toggleData(root, "colorVision", on);
+  if (!on) return;
+  let matrix = document.querySelector<SVGFEColorMatrixElement>(`#${COLOR_FILTER} feColorMatrix`);
+  if (!matrix) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("style", "position:absolute;width:0;height:0;overflow:hidden");
+    const filter = document.createElementNS(ns, "filter");
+    filter.id = COLOR_FILTER;
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+    matrix = document.createElementNS(ns, "feColorMatrix");
+    matrix.setAttribute("type", "matrix");
+    filter.append(matrix);
+    svg.append(filter);
+    document.body.append(svg);
+  }
+  matrix.setAttribute("values", feColorMatrix(colorVisionMatrix(p.colorVision, p.colorVisionStrength / 100)));
 }
 
 function toggleData(el: HTMLElement, key: string, on: boolean) {

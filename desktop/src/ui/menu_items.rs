@@ -464,7 +464,7 @@ impl FuwaApp {
                 .map(|role| {
                     let on = held.contains(&role.id);
                     let (k, s, uid, rid) = (key.to_owned(), sv.to_owned(), user_id.to_owned(), role.id.clone());
-                    let color: Option<Hsla> = role.color.map(|c| gpui_kit::rgb(c as u32).into());
+                    let color: Option<Hsla> = role.color.map(|c| crate::ui::theme::role(c as u32).into());
                     Item::check(
                         role.name.clone(),
                         on,

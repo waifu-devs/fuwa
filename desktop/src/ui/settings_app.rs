@@ -10,12 +10,13 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
 
+use crate::core::accessibility::ColorVision;
 use crate::core::config::{Clock, MotionChoice, NotifyFor, Prefs, RoleColors, SendWith, Sounds};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::ui::motion;
 use crate::ui::settings::{Page, SettingsView};
 use crate::ui::settings_controls::{At, Badge, IconHover, Look, Opt, button_with, choice, keycaps, sample, toggle};
-use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
+use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_md, radius_xl};
 use crate::ui::widgets::icon;
 
 /// The changed badge for settings that are one field of the prefs.
@@ -106,6 +107,79 @@ impl SettingsView {
             window,
             cx,
             |pr, v| pr.saturation = v.round() as u8,
+        );
+        let visions = [ColorVision::Off, ColorVision::Protanopia, ColorVision::Deuteranopia, ColorVision::Tritanopia];
+        let vision_at = visions.iter().position(|v| *v == prefs.color_vision);
+        let strength = (prefs.color_vision != ColorVision::Off).then(|| {
+            self.slider(
+                "color-vision-strength",
+                (0.0, 100.0, 5.0),
+                f32::from(prefs.color_vision_strength),
+                Vec::new(),
+                percent,
+                false,
+                p,
+                window,
+                cx,
+                |pr, v| pr.color_vision_strength = v.round() as u8,
+            )
+        });
+        let vision = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(choice(
+                "color-vision",
+                vision_at,
+                vec![
+                    Opt::new(
+                        t("appsettings.accessibility.colorVisionOff"),
+                        t("appsettings.accessibility.colorVisionOffHint"),
+                        "eye",
+                    ),
+                    Opt::new(
+                        t("appsettings.accessibility.protanopia"),
+                        t("appsettings.accessibility.protanopiaHint"),
+                        "glasses",
+                    ),
+                    Opt::new(
+                        t("appsettings.accessibility.deuteranopia"),
+                        t("appsettings.accessibility.deuteranopiaHint"),
+                        "glasses",
+                    ),
+                    Opt::new(
+                        t("appsettings.accessibility.tritanopia"),
+                        t("appsettings.accessibility.tritanopiaHint"),
+                        "glasses",
+                    ),
+                ],
+                w,
+                p,
+                window,
+                cx,
+                move |this, n, cx| {
+                    let v = visions[n];
+                    this.set(cx, |pr| pr.color_vision = v)
+                },
+            ))
+            .children(strength)
+            .child(
+                // The colors people mix up, through the correction like the rest of the app.
+                sample(p).flex().gap(px(8.0)).children(
+                    [0xe5484d, 0x2fb47c, 0xf5a524, 0x3b8beb, 0xb388ff, 0xf06292]
+                        .map(|c| div().h(px(24.0)).flex_1().rounded(radius_md()).bg(crate::ui::theme::role(c))),
+                ),
+            );
+        let contrast = toggle(
+            "high-contrast",
+            &t("appsettings.accessibility.contrastToggle"),
+            Some(&t("appsettings.accessibility.contrastToggleHint")),
+            prefs.high_contrast,
+            false,
+            p,
+            window,
+            cx,
+            |this, on, cx| this.set(cx, |pr| pr.high_contrast = on),
         );
         let roles_at = match prefs.role_colors {
             RoleColors::Names => 0,
@@ -213,6 +287,20 @@ impl SettingsView {
                 pref!(prefs, saturation),
                 saturation,
             ),
+            (
+                "color-vision",
+                t("appsettings.accessibility.colorVision"),
+                Some(t("appsettings.accessibility.colorVisionHint")),
+                Badge::pref(
+                    prefs.color_vision != ColorVision::Off || prefs.color_vision_strength != 100,
+                    |pr: &mut Prefs| {
+                        pr.color_vision = ColorVision::Off;
+                        pr.color_vision_strength = 100;
+                    },
+                ),
+                vision.into_any_element(),
+            ),
+            ("high-contrast", t("appsettings.accessibility.contrast"), None, pref!(prefs, high_contrast), contrast),
             (
                 "role-colors",
                 t("appsettings.accessibility.roleColors"),
@@ -932,11 +1020,18 @@ fn role_name(id: &str, name: &str, color: u32, mode: RoleColors, p: &Palette) ->
         .child(
             div()
                 .font_weight(FontWeight::BOLD)
-                .text_color(if mode == RoleColors::Names { rgb(color).into() } else { tint })
+                .text_color(if mode == RoleColors::Names { crate::ui::theme::role(color).into() } else { tint })
                 .child(name.to_owned()),
         )
         .when(mode == RoleColors::Beside, |el| {
-            el.child(div().size(px(8.0)).rounded_full().border_2().border_color(p.background).bg(rgb(color)))
+            el.child(
+                div()
+                    .size(px(8.0))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(p.background)
+                    .bg(crate::ui::theme::role(color)),
+            )
         })
         .into_any_element()
 }

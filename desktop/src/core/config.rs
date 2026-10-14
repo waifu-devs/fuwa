@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::accessibility::ColorVision;
 use crate::core::keybinds;
 use crate::core::secrets::Secrets;
 use crate::core::themes::{self, Backdrop, Theme};
@@ -367,6 +368,13 @@ fn lenient_font<'de, D: serde::Deserializer<'de>>(d: D) -> Result<FontPick, D::E
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+/// A kind of color blindness from the settings file, or none when it's one
+/// this app doesn't know (from a newer app).
+fn lenient_color_vision<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ColorVision, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// What sends a message: Enter (Shift+Enter for a new line), or Ctrl/Cmd+Enter
 /// (Enter for a new line); the web app's `sendWith`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -471,6 +479,12 @@ pub struct Prefs {
     pub others_effects: bool,
     /// Color saturation, in percent.
     pub saturation: u8,
+    /// Colors corrected for a kind of color blindness (`core::accessibility`), and how strongly, in percent.
+    #[serde(deserialize_with = "lenient_color_vision")]
+    pub color_vision: ColorVision,
+    pub color_vision_strength: u8,
+    /// Every theme in its high contrast version, over solid panels.
+    pub high_contrast: bool,
     pub underline_links: bool,
     pub role_colors: RoleColors,
     /// A count of what's unread where the app shows it (the web's tab title).
@@ -587,6 +601,9 @@ impl Default for Prefs {
             code_font: FontPick::Default,
             others_effects: true,
             saturation: 100,
+            color_vision: ColorVision::Off,
+            color_vision_strength: 100,
+            high_contrast: false,
             underline_links: false,
             role_colors: RoleColors::Names,
             unread_badge: true,
@@ -705,6 +722,7 @@ impl Prefs {
             self.camera_fps = 0;
         }
         self.saturation = self.saturation.min(100);
+        self.color_vision_strength = self.color_vision_strength.min(100);
         self.volume = self.volume.min(100);
         self.input_volume = self.input_volume.min(200);
         self.output_volume = self.output_volume.min(200);
@@ -764,8 +782,22 @@ impl Prefs {
     }
 
     /// What's behind the app: the theme's own backdrop, or the app's.
+    /// The theme's own backdrop or the app's; under solid panels in high contrast.
     pub fn active_backdrop(&self, theme: &Theme) -> Backdrop {
-        theme.backdrop.clone().unwrap_or_else(|| self.backdrop.clone())
+        let mut backdrop = theme.backdrop.clone().unwrap_or_else(|| self.backdrop.clone());
+        if self.high_contrast {
+            backdrop.panels = 100;
+        }
+        backdrop
+    }
+
+    /// The theme as it's painted: the active one, in high contrast when that's on.
+    pub fn shown_theme(&self, system_dark: bool) -> Theme {
+        let mut theme = self.active_theme(system_dark);
+        if self.high_contrast {
+            theme.tokens = crate::core::accessibility::high_contrast(&theme.tokens);
+        }
+        theme
     }
 }
 

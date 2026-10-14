@@ -99,6 +99,8 @@ function appSections(t: I18n["t"]): SettingsSection[] {
       settings: [
         { id: "reduce-motion", label: t("settings.nav.reduceMotion"), keywords: "animation" },
         { id: "saturation", label: t("appsettings.accessibility.saturation"), keywords: "color grey" },
+        { id: "color-vision", label: t("appsettings.accessibility.colorVision"), keywords: "colorblind colourblind daltonism protanopia deuteranopia tritanopia filter" },
+        { id: "high-contrast", label: t("appsettings.accessibility.contrastToggle"), keywords: "contrast legibility focus" },
         { id: "role-colors", label: t("appsettings.accessibility.roleColors"), keywords: "names colour tint dot" },
         { id: "others-effects", label: t("appsettings.accessibility.effects"), keywords: "animation sparkles others cards" },
         { id: "underline-links", label: t("settings.nav.underlineLinks") },

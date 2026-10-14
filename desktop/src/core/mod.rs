@@ -9,6 +9,7 @@
 //! window that rebuild something big (the message list, the member list)
 //! can tell whether their part moved ([`Shared::changed_since`]).
 
+pub mod accessibility;
 pub mod account;
 pub mod account_settings;
 pub mod accounts;

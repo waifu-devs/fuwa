@@ -90,7 +90,7 @@ pub fn hue_gradient(id: &str, radius: f32, el: Div) -> Div {
 /// mixed 70/30 with the text color, for names without a role color.
 pub fn name_tint(id: &str, p: &Palette) -> Hsla {
     let hue: Rgba = hsla(hue_of(id) / 360.0, 0.75, 0.55, 1.0).into();
-    crate::ui::theme::mix(p.foreground, hue, 0.7)
+    crate::ui::theme::mix(p.foreground, crate::ui::theme::shown(hue), 0.7)
 }
 
 /// "Mika Sato" → "MS", as the web app's `initials`.

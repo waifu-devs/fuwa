@@ -457,7 +457,7 @@ impl FuwaApp {
                 .or_insert_with(|| {
                     Rc::new((
                         i.display_name(Some(&server), id),
-                        i.name_color(&server, id).map(|c| rgb(c).into()),
+                        i.name_color(&server, id).map(|c| crate::ui::theme::role(c).into()),
                         is_agent(i.users.get(id)).then_some("AGENT"),
                         i.users.get(id).cloned(),
                         i.decoration_of(Some(&server), id).map(|u| SharedString::from(u.to_owned())),
@@ -762,7 +762,7 @@ impl FuwaApp {
                 id: format!("p{}", p.nonce),
                 user: i.me.clone(),
                 name: i.display_name(Some(&server), &me),
-                color: i.name_color(&server, &me).map(|c| rgb(c).into()),
+                color: i.name_color(&server, &me).map(|c| crate::ui::theme::role(c).into()),
                 content: p.content.clone(),
                 shown: String::new(),
                 mentions_me: false,

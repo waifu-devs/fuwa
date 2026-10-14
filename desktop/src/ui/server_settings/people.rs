@@ -707,7 +707,7 @@ impl ServerSettingsView {
         let role_colors = self.core.prefs_now().role_colors;
         let colored = s.color.is_some() && role_colors == crate::core::config::RoleColors::Names;
         let name_color: Hsla = match s.color {
-            Some(c) if colored => gpui_kit::rgb(c).into(),
+            Some(c) if colored => crate::ui::theme::role(c).into(),
             _ => crate::ui::widgets::name_tint(&uid, p),
         };
         let title = div()
