@@ -110,7 +110,10 @@ impl FuwaApp {
             cx.stop_propagation();
             return;
         }
-        if self.switcher_keys(&ev.keystroke, window, cx) || self.sheet_keys(&ev.keystroke, cx) {
+        if self.switcher_keys(&ev.keystroke, window, cx)
+            || self.sheet_keys(&ev.keystroke, cx)
+            || self.viewer_keys(&ev.keystroke, cx)
+        {
             cx.stop_propagation();
             return;
         }

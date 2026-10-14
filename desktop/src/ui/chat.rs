@@ -2138,7 +2138,15 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     }
     if !m.embeds.is_empty() {
         let hide = m.can_hide_previews.then_some(&ctx.this);
-        text = text.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p, ctx.fresh.contains_key(&m.id), hide));
+        text = text.child(crate::ui::embeds::embeds(
+            &m.id,
+            &m.embeds,
+            p,
+            ctx.fresh.contains_key(&m.id),
+            hide,
+            &ctx.this,
+            &ctx.key,
+        ));
     }
     if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
         let starred = ctx.saved_gifs.contains(&gif.url);

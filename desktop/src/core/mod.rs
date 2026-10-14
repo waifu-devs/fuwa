@@ -84,6 +84,7 @@ pub mod updates;
 pub mod vault;
 pub mod voice;
 pub mod voice_notes;
+pub mod zoom;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
