@@ -2702,6 +2702,23 @@ impl NodeDb {
         Ok(found)
     }
 
+    /// Agents whose endpoint is on and not failing, and which are on, as are
+    /// their owners: the ones online through their endpoint.
+    pub async fn working_agent_endpoints(&self) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT endpoints.account_id FROM agent_endpoints AS endpoints
+             JOIN accounts AS agents ON agents.id = endpoints.account_id
+             LEFT JOIN accounts AS owners ON owners.id = agents.owner_id
+             WHERE endpoints.url != '' AND endpoints.disabled_at IS NULL AND endpoints.failing_since IS NULL
+               AND agents.disabled_at IS NULL AND owners.disabled_at IS NULL",
+            (),
+            |r| r.get::<String>(0),
+        )
+        .await
+    }
+
     /// Notes how a delivery to an endpoint went, if it's still at `epoch`:
     /// the first failure starts the clock, and failing for `give_up_after`
     /// ms turns the endpoint off. Whether it's off now.

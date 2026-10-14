@@ -173,6 +173,20 @@ impl Endpoint {
     }
 }
 
+/// The status of `user_id` that next reaches a presence stream.
+async fn next_status(stream: &mut tonic::Streaming<pb::WatchPresenceResponse>, user_id: &str) -> pb::PresenceStatus {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(15), stream.message())
+            .await
+            .expect("no presence came")
+            .unwrap()
+            .unwrap();
+        if let Some(presence) = message.presence.filter(|p| p.user_id == user_id) {
+            return presence.status();
+        }
+    }
+}
+
 #[tokio::test]
 async fn an_agent_hears_through_its_endpoint_and_answers_there() {
     let dir = tempfile::tempdir().unwrap();
@@ -223,6 +237,12 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into() }))
         .await
         .unwrap();
+    // Its owner watches who's online: the agent is, while its endpoint works.
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel.clone())
+        .watch_presence(authed(&owner, pb::WatchPresenceRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
     commands
         .set_commands(authed(
             &made.token,
@@ -288,6 +308,7 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .unwrap();
     assert_eq!(saved.url, endpoint.url);
     assert_eq!(saved.secret, "", "setting the URL doesn't show the secret");
+    assert_eq!(next_status(&mut presence, &agent_id).await, pb::PresenceStatus::Online);
 
     // Events come signed, in proto3 JSON.
     let send = |content: &str| {
@@ -347,9 +368,11 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
     };
     assert_eq!(failing.last_error, "answered 500");
     assert!(failing.last_delivered_at.is_some());
+    assert_eq!(next_status(&mut presence, &agent_id).await, pb::PresenceStatus::Offline);
     endpoint.down.store(false, Ordering::SeqCst);
     let event = endpoint.next("messageCreated").await;
     assert_eq!(event["messageCreated"]["message"]["content"], "while you were out");
+    assert_eq!(next_status(&mut presence, &agent_id).await, pb::PresenceStatus::Online);
 
     // A new secret is used at once.
     let reset = agents
@@ -366,8 +389,9 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
     let event = endpoint.next("messageCreated").await;
     assert_eq!(event["messageCreated"]["message"]["content"], "new secret");
 
-    // Turned off, nothing more comes.
+    // Turned off, nothing more comes, and it's offline.
     agents.set_agent_endpoint(set(String::new(), &[])).await.unwrap();
+    assert_eq!(next_status(&mut presence, &agent_id).await, pb::PresenceStatus::Offline);
     messages.send_message(send("anyone there?")).await.unwrap();
     let quiet = tokio::time::timeout(Duration::from_secs(2), endpoint.deliveries.recv()).await;
     assert!(quiet.is_err(), "a delivery came after the endpoint was turned off");

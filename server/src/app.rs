@@ -95,6 +95,9 @@ pub struct App {
     /// Agents whose endpoint changed (an empty id: maybe any of them), for
     /// what deliveries remember of it. See [`App::agent_endpoint_changed`].
     endpoints_changed: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Woken when a delivery to an endpoint went through or failed, where
+    /// accounts are, so agents online through their endpoint are looked at again.
+    pub endpoint_reports: tokio::sync::Notify,
     /// Whether a newer fuwa is out (`releases.rs`); checked by a single
     /// process and a split instance's directory, which answers GetNode.
     pub releases: Arc<crate::releases::Releases>,
@@ -251,6 +254,7 @@ impl App {
             session_epoch: std::sync::atomic::AtomicU64::new(0),
             joined: tokio::sync::broadcast::Sender::new(256),
             endpoints_changed: tokio::sync::broadcast::Sender::new(256),
+            endpoint_reports: tokio::sync::Notify::new(),
             releases: crate::releases::Releases::new(update_check, release_cache),
         });
         if app.node.is_some() {
@@ -258,6 +262,8 @@ impl App {
         }
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
+            // Agents whose endpoint works are online from the start.
+            spawn_endpoint_presence(app.clone());
         }
         crate::cluster::shard::connect(&app).await;
         // Shared channels' messages reach the servers showing them from the start.
@@ -790,6 +796,50 @@ fn spawn_presence_ticks(app: Arc<App>) {
             }
         }
     });
+}
+
+/// Keeps agents whose endpoint works online (docs/presence.md): those with an
+/// endpoint that's on and not failing, while the instance sends to endpoints.
+/// Looked at again when an endpoint changes or a delivery is reported, and
+/// every so often in case word of either went missing.
+fn spawn_endpoint_presence(app: Arc<App>) {
+    const EVERY: Duration = Duration::from_secs(60);
+    tokio::spawn(async move {
+        let mut changes = app.agent_endpoint_changes();
+        let mut every = tokio::time::interval(EVERY);
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => {}
+                _ = changes.recv() => {}
+                _ = app.endpoint_reports.notified() => {}
+            }
+            // Bursts of changes are looked at once.
+            while changes.try_recv().is_ok() {}
+            let _ = endpoint_presence(&app).await;
+        }
+    });
+}
+
+/// Holds online the agents whose endpoint works, and lets go of the rest.
+async fn endpoint_presence(app: &App) -> Result<()> {
+    use crate::presence::ENDPOINT;
+    let working: std::collections::HashSet<String> = match app.settings().agent_endpoints {
+        crate::pb::AgentEndpoints::Off => Default::default(),
+        _ => app.node()?.working_agent_endpoints().await?.into_iter().collect(),
+    };
+    let held = app.presence.held(ENDPOINT);
+    for agent_id in held.difference(&working) {
+        app.presence.release(&app.index, agent_id, ENDPOINT);
+    }
+    for agent_id in working.difference(&held) {
+        if !app.presence.hold(&app.index, agent_id, ENDPOINT, None) {
+            let settings = app.node()?.presence_settings(agent_id).await?;
+            app.presence.hold(&app.index, agent_id, ENDPOINT, Some(settings));
+        }
+    }
+    Ok(())
 }
 
 /// Every few minutes: members whose single sign-on to a server ran out get
