@@ -1315,6 +1315,7 @@ impl FuwaApp {
                 );
             }
             Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
+                let text = self.encode_emoji(&text);
                 self.run(
                     cx,
                     {

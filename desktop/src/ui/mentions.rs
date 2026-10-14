@@ -139,6 +139,20 @@ fn username_at(rest: &str) -> Option<&str> {
 /// kind, who or what, a colour and whether it's you), leaving code and links
 /// alone. People who aren't in the server stay plain text.
 pub fn mention_links(source: &str, look: &Look) -> String {
+    links(source, look, false)
+}
+
+/// Only the server emoji tokens of `source` as pictures (`emojis`, ids to
+/// pictures), or their `:name:` for the rest: an encrypted message's text,
+/// whose mentions stay as written.
+pub fn emoji_links(source: &str, emojis: HashMap<String, String>) -> String {
+    if !source.contains('<') {
+        return source.to_owned();
+    }
+    links(source, &Look { emojis, ..Look::default() }, true)
+}
+
+fn links(source: &str, look: &Look, only_emoji: bool) -> String {
     let mut out = String::with_capacity(source.len() + 16);
     let mut fenced = false;
     for (n, line) in source.split('\n').enumerate() {
@@ -164,6 +178,7 @@ pub fn mention_links(source: &str, look: &Look) -> String {
             let c = rest.chars().next().unwrap_or_default();
             let plain = !in_code && bracket == 0 && paren == 0;
             if plain
+                && !only_emoji
                 && rest.starts_with("<@&")
                 && let Some(end) = rest.find('>')
                 && rest[3..end].len() == 26
@@ -199,7 +214,7 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                 prev = Some('>');
                 continue;
             }
-            if plain && c == '@' && !prev.is_some_and(|p| word(p) || p == '@' || p == '<' || p == '.') {
+            if plain && !only_emoji && c == '@' && !prev.is_some_and(|p| word(p) || p == '@' || p == '<' || p == '.') {
                 let after = &rest[1..];
                 let loud = ["everyone", "here"].into_iter().find(|loud| {
                     after.get(..loud.len()).is_some_and(|w| w.eq_ignore_ascii_case(loud))
@@ -629,5 +644,16 @@ mod tests {
         let picked = vec![("Mods".to_owned(), ROLE.to_owned())];
         assert_eq!(encode("hey @Mods and @Modsy", &picked), format!("hey <@&{ROLE}> and @Modsy"));
         assert_eq!(encode("@Mods", &picked), format!("<@&{ROLE}>"));
+    }
+
+    #[test]
+    fn encrypted_text_draws_only_its_carried_emoji() {
+        let id = "01J9ZZZZZZZZZZZZZZZZZZZZZZ";
+        let carried = HashMap::from([(id.to_owned(), "https://x/media/e.png".to_owned())]);
+        let text = format!("@everyone <:owl:{id}> <:gone:01J9XXXXXXXXXXXXXXXXXXXXXX>");
+        assert_eq!(
+            emoji_links(&text, carried),
+            format!("@everyone ![:owl:]({}https://x/media/e.png) :gone:", crate::ui::emoji::SCHEME)
+        );
     }
 }

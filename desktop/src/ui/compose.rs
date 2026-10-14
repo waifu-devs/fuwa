@@ -165,11 +165,13 @@ impl FuwaApp {
                     }
                 })
                 .unwrap_or_default(),
-            Target::Dm { .. } | Target::Secure { .. } => emoji::search(&query, &emoji::Catalog::default(), tone, 8)
-                .into_iter()
-                .map(mentions::Pick::Emoji)
-                .collect(),
+            Target::Dm { .. } | Target::Secure { .. } => Vec::new(),
         });
+        // In encrypted places every server's emoji you're in, carried along.
+        let options = match self.encrypted_catalog().filter(|_| kind == ':') {
+            Some(catalog) => emoji::search(&query, &catalog, tone, 8).into_iter().map(mentions::Pick::Emoji).collect(),
+            None => options,
+        };
         if options.is_empty() {
             self.picker = None;
             return;
@@ -206,8 +208,11 @@ impl FuwaApp {
     }
 
     /// `:name:` of the emoji you can use in the open server (its own and
-    /// your other servers') as their tokens.
+    /// your other servers', or in an encrypted place every server's) as their tokens.
     pub(crate) fn encode_emoji(&self, text: &str) -> String {
+        if let Some(catalog) = self.encrypted_catalog() {
+            return catalog.encode(text);
+        }
         let Some(Target::Channel { key, server, .. }) = self.target() else { return text.to_owned() };
         self.core.shared.read(|s| match s.instance(&key) {
             Some(i) => emoji::Catalog::of(&i.servers, &i.emojis, &server).encode(text),
@@ -522,6 +527,7 @@ impl FuwaApp {
             }
             Some(Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. }) => {
                 let Ok(sequence) = id.parse::<i64>() else { return };
+                let text = self.encode_emoji(&text);
                 self.run(
                     cx,
                     async move { core.send_dm(&key, &conversation, Content::Edit { sequence, text }).await },

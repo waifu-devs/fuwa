@@ -120,6 +120,10 @@ pub struct Item {
     /// Reactions to it, each person's latest for each emoji (`core/reactions.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<ReactionMark>,
+    /// Server emoji its text writes as tokens, as its sender carried them
+    /// (checked by `core::emoji::checked`), as of its latest edit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub emojis: Vec<EmojiRef>,
 }
 
 /// One person's reaction to a message with one emoji, as the record that
@@ -128,7 +132,11 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReactionMark {
     pub user_id: String,
+    /// A standard emoji's characters; empty for a server emoji (`custom`).
     pub emoji: String,
+    /// A server emoji, as its sender carried it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom: Option<EmojiRef>,
     /// The record that said it.
     pub seq: i64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -137,6 +145,41 @@ pub struct ReactionMark {
     /// can be passed on to devices added later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed: Option<Signed>,
+}
+
+/// A server emoji carried inside an encrypted message, so it draws whether
+/// or not this person is in its server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmojiRef {
+    pub id: String,
+    pub server_id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animated: bool,
+}
+
+impl EmojiRef {
+    pub fn of(e: &crate::pb::Emoji) -> Self {
+        Self {
+            id: e.id.clone(),
+            server_id: e.server_id.clone(),
+            name: e.name.clone(),
+            url: e.url.clone(),
+            animated: e.animated,
+        }
+    }
+
+    pub fn to_pb(&self) -> crate::pb::Emoji {
+        crate::pb::Emoji {
+            id: self.id.clone(),
+            server_id: self.server_id.clone(),
+            name: self.name.clone(),
+            url: self.url.clone(),
+            animated: self.animated,
+            ..Default::default()
+        }
+    }
 }
 
 fn is_zero(n: &i64) -> bool {
@@ -203,6 +246,7 @@ impl Item {
             thread: 0,
             in_channel: false,
             reactions: Vec::new(),
+            emojis: Vec::new(),
         }
     }
 }

@@ -664,6 +664,7 @@ impl FuwaApp {
         if files.is_empty() {
             return false;
         }
+        let text = self.encode_emoji(&text);
         let nonce = crate::core::dms::new_nonce();
         let sizes: Vec<(String, i64)> =
             files.iter().map(|f| (sealed_files::clean_name(&f.name), f.bytes.len() as i64)).collect();

@@ -413,6 +413,35 @@ fn two_people_talk_in_a_server_and_in_private() {
     }
     said(&alice, "got it");
 
+    // Alice writes Bob her owl, from a server he isn't in: it's carried inside
+    // the encryption, so his device draws it. Her reaction with it goes the same way.
+    {
+        let (core, key, id) = (alice.clone(), key.clone(), conversation.clone());
+        let content = Content::Text { text: hoot.clone(), reply_to: 0 };
+        wait(&alice, async move { core.send_dm(&key, &id, content).await }).unwrap();
+    }
+    let (k2, c2, h2, owl_id) = (key.clone(), conversation.clone(), hoot.clone(), owl.id.clone());
+    until(&bob, "the carried owl", move |s| {
+        s.instance(&k2).unwrap().dms.items[&c2]
+            .iter()
+            .any(|i| i.content == h2 && i.emojis.iter().any(|e| e.id == owl_id))
+    });
+    let got_seq = bob.shared.read(|s| {
+        s.instance(&key).unwrap().dms.items[&conversation].iter().find(|i| i.content == "got it").unwrap().seq
+    });
+    {
+        let (core, key, id) = (alice.clone(), key.clone(), conversation.clone());
+        let owl = fuwa_desktop::core::reactions::Reacted::Custom(fuwa_desktop::core::vault::EmojiRef::of(&owl));
+        wait(&alice, async move { core.react_dm(&key, &id, got_seq, owl, true).await }).unwrap();
+    }
+    let (k2, c2, owl_id) = (key.clone(), conversation.clone(), owl.id.clone());
+    until(&bob, "Alice's owl reaction", move |s| {
+        let item = s.instance(&k2).unwrap().dms.items[&c2].iter().find(|i| i.seq == got_seq).cloned().unwrap();
+        fuwa_desktop::core::reactions::tally(&item.reactions, "")
+            .iter()
+            .any(|r| r.emoji_id == owl_id && r.count == 1 && !r.emoji_url.is_empty())
+    });
+
     // Bob reacts to Alice's message inside the encryption: both devices tally it,
     // and it's no message of its own (nothing new to read, no unread count).
     let secret_seq = alice.shared.read(|s| {
