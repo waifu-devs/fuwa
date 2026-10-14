@@ -693,9 +693,12 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     {
         engine.on_server_event(&sid, payload);
     }
-    // Everyone's balances moved (a grant to a role), or you bought something: your wallet is read again.
-    let bought = matches!(&event.payload, Some(Payload::PurchaseMade(pb::PurchaseMade { entry: Some(e), .. }))
-        if core.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref()).is_some_and(|me| me.id == e.user_id)));
+    // Everyone's balances moved (a grant to a role), or you bought or won something: your wallet is read again.
+    let mine = |user_id: &str| {
+        core.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref()).is_some_and(|me| me.id == user_id))
+    };
+    let bought = matches!(&event.payload, Some(Payload::PurchaseMade(pb::PurchaseMade { entry: Some(e), .. })) if mine(&e.user_id))
+        || matches!(&event.payload, Some(Payload::GachaPulled(pb::GachaPulled { pull: Some(p), .. })) if mine(&p.user_id));
     if bought || matches!(event.payload, Some(Payload::WalletsChanged(_))) {
         crate::core::economy::spawn_wallet(core, key, &sid);
     }

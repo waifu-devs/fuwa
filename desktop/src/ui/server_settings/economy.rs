@@ -1038,6 +1038,17 @@ impl ServerSettingsView {
             Some(n) => t_with("desktop.economy.shop.left", &[("count", Arg::Num(n))]),
             None => t("desktop.economy.listing.unlimited"),
         });
+        if l.gacha_only {
+            facts = facts.child(
+                div()
+                    .px(px(6.0))
+                    .rounded_full()
+                    .bg(alpha(p.primary, 0.12))
+                    .text_color(p.primary)
+                    .font_weight(FontWeight::BOLD)
+                    .child(t("desktop.economy.shop.gachaOnly")),
+            );
+        }
         if !l.available {
             facts = facts.child(
                 div()
@@ -1373,6 +1384,44 @@ impl ServerSettingsView {
                     },
                 )),
         );
+        // Won only from gacha banners: set up on the web, members pull for it in the shop.
+        let gacha = self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("gacha")));
+        if gacha || draft.gacha_only {
+            form = form.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(t("desktop.economy.listing.gachaOnly")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted_foreground)
+                                    .child(t("desktop.economy.listing.gachaOnlyHint")),
+                            ),
+                    )
+                    .child(switch(
+                        SharedString::from("eco-gacha-only"),
+                        draft.gacha_only,
+                        false,
+                        cx,
+                        |this: &mut Self, on, cx| {
+                            if let Some(d) = this.listing_draft() {
+                                d.gacha_only = on;
+                            }
+                            cx.notify();
+                        },
+                    )),
+            );
+        }
         if let Some(problem) = draft.problem() {
             form = form.child(div().text_sm().text_color(p.muted_foreground).child(t(problem)));
         }

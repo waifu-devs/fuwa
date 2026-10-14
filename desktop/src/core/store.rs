@@ -644,6 +644,15 @@ pub fn apply_event(
             let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
             crate::core::economy::balance_updated(i.economy.entry(sid.to_owned()).or_default(), balance, &me)
         }
+        Payload::GachaBannersUpdated(p) => {
+            crate::core::economy::banners_updated(i.economy.entry(sid.to_owned()).or_default(), &p.banners)
+        }
+        Payload::GachaPulled(pb::GachaPulled { pull: Some(pull), progress: Some(progress) }) => {
+            // Only yours are kept: a manager hears everyone's pulls.
+            if i.me.as_ref().is_some_and(|m| m.id == pull.user_id) {
+                crate::core::economy::progress_updated(i.economy.entry(sid.to_owned()).or_default(), progress)
+            }
+        }
         Payload::PurchaseMade(pb::PurchaseMade { listing: Some(listing), .. }) => {
             // Its listing as it is after the sale; the wallet is read again (`sync.rs`).
             crate::core::economy::listing_updated(i.economy.entry(sid.to_owned()).or_default(), listing)

@@ -51,6 +51,7 @@ pub enum ShopEvent {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Shop,
+    Gacha,
     History,
     Send,
 }
@@ -66,6 +67,11 @@ pub struct ShopView {
     buying: Option<String>,
     /// Just bought, to pop it.
     bought: Option<(String, Instant)>,
+    /// A pull being made (its banner), and the last one's results until they're put away.
+    pulling: Option<String>,
+    pulled: Option<(pb::GachaPull, Instant)>,
+    /// Banners whose drop rates are open.
+    rates_open: std::collections::HashSet<String>,
     /// A currency whose reward is being claimed, and the last one claimed.
     claiming: Option<String>,
     claimed: Option<(String, i64, Instant)>,
@@ -150,6 +156,9 @@ impl ShopView {
             confirming: None,
             buying: None,
             bought: None,
+            pulling: None,
+            pulled: None,
+            rates_open: Default::default(),
             claiming: None,
             claimed: None,
             ledger: Vec::new(),
@@ -308,6 +317,28 @@ impl ShopView {
         cx.notify();
     }
 
+    fn pull(&mut self, banner: &pb::GachaBanner, count: i32, cx: &mut Context<Self>) {
+        let Some(price) = eco::pull_cost(banner, count) else { return };
+        if self.pulling.is_some() {
+            return;
+        }
+        self.pulling = Some(banner.id.clone());
+        self.error = None;
+        let (core, key, sid, id) = (self.core.clone(), self.key.clone(), self.server.clone(), banner.id.clone());
+        self.run(cx, async move { core.pull(&key, &sid, &id, count, price).await }, |this, result, cx| {
+            this.pulling = None;
+            match result {
+                Ok(res) => {
+                    this.pulled = res.pull.map(|p| (p, Instant::now()));
+                    this.ledger_read = false;
+                }
+                Err(err) => this.error = Some(err.message),
+            }
+            cx.notify();
+        });
+        cx.notify();
+    }
+
     fn send(&mut self, cx: &mut Context<Self>) {
         let (Some(currency), Some(to)) = (self.send_currency.clone(), self.send_to.clone()) else { return };
         let Some(amount) = parse_amount(&self.amount.read(cx).value()).filter(|n| *n > 0) else {
@@ -426,6 +457,17 @@ pub(crate) fn ledger_line(
             Some(name) => t_with("desktop.economy.ledger.bought", &[("name", Arg::Str(&name))]),
             None => t("desktop.economy.ledger.boughtGone"),
         },
+        LedgerKind::Gacha => {
+            let banner = listing.unwrap_or_else(|| t("desktop.economy.gacha.aBanner"));
+            let key = if entry.amount < 0 {
+                "desktop.economy.ledger.pulled"
+            } else if entry.note == "duplicate" {
+                "desktop.economy.ledger.gachaRefund"
+            } else {
+                "desktop.economy.ledger.gachaWon"
+            };
+            t_with(key, &[("name", Arg::Str(&banner))])
+        }
     }
 }
 
@@ -439,6 +481,7 @@ pub(crate) fn ledger_glyph(entry: &pb::LedgerEntry) -> &'static str {
         LedgerKind::Transfer if entry.amount < 0 => "arrow-up-right",
         LedgerKind::Transfer => "arrow-down-left",
         LedgerKind::Purchase => "shopping-bag",
+        LedgerKind::Gacha => "dices",
     }
 }
 
@@ -740,6 +783,43 @@ impl ShopView {
                 .child(icon("check").size(px(14.0)))
                 .child(t("desktop.economy.shop.owned"))
                 .into_any_element()
+        } else if l.gacha_only {
+            let from: Vec<String> = f.economy.banners_with(&l.id, now_ms()).iter().map(|b| b.name.clone()).collect();
+            let tip = t_with("desktop.economy.gacha.dropsFrom", &[("banners", Arg::Str(&from.join(", ")))]);
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("shop-gacha-only-{}", l.id)))
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .px(px(8.0))
+                        .h(px(22.0))
+                        .rounded_full()
+                        .bg(alpha(p.primary, 0.12))
+                        .text_color(p.primary)
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::BOLD)
+                        .child(icon("dices").size(px(12.0)))
+                        .child(t("desktop.economy.shop.gachaOnly"))
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx)),
+                )
+                .child(
+                    button(
+                        SharedString::from(format!("shop-try-{}", l.id)),
+                        t("desktop.economy.gacha.tryLuck"),
+                        Some("dices"),
+                        Look::Primary,
+                        true,
+                        p,
+                    )
+                    .rounded(radius_xl())
+                    .on_click(cx.listener(|this, _, _, cx| this.go(Screen::Gacha, cx))),
+                )
+                .into_any_element()
         } else if confirming {
             let (listing, nm) = (l.clone(), name.clone());
             div()
@@ -846,7 +926,7 @@ impl ShopView {
 
     fn shop_screen(&mut self, f: &Facts, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let balances = self.balances(f, p, window, cx);
-        let listings: Vec<pb::ShopListing> = f.economy.for_sale().into_iter().cloned().collect();
+        let listings: Vec<pb::ShopListing> = f.economy.for_sale(now_ms()).into_iter().cloned().collect();
         let list: AnyElement = if listings.is_empty() {
             empty("store", &t("desktop.economy.shop.empty"), p)
         } else {
@@ -904,7 +984,7 @@ impl ShopView {
 
     fn ledger_row(&self, e: &pb::LedgerEntry, f: &Facts, p: &Palette) -> AnyElement {
         let currency = f.economy.currency(&e.currency_id).cloned().unwrap_or_default();
-        let listing = f.economy.listing(&e.listing_id).map(|l| listing_name(l, &f.roles, &f.items));
+        let listing = eco::entry_subject(&f.economy, e, &f.roles, &f.items);
         let name_of = |id: &str| self.name_of(id);
         let line = ledger_line(e, &name_of, listing);
         let (amount, tint) = signed(e.amount, p);
@@ -1250,11 +1330,16 @@ impl Render for ShopView {
                 )
                 .child(div().flex_1().min_w_0().truncate().child(label))
         };
-        let screens = [
-            (Screen::Shop, "shop-nav-shop", "store", t("desktop.economy.shop.title")),
-            (Screen::History, "shop-nav-history", "receipt", t("desktop.economy.ledger.title")),
-            (Screen::Send, "shop-nav-send", "send", t("desktop.economy.send.title")),
-        ];
+        let gacha = !f.economy.shown_banners(now_ms()).is_empty();
+        if !gacha && self.screen == Screen::Gacha {
+            self.screen = Screen::Shop;
+        }
+        let mut screens = vec![(Screen::Shop, "shop-nav-shop", "store", t("desktop.economy.shop.title"))];
+        if gacha {
+            screens.push((Screen::Gacha, "shop-nav-gacha", "dices", t("desktop.economy.gacha.title")));
+        }
+        screens.push((Screen::History, "shop-nav-history", "receipt", t("desktop.economy.ledger.title")));
+        screens.push((Screen::Send, "shop-nav-send", "send", t("desktop.economy.send.title")));
         let at = screens.iter().position(|s| s.0 == self.screen).unwrap_or(0);
         let hl = motion::follow("shop-nav-hl", at as f32 * 34.0, window, cx);
         let mut rows = div().relative().flex().flex_col().gap(px(2.0)).child(
@@ -1326,11 +1411,13 @@ impl Render for ShopView {
 
         let (title, about) = match self.screen {
             Screen::Shop => (t("desktop.economy.shop.title"), t("desktop.economy.shop.about")),
+            Screen::Gacha => (t("desktop.economy.gacha.title"), t("desktop.economy.gacha.about")),
             Screen::History => (t("desktop.economy.ledger.title"), t("desktop.economy.ledger.about")),
             Screen::Send => (t("desktop.economy.send.title"), t("desktop.economy.send.about")),
         };
         let body = match self.screen {
             Screen::Shop => self.shop_screen(&f, &p, window, cx),
+            Screen::Gacha => self.gacha_screen(&f, &p, window, cx),
             Screen::History => self.history_screen(&f, &p, window, cx),
             Screen::Send => self.send_screen(&f, &p, window, cx),
         };
@@ -1441,6 +1528,332 @@ impl Render for ShopView {
                 let (dx, dy) = (w * 0.02 * (1.0 - k), h * 0.02 * (1.0 - k));
                 el.opacity(k).top(px(-dy)).bottom(px(-dy)).left(px(-dx)).right(px(-dx))
             })
+            .into_any_element()
+    }
+}
+
+/// A tier's color as the screen draws it.
+fn tier_tint(banner: &pb::GachaBanner, tier_id: &str) -> Hsla {
+    let at = banner.tiers.iter().position(|t| t.id == tier_id).unwrap_or(banner.tiers.len());
+    let color = banner.tiers.get(at).map_or(eco::TIER_COLORS[eco::TIER_COLORS.len() - 1], |t| eco::tier_color(t, at));
+    gpui_kit::rgb(color).into()
+}
+
+/// A small rounded label: "Duplicate", "Guaranteed".
+fn chip(text: String, tint: Hsla) -> gpui_kit::Div {
+    div()
+        .flex_none()
+        .px(px(6.0))
+        .h(px(18.0))
+        .flex()
+        .items_center()
+        .rounded_full()
+        .bg(tint.opacity(0.15))
+        .text_color(tint)
+        .text_size(px(10.5))
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .child(text)
+}
+
+impl ShopView {
+    /// The banners you can pull on: price, pity, limits, Pull and the drop rates; what the last pull won on top.
+    fn gacha_screen(&mut self, f: &Facts, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let now = now_ms();
+        let mut col = div().flex().flex_col().gap(px(14.0));
+        if let Some((pull, at)) = self.pulled.clone() {
+            col = col.child(self.pull_results(&pull, at, f, p, cx));
+        }
+        let banners: Vec<pb::GachaBanner> = f.economy.shown_banners(now).into_iter().cloned().collect();
+        if banners.is_empty() {
+            return empty("dices", &t("desktop.economy.gacha.empty"), p);
+        }
+        for (n, b) in banners.iter().enumerate() {
+            col = col.child(motion::rise(
+                self.banner_card(b, f, p, now, window, cx),
+                SharedString::from(format!("shop-banner-in-{}", b.id)),
+                Duration::from_millis(40 * n.min(6) as u64),
+                10.0,
+            ));
+        }
+        div().id("shop-gacha-scroll").flex_1().min_h_0().overflow_y_scroll().pb(px(24.0)).child(col).into_any_element()
+    }
+
+    fn banner_card(
+        &self,
+        b: &pb::GachaBanner,
+        f: &Facts,
+        p: &Palette,
+        now: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::Div {
+        let currency = f.economy.currency(&b.currency_id).cloned().unwrap_or_default();
+        let progress = f.economy.progress.get(&b.id);
+        let top = b.tiers.iter().position(|t| t.rate > 0).unwrap_or(0);
+        let glow: Hsla =
+            gpui_kit::rgb(b.tiers.get(top).map_or(eco::TIER_COLORS[0], |t| eco::tier_color(t, top))).into();
+        let open = eco::openness(b, now);
+        let when = match open {
+            eco::Openness::Soon(at) => {
+                t_with("desktop.economy.gacha.opensIn", &[("time", Arg::Str(&countdown(at - now)))])
+            }
+            eco::Openness::Open(at) if at > 0 => {
+                t_with("desktop.economy.gacha.closesIn", &[("time", Arg::Str(&countdown(at - now)))])
+            }
+            _ => t("desktop.economy.gacha.always"),
+        };
+        let left = eco::pulls_left(b, progress);
+        let pity = eco::pity_in(b, progress);
+        let pity_tier = b.tiers.iter().find(|t| t.id == b.pity_tier_id).map(|t| t.name.clone()).unwrap_or_default();
+        let mut meta = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(12.0))
+            .text_xs()
+            .text_color(p.muted_foreground)
+            .child(div().flex().items_center().gap(px(4.0)).child(icon("clock").size(px(12.0))).child(when));
+        if let Some(n) = pity {
+            meta = meta.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(tier_tint(b, &b.pity_tier_id))
+                    .child(icon("sparkles").size(px(12.0)))
+                    .child(t_with(
+                        "desktop.economy.gacha.pityIn",
+                        &[("count", Arg::Num(i64::from(n))), ("tier", Arg::Str(&pity_tier))],
+                    )),
+            );
+        }
+        if let Some(n) = left {
+            meta = meta.child(t_with("desktop.economy.gacha.pullsLeft", &[("count", Arg::Num(i64::from(n)))]));
+        }
+        if let Some(pr) = progress.filter(|pr| pr.pulls > 0) {
+            meta = meta.child(t_with("desktop.economy.gacha.pulled", &[("count", Arg::Num(i64::from(pr.pulls)))]));
+        }
+        // Pull once, and the multi-pull when the banner has one.
+        let busy = self.pulling.as_deref() == Some(b.id.as_str());
+        let can = matches!(open, eco::Openness::Open(_)) && self.pulling.is_none();
+        let mut pulls = div().flex().flex_wrap().items_center().gap(px(8.0));
+        for count in [1, b.multi_pull].into_iter().filter(|c| *c == 1 || *c >= 2) {
+            let Some(price) = eco::pull_cost(b, count) else { continue };
+            let short = f.economy.amount(&b.currency_id) < price;
+            let out = left.is_some_and(|l| l < count);
+            let label = if count == 1 {
+                t("desktop.economy.gacha.pullOnce")
+            } else {
+                t_with("desktop.economy.gacha.pullMany", &[("count", Arg::Num(i64::from(count)))])
+            };
+            let ok = can && !short && !out;
+            let banner = b.clone();
+            pulls = pulls.child(
+                button(
+                    SharedString::from(format!("shop-pull-{}-{count}", b.id)),
+                    "",
+                    Some("dices"),
+                    if count == 1 { Look::Outline } else { Look::Primary },
+                    false,
+                    p,
+                )
+                .rounded(radius_xl())
+                .child(label)
+                .child(div().opacity(0.85).child(money(&currency, &f.emojis, price, 14.0)))
+                .when(busy, |el| el.child(spinner(SharedString::from(format!("shop-pull-spin-{count}")), 14.0, window)))
+                .when(!ok, |el| el.opacity(0.5))
+                .when(ok, |el| el.on_click(cx.listener(move |this, _, _, cx| this.pull(&banner, count, cx)))),
+            );
+        }
+        let why = if !matches!(open, eco::Openness::Open(_)) {
+            Some(t("desktop.economy.gacha.notOpen"))
+        } else if left == Some(0) {
+            Some(t("desktop.economy.gacha.noPulls"))
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            pulls = pulls.child(div().text_xs().text_color(p.muted_foreground).child(why));
+        }
+        let rates_open = self.rates_open.contains(&b.id);
+        let id = b.id.clone();
+        pulls = pulls.child(
+            button(
+                SharedString::from(format!("shop-rates-{}", b.id)),
+                t("desktop.economy.gacha.rates"),
+                Some(if rates_open { "chevron-up" } else { "percent" }),
+                Look::Ghost,
+                true,
+                p,
+            )
+            .rounded(radius_xl())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.rates_open.remove(&id) {
+                    this.rates_open.insert(id.clone());
+                }
+                cx.notify();
+            })),
+        );
+        let mut card = div()
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(glow.opacity(0.35))
+            .bg(alpha(p.card, 0.8))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .size(px(44.0))
+                            .flex_none()
+                            .rounded(radius_xl())
+                            .bg(glow.opacity(0.15))
+                            .text_color(glow)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("dices").size(px(22.0))),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).truncate().child(b.name.clone()))
+                            .when(!b.description.is_empty(), |el| {
+                                el.child(div().text_sm().text_color(p.muted_foreground).child(b.description.clone()))
+                            }),
+                    ),
+            )
+            .child(meta)
+            .child(pulls);
+        if rates_open {
+            card = card.child(self.rates(b, f, p));
+        }
+        card
+    }
+
+    /// Every tier with its rate, and each prize in it with its chance per pull.
+    fn rates(&self, b: &pb::GachaBanner, f: &Facts, p: &Palette) -> AnyElement {
+        let mut list = div().flex().flex_col().gap(px(8.0)).pt(px(4.0));
+        for (n, tier) in b.tiers.iter().enumerate() {
+            let tint: Hsla = gpui_kit::rgb(eco::tier_color(tier, n)).into();
+            let mut block = div().flex().flex_col().gap(px(2.0)).child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_sm()
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child(div().size(px(10.0)).rounded_full().bg(tint))
+                    .child(div().flex_1().text_color(tint).child(tier.name.clone()))
+                    .child(eco::percent(tier.rate)),
+            );
+            for prize in b.prizes.iter().filter(|x| x.tier_id == tier.id) {
+                let name = eco::prize_name(&f.economy, prize, &f.roles, &f.items);
+                block = block.child(
+                    div()
+                        .pl(px(18.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(div().flex_1().min_w_0().truncate().child(name))
+                        .child(eco::percent(prize.chance)),
+                );
+            }
+            list = list.child(block);
+        }
+        list.child(div().text_xs().text_color(p.muted_foreground).child(t("desktop.economy.gacha.ratesNote")))
+            .into_any_element()
+    }
+
+    /// What the last pull won, one card after another.
+    fn pull_results(
+        &self,
+        pull: &pb::GachaPull,
+        at: Instant,
+        f: &Facts,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let banner = f.economy.banner(&pull.banner_id).cloned().unwrap_or_default();
+        let gold = gold(p);
+        let mut row = div().flex().flex_wrap().gap(px(8.0));
+        for (n, r) in pull.results.iter().enumerate() {
+            let tint = tier_tint(&banner, &r.tier_id);
+            let outcome = pb::GachaOutcome::try_from(r.outcome).unwrap_or(pb::GachaOutcome::Won);
+            let mut chips = div().flex().flex_wrap().gap(px(4.0));
+            chips = chips.child(chip(
+                match outcome {
+                    pb::GachaOutcome::Duplicate => t("desktop.economy.gacha.duplicate"),
+                    pb::GachaOutcome::Refunded => t("desktop.economy.gacha.refunded"),
+                    _ => t("desktop.economy.gacha.new"),
+                },
+                if outcome == pb::GachaOutcome::Won { tint } else { p.muted_foreground.into() },
+            ));
+            if r.guaranteed {
+                chips = chips.child(chip(t("desktop.economy.gacha.guaranteed"), gold));
+            }
+            let card = div()
+                .w(px(170.0))
+                .p(px(10.0))
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .rounded(radius_xl())
+                .border_1()
+                .border_color(tint.opacity(0.5))
+                .bg(tint.opacity(0.08))
+                .child(div().text_xs().font_weight(FontWeight::EXTRA_BOLD).text_color(tint).child(r.tier_name.clone()))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).truncate().child(r.prize_name.clone()))
+                .child(chips);
+            row = row.child(motion::pop(
+                card,
+                SharedString::from(format!("shop-drop-{n}-{at:?}")),
+                0.6,
+                if n % 2 == 0 { -6.0 } else { 6.0 },
+                Duration::from_millis(90 * n.min(12) as u64),
+            ));
+        }
+        div()
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .rounded(radius_2xl())
+            .border_1()
+            .border_color(alpha(p.primary, 0.4))
+            .bg(alpha(p.primary, 0.05))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t_with("desktop.economy.gacha.results", &[("name", Arg::Str(&pull.banner_name))])),
+                    )
+                    .child(
+                        button("shop-pulled-done", t("desktop.economy.gacha.done"), None, Look::Ghost, true, p)
+                            .rounded(radius_xl())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.pulled = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(row)
             .into_any_element()
     }
 }
