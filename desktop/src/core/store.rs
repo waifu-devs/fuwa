@@ -136,6 +136,8 @@ pub struct InstanceState {
     pub mod_view: HashMap<String, crate::core::mod_view::ModView>,
     /// Per server: its currencies, shop and your wallet there (`economy.rs`).
     pub economy: HashMap<String, crate::core::economy::Economy>,
+    /// Per board channel, while it's been opened: its columns, labels, cards and their bodies (`board.rs`).
+    pub boards: HashMap<String, crate::core::board::Board>,
 }
 
 impl InstanceState {
@@ -182,6 +184,7 @@ impl InstanceState {
             home_emojis: HashMap::new(),
             mod_view: HashMap::new(),
             economy: HashMap::new(),
+            boards: HashMap::new(),
         }
     }
 
@@ -529,6 +532,7 @@ pub fn apply_event(
 ) -> Outcome {
     let sid = event.server_id.as_str();
     let Some(payload) = &event.payload else { return Outcome::Nothing };
+    crate::core::board::on_event(&mut i.boards, payload);
     match payload {
         Payload::ServerUpdated(p) => {
             if let Some(server) = &p.server
@@ -553,6 +557,7 @@ pub fn apply_event(
                 list.retain(|c| c.id != p.channel_id);
             }
             i.messages.remove(&p.channel_id);
+            i.boards.remove(&p.channel_id);
             i.unread.remove(&p.channel_id);
             i.newest.remove(&p.channel_id);
             i.notified.remove(&p.channel_id);

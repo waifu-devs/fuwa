@@ -292,6 +292,7 @@ impl FuwaApp {
                 Built::of(vec![vec![read], copy_id(&other, "user")])
             }
             MenuOf::Composer => self.composer_items(cx),
+            MenuOf::Board { menu, .. } => self.board_menu_items(menu),
             MenuOf::Reaction { msg, chip } => {
                 let (id, emoji, label) = (msg.clone(), chip.key.clone(), chip.label());
                 let title = crate::core::i18n::t_with("chattools.reactions.clearOne", &[("emoji", Arg::Str(&label))]);

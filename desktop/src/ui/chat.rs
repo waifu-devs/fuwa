@@ -507,15 +507,20 @@ impl FuwaApp {
         let can_start = threads_here && i.access(&server).has_in(&channel, pb::Permission::CreateThreads);
         let can_reply = threads_here && i.access(&server).has_in(&channel, pb::Permission::SendMessages);
         // In a thread: the message it's under comes first, then its replies.
-        let parent = thread.and_then(|id| {
+        let under = thread.and_then(|id| {
             i.thread_parents.get(id).or_else(|| i.messages.get(&channel)?.items.iter().find(|m| m.id == id))
         });
+        // A card's comments: its body shows above them, in the card's own panel (`ui/board.rs`).
+        let card = here.is_some_and(|c| c.r#type == pb::ChannelType::Board as i32);
+        let parent = under.filter(|_| !card);
         let divider = |rows: &mut Vec<Row>| {
-            let count = parent.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
+            let count = under.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
+            let words = if card { "chattools.board.commentsHeading" } else { "chat.threads.replies" };
             rows.push(Row::Divider {
                 text: match count {
+                    0 if card => t("chattools.board.commentsStart"),
                     0 => t("chat.threads.noReplies"),
-                    n => crate::core::i18n::t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(n)))]),
+                    n => crate::core::i18n::t_with(words, &[("count", Arg::Num(i64::from(n)))]),
                 },
             });
             if loaded.has_more {
@@ -1028,6 +1033,9 @@ impl FuwaApp {
             )
             .into_any_element();
         };
+        if channel.r#type == pb::ChannelType::Board as i32 {
+            return self.board_view(key, server, &channel, window, cx);
+        }
         let secure = channel.r#type == pb::ChannelType::Secure as i32;
         let header = if secure {
             self.secure_header(key, server, &channel, &p, cx)

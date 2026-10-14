@@ -216,6 +216,7 @@ clients! {
     live => "LiveService" pb::live_service_client::LiveServiceClient<Transport>,
     moderation => "ModerationService" pb::moderation_service_client::ModerationServiceClient<Transport>,
     economy => "EconomyService" pb::economy_service_client::EconomyServiceClient<Transport>,
+    boards => "BoardService" pb::board_service_client::BoardServiceClient<Transport>,
 }
 
 impl Api {
