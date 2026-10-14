@@ -561,7 +561,7 @@
     "one": "Como máximo {count} tarjeta",
     "other": "Como máximo {count} tarjetas"
   },
-  "board.markdownHint": "Admite Markdown. Ctrl+Enter guarda.",
+  "board.markdownHint": "Admite Markdown y $matemáticas$. Ctrl+Enter guarda.",
   "board.mine": "Mis tarjetas",
   "board.more": "Ver más",
   "board.moveDown": "Bajar",

@@ -561,7 +561,7 @@
     "one": "At most {count} card",
     "other": "At most {count} cards"
   },
-  "board.markdownHint": "Markdown works. Ctrl+Enter saves.",
+  "board.markdownHint": "Markdown and $math$ work. Ctrl+Enter saves.",
   "board.mine": "My cards",
   "board.more": "Show more",
   "board.moveDown": "Move down",

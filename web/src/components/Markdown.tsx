@@ -3,9 +3,11 @@ import renderMarkdown, { type Components, type Options } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { guardMasked } from "@/components/LeavingDialog";
+import { BlockMath, InlineMath, WideMath } from "@/components/Math";
 import { Spoiler } from "@/components/Spoiler";
 import { Timestamp } from "@/components/Timestamp";
 import { remarkMaskedLinks } from "@/lib/links";
+import { markMath, remarkMath } from "@/lib/math";
 import { remarkSpoilers } from "@/lib/spoilers";
 import { remarkTimestamps } from "@/lib/timestamps";
 import { cn } from "@/lib/utils";
@@ -22,7 +24,9 @@ import { cn } from "@/lib/utils";
  *
  * Timestamps (`<t:SECONDS:STYLE>`, as in Discord) read in each reader's own
  * time zone, in block and inline Markdown alike, and `||spoilers||` stay
- * covered until the reader reveals them.
+ * covered until the reader reveals them. Block Markdown also draws math:
+ * `$inline$`, `$$display$$` and ```math blocks (lib/math.ts), where dollar
+ * amounts stay text.
  *
  * Styles live in app.css (.markdown and .markdown-inline) and only use theme
  * tokens, so Markdown looks right in every theme.
@@ -73,6 +77,9 @@ const blockComponents: Components = {
   h6: ({ node: _node, ...props }) => <h4 {...props} />,
   "fuwa-time": Timestamp,
   "fuwa-spoiler": Spoiler,
+  "fuwa-math": InlineMath,
+  "fuwa-math-wide": WideMath,
+  "fuwa-math-block": BlockMath,
 } as Components;
 
 /** Extra syntax for one kind of text, like mentions in chat: more remark plugins and the elements they make. */
@@ -105,7 +112,7 @@ function cached(kind: string, text: string, make: () => ReactElement): ReactElem
   return made;
 }
 
-const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks, remarkTimestamps, remarkSpoilers, remarkMaskedLinks];
+const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkMath, remarkBreaks, remarkTimestamps, remarkSpoilers, remarkMaskedLinks];
 const extensionIds = new WeakMap<MarkdownExtension, string>();
 let extensions = 0;
 const extensionOptions = (extension: MarkdownExtension): Options => ({
@@ -129,8 +136,8 @@ export const Markdown = memo(function Markdown({
   extension?: MarkdownExtension;
 }) {
   const content = extension
-    ? cached(extensionKey(extension), children, () => renderMarkdown({ ...extensionOptions(extension), children }))
-    : cached("block", children, () => renderMarkdown({ remarkPlugins: BLOCK_PLUGINS, components: blockComponents, children }));
+    ? cached(extensionKey(extension), children, () => renderMarkdown({ ...extensionOptions(extension), children: markMath(children) }))
+    : cached("block", children, () => renderMarkdown({ remarkPlugins: BLOCK_PLUGINS, components: blockComponents, children: markMath(children) }));
   return <div className={cn("markdown", className)}>{content}</div>;
 });
 

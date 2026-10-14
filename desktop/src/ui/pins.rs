@@ -668,7 +668,7 @@ impl FuwaApp {
                 .child(
                     gpui_kit::base::TextView::markdown(
                         SharedString::from(format!("pin-body|{id}")),
-                        images_as_links(&text),
+                        images_as_links(&crate::core::math::mark(&text)),
                     )
                     .markdown_extensions(crate::ui::emoji::markdown_extensions())
                     .style(crate::ui::chat::chat_markdown(&p)),

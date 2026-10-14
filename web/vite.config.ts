@@ -10,15 +10,15 @@ import { defineConfig, type Plugin, searchForWorkspaceRoot } from "vite";
 const fuwa = process.env.FUWA_DEV_URL ?? "http://localhost:8080";
 
 // The app ships its own copy of the site's font (M PLUS Rounded 1c) so it works
-// offline on self-hosted instances. Every browser the app supports reads WOFF2,
-// so the older WOFF copies are left out of the build.
+// offline on self-hosted instances, and KaTeX's for formulas. Every browser the app
+// supports reads WOFF2, so the older WOFF and TrueType copies are left out of the build.
 function woff2Only(): Plugin {
   return {
     name: "fuwa:woff2-only",
     enforce: "pre",
     transform(code, id) {
-      if (!/@fontsource\/.+\.css$/.test(id)) return;
-      return code.replace(/,\s*url\([^)]+\.woff\) format\('woff'\)/g, "");
+      if (!/(?:@fontsource\/.+|katex\/dist\/katex(?:\.min)?)\.css$/.test(id)) return;
+      return code.replace(/,\s*url\([^)]+\.(?:woff|ttf)\) format\((["'])(?:woff|truetype)\1\)/g, "");
     },
   };
 }
@@ -50,10 +50,11 @@ export default defineConfig({
     assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
     chunkSizeWarningLimit: 1500,
     // Libraries in their own file: the app's code changes far more often, and each stays under the limit.
-    // vgpu (WebGPU effects behind the chat) is left out of it: it loads only when someone turns an effect on.
+    // vgpu (WebGPU effects behind the chat) is left out of it: it loads only when someone turns an effect on,
+    // and so is KaTeX, which loads only when a formula is on screen (components/Math.tsx).
     rolldownOptions: {
       output: {
-        codeSplitting: { groups: [{ name: "vendor", test: /node_modules[\\/](?!\.pnpm[\\/](?:vgpu|@vgpu|wgpu-matrix))(?!(?:vgpu|@vgpu|wgpu-matrix)[\\/])/ }] },
+        codeSplitting: { groups: [{ name: "vendor", test: /node_modules[\\/](?!\.pnpm[\\/](?:vgpu|@vgpu|wgpu-matrix|katex))(?!(?:vgpu|@vgpu|wgpu-matrix|katex)[\\/])/ }] },
       },
     },
   },

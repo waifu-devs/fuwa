@@ -436,6 +436,11 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
   font-size: 0.875em;
 }
 :where(.markdown, .markdown-inline) del { opacity: 0.7; }
+/* Formulas (components/Math.tsx): KaTeX's own size is a little big beside chat text. */
+.markdown .katex { font-size: 1.1em; }
+.markdown .math-block { overflow-x: auto; overflow-y: hidden; padding: 0.15em 0; text-align: center; }
+.markdown .math-block .katex-display { margin: 0.1em 0; }
+.markdown .math-source { color: var(--muted-foreground); }
 
 
 /* Refused uploads shake their message once. */
