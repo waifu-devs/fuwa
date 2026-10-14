@@ -118,6 +118,8 @@ export type FileRef = {
   fileSize: number;
   /** Marked as a spoiler: shown covered until it's clicked. */
   spoiler?: boolean;
+  /** A GIF from the GIF picker: shown like one in a channel, not as a file. `provider` is a GifProvider. */
+  gif?: { title: string; provider: number };
 };
 
 /** A voice message's sealed file and what it sounds like, from inside the encrypted message. */

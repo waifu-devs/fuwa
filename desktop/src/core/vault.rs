@@ -208,6 +208,19 @@ pub struct FileRef {
     /// Marked as a spoiler by its sender: covered until it's clicked.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub spoiler: bool,
+    /// A GIF from the GIF picker: shown like one in a channel, not as a file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gif: Option<GifMark>,
+}
+
+/// What a GIF sealed as a file shows besides itself (`pb::SealedGif`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GifMark {
+    /// What it shows, for screen readers.
+    pub title: String,
+    /// Who to credit (a `pb::GifProvider`).
+    pub provider: i32,
 }
 
 /// A voice message's sealed file and what was said about it.

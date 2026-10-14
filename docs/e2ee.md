@@ -301,8 +301,10 @@ file's own first bytes say it's PNG, JPEG, GIF, WebP, AVIF, MP4 or WebM:
 never by the type the sender gave. SVG, HTML, PDF and everything else is a
 card to download, saved as plain bytes under its cleaned name and never
 opened in a tab. With reduce motion on, a GIF or animated WebP shows its
-first frame until it's clicked. Nothing is ever made of a file by anyone
-else: no thumbnails, no scanning (AutoMod can't open them).
+first frame until it's clicked. A GIF from the GIF picker (docs/gifs.md) is
+sent as one of these files, marked as a GIF inside the encrypted text, and
+shown like a GIF in a channel instead of as a file. Nothing is ever made of a
+file by anyone else: no thumbnails, no scanning (AutoMod can't open them).
 
 Every sealed upload, voice message or file, counts toward the instance's
 caps on files (`attachment_upload_bytes` for one file on its sealed size,

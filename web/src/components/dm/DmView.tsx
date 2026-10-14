@@ -24,9 +24,9 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
-import type { Member, User } from "@/gen/fuwa/v1/types_pb";
+import type { Member, MessageGif, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
@@ -43,6 +43,7 @@ import {
   retryPending,
   sendDm,
   sendDmFiles,
+  sendDmGif,
   sendVoiceDm,
   voiceLimits,
   voiceLoader,
@@ -64,7 +65,9 @@ import { emojisToCarry, encodeEmoji, useCatalog, type Catalog, type CarriedEmoji
 import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
+import { GifButton } from "@/components/chat/GifPicker";
 import { insertAtCaret } from "@/lib/caret";
+import { filesIn } from "@/lib/pasted";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
@@ -227,8 +230,8 @@ function TrustPill({ instanceKey, conversationId, onOpen }: { instanceKey: strin
       className={cn(
         "group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full px-2.5 py-1 text-xs font-bold transition-colors",
         state === "changed"
-          ? "bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300"
-          : "bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300",
+          ? "border border-seal-warn-edge bg-seal-warn-surface text-seal-warn-ink shadow-sm hover:bg-seal-warn-surface-hover"
+          : "border border-seal-edge bg-seal-surface text-seal-ink shadow-sm hover:bg-seal-surface-hover",
       )}
     >
       <span aria-hidden className="shine pointer-events-none absolute inset-0" />
@@ -257,7 +260,7 @@ export function Starting() {
         <motion.span
           animate={{ rotate: [0, -18, 14, -8, 0] }}
           transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 0.4, ease: "easeInOut" }}
-          className="grid size-14 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          className="grid size-14 place-items-center rounded-2xl border border-seal-edge bg-seal-surface text-seal-ink"
         >
           <KeyRoundIcon className="size-7" />
         </motion.span>
@@ -636,15 +639,15 @@ function Beginning({ partner }: { partner: User | undefined }) {
           initial={{ scale: 0, rotate: -30 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.45 }}
-          className="absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full bg-emerald-500 text-white ring-4 ring-card"
+          className="absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full bg-seal-ink text-seal-surface ring-4 ring-card"
         >
           <LockKeyholeIcon className="size-4" />
         </motion.span>
       </span>
       <h2 className="mt-3 text-2xl font-extrabold sm:text-3xl">{displayName(partner)}</h2>
       {partner && <p className="text-muted-foreground">@{partner.username}</p>}
-      <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-900 dark:text-emerald-100">
-        <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl border border-seal-edge bg-seal-surface px-3 py-2.5 text-sm text-card-foreground">
+        <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-seal-ink" />
         <span>
           <T k="dms-calls.dm.beginning.text" values={{ encrypted: <b>{t("dms-calls.dm.beginning.encrypted")}</b>, name: displayName(partner) }} />
         </span>
@@ -659,7 +662,7 @@ function Joining({ text }: { text: string }) {
       <motion.span
         animate={{ rotate: [0, -16, 12, 0] }}
         transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-        className="grid size-8 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+        className="grid size-8 place-items-center rounded-full border border-seal-edge bg-seal-surface text-seal-ink"
       >
         <KeyRoundIcon className="size-4" />
       </motion.span>
@@ -1086,7 +1089,7 @@ function SystemLine({ item, text, animate }: { item: Item; text: string; animate
         <Icon
           className={cn(
             "size-4 transition-transform duration-500 group-hover:rotate-[-20deg]",
-            item.kind === "unreadable" || item.kind === "reset" ? "text-amber-500" : "text-emerald-500",
+            item.kind === "unreadable" || item.kind === "reset" ? "text-seal-warn-icon" : "text-seal-icon",
           )}
         />
       </span>
@@ -1259,12 +1262,27 @@ function ComposerBox({
     }
   }
 
+  /** Sends a GIF from the picker on its own, leaving what's typed in the box. The picker says if it can't be fetched. */
+  async function sendGif(gif: MessageGif) {
+    setError(null);
+    sentFrom(instanceKey, typing);
+    await sendDmGif(instanceKey, id, gif, thread && { thread: thread.parent, inChannel: alsoChannel });
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
     if (sendsMessage(e, sendWith)) {
       e.preventDefault();
       send();
     }
+  }
+
+  // Pasted pictures and files join the ones picked, sealed on this device like them.
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = filesIn(e.clipboardData);
+    if (!pasted.length || !files || status !== "ready") return;
+    e.preventDefault();
+    pickFiles(draft, pasted);
   }
 
   return (
@@ -1292,7 +1310,7 @@ function ComposerBox({
             <motion.span
               animate={seal}
               title={t("dms-calls.dm.composer.sealed")}
-              className="mb-2 grid size-5 shrink-0 place-items-center text-emerald-500"
+              className="mb-2 grid size-5 shrink-0 place-items-center text-seal-icon"
             >
               <LockKeyholeIcon className="size-4" />
             </motion.span>
@@ -1307,6 +1325,7 @@ function ComposerBox({
                 if (e.target.value) typed(instanceKey, typing);
               }}
               onKeyDown={onKeyDown}
+              onPaste={onPaste}
               placeholder={placeholder}
               aria-label={placeholder}
               className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"
@@ -1333,6 +1352,7 @@ function ComposerBox({
                 </motion.button>
               )}
             </EmojiPicker>
+            {files && status === "ready" && <GifButton instanceKey={instanceKey} onSend={(gif) => sendGif(gif)} />}
             {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
@@ -1416,7 +1436,7 @@ function ComposerFooter({
         </label>
       )}
       <KeysHint sendWith={sendWith} className={cn("hidden min-w-0 flex-1 truncate", !inThread && "sm:block")} />
-      <p className="ml-auto flex shrink-0 items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+      <p className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-seal-edge bg-seal-surface px-1.5 font-bold text-seal-ink">
         <LockKeyholeIcon className="size-3" /> {note}
       </p>
     </div>

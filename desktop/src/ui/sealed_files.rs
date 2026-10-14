@@ -21,7 +21,7 @@ use gpui_kit::{
 use crate::core::attachments;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::sealed_files::{self, Outgoing};
-use crate::core::vault::FileRef;
+use crate::core::vault::{FileRef, GifMark};
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::dm_view::seal;
 use crate::ui::motion;
@@ -50,6 +50,30 @@ thread_local! {
 
 fn state_of(media_id: &str) -> Option<State> {
     FILES.with(|f| f.borrow().get(media_id).cloned())
+}
+
+/// A picture this device opened, to draw large (`viewer.rs`), with its bytes to save.
+pub(crate) fn opened_picture(media_id: &str) -> Option<(Arc<Image>, Arc<Vec<u8>>)> {
+    match state_of(media_id)? {
+        State::Open { bytes, picture: Some(picture) } => Some((picture, bytes)),
+        _ => None,
+    }
+}
+
+/// The message's pictures the viewer steps through: opened here, and not still covered.
+fn viewable(files: &[FileRef]) -> Vec<crate::ui::viewer::Viewed> {
+    files
+        .iter()
+        .filter(|f| opened_picture(&f.media_id).is_some())
+        .filter(|f| spoilers::file_shown(&f.media_id, f.spoiler) == spoilers::Shown::Revealed)
+        .map(|f| crate::ui::viewer::Viewed {
+            source: crate::ui::viewer::Source::Sealed(f.media_id.clone()),
+            name: f.name.clone(),
+            width: f.width as i32,
+            height: f.height as i32,
+            bytes: opened_picture(&f.media_id).map_or(0, |(_, b)| b.len() as i64),
+        })
+        .collect()
 }
 
 /// Opens a file on this device, once (and again after it failed, when asked).
@@ -83,6 +107,10 @@ fn open(this: &WeakEntity<FuwaApp>, key: &str, file: &FileRef, cx: &mut gpui_kit
 }
 
 /// Saves an opened file where the person picks, under its cleaned name.
+pub(crate) fn save_opened(this: &WeakEntity<FuwaApp>, name: String, bytes: Arc<Vec<u8>>, cx: &mut gpui_kit::App) {
+    save(this, name, bytes, cx)
+}
+
 fn save(this: &WeakEntity<FuwaApp>, name: String, bytes: Arc<Vec<u8>>, cx: &mut gpui_kit::App) {
     let _ = this.update(cx, |_, cx| {
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
@@ -118,8 +146,9 @@ pub(crate) fn files_view(
     cx: &mut gpui_kit::App,
 ) -> AnyElement {
     let mut out = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
+    let all: Arc<Vec<FileRef>> = Arc::new(files.to_vec());
     for (n, file) in files.iter().enumerate() {
-        out = out.child(one_file(&format!("{mid}|{n}"), file, p, this, key, cx));
+        out = out.child(one_file(&format!("{mid}|{n}"), file, &all, p, this, key, cx));
     }
     out.into_any_element()
 }
@@ -127,13 +156,14 @@ pub(crate) fn files_view(
 fn one_file(
     id: &str,
     file: &FileRef,
+    all: &Arc<Vec<FileRef>>,
     p: &Palette,
     this: &WeakEntity<FuwaApp>,
     key: &str,
     cx: &mut gpui_kit::App,
 ) -> AnyElement {
     let s = seal(p);
-    let hinted = file.content_type.starts_with("image/") || file.width > 0;
+    let hinted = file.content_type.starts_with("image/") || file.width > 0 || file.gif.is_some();
     let auto = hinted && (if file.file_size > 0 { file.file_size } else { file.size }) <= AUTO_OPEN_BYTES;
     let state = state_of(&file.media_id);
     // A spoiler stays covered until it's clicked (it may open meanwhile, unseen).
@@ -143,9 +173,31 @@ fn one_file(
         let (this, key, file) = (this.clone(), key.to_owned(), file.clone());
         cx.defer(move |cx| open(&this, &key, &file, cx));
     }
+    if let Some(mark) = &file.gif {
+        match &state {
+            Some(State::Open { picture: Some(picture), .. }) => {
+                return gif_view(id, file, mark, Some(picture.clone()), p);
+            }
+            None | Some(State::Opening) => return gif_view(id, file, mark, None, p),
+            // One that didn't open, or isn't a picture after all, is a card like any file.
+            _ => {}
+        }
+    }
     if let Some(State::Open { bytes, picture: Some(picture) }) = &state {
         let (w, h) = attachments::fit_box(file.width as i32, file.height as i32, MEDIA_BOX);
         let (this, name, bytes) = (this.clone(), file.name.clone(), bytes.clone());
+        // A click opens it in the viewer, with the message's other opened pictures.
+        let open_viewer = {
+            let (this, all, key, media_id) = (this.clone(), all.clone(), key.to_owned(), file.media_id.clone());
+            move |_: &gpui_kit::ClickEvent, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+                let pictures = viewable(&all);
+                let at = pictures
+                    .iter()
+                    .position(|v| v.source == crate::ui::viewer::Source::Sealed(media_id.clone()))
+                    .unwrap_or(0);
+                let _ = this.update(cx, |this, cx| this.view_pictures(&key, pictures, at, window, cx));
+            }
+        };
         let cover = (shown != spoilers::Shown::Revealed)
             .then(|| spoilers::picture_cover(id, &file.media_id, shown == spoilers::Shown::Fading, p));
         if shown == spoilers::Shown::Covered {
@@ -173,6 +225,8 @@ fn one_file(
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.6))
+            .cursor_pointer()
+            .on_click(open_viewer)
             .child(
                 img(picture.clone())
                     .id(SharedString::from(format!("sealed-img|{id}")))
@@ -208,7 +262,10 @@ fn one_file(
                             .build(window, cx)
                         }
                     })
-                    .on_click(move |_, _, cx| save(&this, name.clone(), bytes.clone(), cx))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        save(&this, name.clone(), bytes.clone(), cx)
+                    })
                     .child(icon("download").size(px(16.0))),
             )
             .children(cover)
@@ -409,6 +466,51 @@ fn capital(text: &str) -> String {
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
+/// A GIF sent from the picker, sealed as a file (the web's `SealedGif`): sized
+/// before it opens, playing inline as a GIF in a channel does (and holding
+/// still with reduced motion, as every picture does), with its credit on hover.
+fn gif_view(id: &str, file: &FileRef, mark: &GifMark, picture: Option<Arc<Image>>, p: &Palette) -> AnyElement {
+    let (w, h) = crate::core::gifs::fit(file.width as i32, file.height as i32);
+    let group = SharedString::from(format!("sealed-gif|{id}"));
+    let credit = crate::core::gifs::provider_name(mark.provider);
+    let fg = p.muted_foreground;
+    div()
+        .id(SharedString::from(format!("sealed-gif-box|{id}")))
+        .group(group.clone())
+        .relative()
+        .mt(px(4.0))
+        .w(px(w))
+        .h(px(h))
+        .max_w_full()
+        .rounded(radius_xl())
+        .overflow_hidden()
+        .bg(p.muted)
+        .map(|el| match picture {
+            Some(picture) => el.child(
+                img(picture)
+                    .id(SharedString::from(format!("sealed-gif-img|{id}")))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            ),
+            None => el.flex().items_center().justify_center().text_color(fg).child(t("chat.gif.gif")),
+        })
+        .when(!credit.is_empty(), |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .right(px(8.0))
+                    .bottom(px(6.0))
+                    .text_size(px(10.0))
+                    .font_weight(gpui_kit::FontWeight::BOLD)
+                    .text_color(gpui_kit::white().opacity(0.85))
+                    .opacity(0.0)
+                    .group_hover(group, |s| s.opacity(1.0))
+                    .child(t_with("chat.gif.via", &[("provider", Arg::Str(credit))])),
+            )
+        })
+        .into_any_element()
+}
+
 /// Files on their way in an encrypted message (the web's `PendingFiles`).
 pub(crate) fn pending_files(files: &[(String, i64)], p: &Palette) -> AnyElement {
     let s = seal(p);
@@ -490,31 +592,26 @@ impl FuwaApp {
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let read = cx
-                .background_executor()
-                .spawn(async move {
-                    paths
-                        .into_iter()
-                        .filter_map(|path| {
-                            let bytes = std::fs::read(&path).ok()?;
-                            let name = path.file_name()?.to_string_lossy().into_owned();
-                            let content_type = attachments::content_type_of(&name).to_owned();
-                            Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await;
-            let _ = this.update(cx, |_, cx| {
-                PICKED.with(|p| {
-                    let mut p = p.borrow_mut();
-                    let list = p.entry(place.clone()).or_default();
-                    list.extend(read);
-                    list.truncate(sealed_files::MAX_FILES);
-                });
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.add_sealed_files(place, paths, cx));
         })
         .detach();
+    }
+
+    /// Adds files to the next message in `place`, up to what one can carry (the
+    /// web's `pickFiles`): any that can't go are left out, and why is said.
+    pub(crate) fn add_picked(&mut self, place: String, read: Vec<Outgoing>, cx: &mut Context<Self>) {
+        if read.is_empty() {
+            return;
+        }
+        let mut next = picked(&place);
+        next.extend(read);
+        if let Some(why) = sealed_files::cant_send(&next) {
+            self.toast("paperclip", why, String::new(), None, None, cx);
+        }
+        next.retain(|f| sealed_files::cant_send(std::slice::from_ref(f)).is_none());
+        next.truncate(sealed_files::MAX_FILES);
+        PICKED.with(|p| p.borrow_mut().insert(place, next));
+        cx.notify();
     }
 
     /// The files waiting to go (the web's `PickedTray`), each with a way to take it out.
@@ -665,6 +762,22 @@ impl FuwaApp {
             return false;
         }
         let text = self.encode_emoji(&text);
+        self.send_files_in(key, id, place, files, text, thread, cx);
+        true
+    }
+
+    /// Sends `files` (picked, or a GIF from the picker) in `place`, showing them on their way.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn send_files_in(
+        &mut self,
+        key: String,
+        id: String,
+        place: String,
+        files: Vec<Outgoing>,
+        text: String,
+        thread: Option<(i64, bool)>,
+        cx: &mut Context<Self>,
+    ) {
         let nonce = crate::core::dms::new_nonce();
         let sizes: Vec<(String, i64)> =
             files.iter().map(|f| (sealed_files::clean_name(&f.name), f.bytes.len() as i64)).collect();
@@ -690,7 +803,6 @@ impl FuwaApp {
                 cx.notify();
             },
         );
-        true
     }
 }
 

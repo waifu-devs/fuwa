@@ -13,7 +13,7 @@ import {
 } from "@floating-ui/react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
-import { Permission } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { providerName, sendGif, useGifSettings } from "@/fuwa/gifs";
@@ -26,14 +26,24 @@ import { cn } from "@/lib/utils";
 const Picker = lazyComponent(() => import("./GifPanel").then((m) => m.GifPanel));
 
 /**
- * The GIF button by the composer and the picker it opens: search (through
- * the instance), moods to browse, your saved GIFs and uploads, and what you
- * sent lately. Picking one sends it at once. Shown only where GIF search is
- * on, or you have saved GIFs to send.
+ * The GIF button by a channel's composer: shown where you may attach files.
+ * Picking one sends it at once.
  */
 export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: string; serverId: string; channelId: string }) {
-  const settings = useGifSettings(instanceKey);
   const access = useAccess(instanceKey, serverId);
+  // GIFs are attachments: they need Attach Files where you are.
+  if (!hasIn(access, channelId, Permission.ATTACH_FILES)) return null;
+  return <GifButton instanceKey={instanceKey} onSend={(gif) => run(sendGif(instanceKey, serverId, channelId, gif))} />;
+}
+
+/**
+ * The GIF button and the picker it opens: search (through the instance),
+ * moods to browse, your saved GIFs and uploads, and what you sent lately.
+ * Picking one hands it to `onSend`; the picker closes once that's done.
+ * Shown only where GIF search is on.
+ */
+export function GifButton({ instanceKey, onSend }: { instanceKey: string; onSend: (gif: MessageGif) => Promise<unknown> }) {
+  const settings = useGifSettings(instanceKey);
   const [open, setOpen] = useState(false);
   const { t } = useI18n();
   const { refs, floatingStyles, context } = useFloating({
@@ -44,8 +54,7 @@ export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: s
     middleware: [offset(8), flip(), shift({ padding: 8 })],
   });
   const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context), useRole(context, { role: "dialog" })]);
-  // GIFs are attachments: they need Attach Files where you are.
-  if (!settings?.enabled || !hasIn(access, channelId, Permission.ATTACH_FILES)) return null;
+  if (!settings?.enabled) return null;
   return (
     <>
       <motion.button
@@ -79,7 +88,7 @@ export function GifPicker({ instanceKey, serverId, channelId }: { instanceKey: s
                     instanceKey={instanceKey}
                     credit={providerName(settings.provider)}
                     onSend={async (gif) => {
-                      await run(sendGif(instanceKey, serverId, channelId, gif));
+                      await onSend(gif);
                       setOpen(false);
                     }}
                   />

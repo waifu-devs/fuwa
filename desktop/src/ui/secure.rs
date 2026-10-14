@@ -81,7 +81,7 @@ pub fn start(title: String, body: String, p: &Palette) -> Div {
                 div()
                     .size(px(28.0))
                     .rounded_full()
-                    .bg(s.green)
+                    .bg(s.pill)
                     .shadow(vec![gpui_kit::BoxShadow {
                         color: card,
                         offset: gpui_kit::point(px(0.0), px(0.0)),
@@ -92,7 +92,7 @@ pub fn start(title: String, body: String, p: &Palette) -> Div {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(gpui_kit::white())
+                    .text_color(s.surface)
                     .child(icon("lock-keyhole").size(px(14.0))),
             )
         },
@@ -113,7 +113,9 @@ pub fn start(title: String, body: String, p: &Palette) -> Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(gpui_kit::Hsla { a: 0.15, ..s.green })
+                .bg(s.surface)
+                .border_1()
+                .border_color(s.edge)
                 .text_color(s.icon)
                 .child(icon("shield-check").size(px(32.0)))
                 .child(badge),
@@ -137,7 +139,9 @@ pub fn start(title: String, body: String, p: &Palette) -> Div {
                 .px(px(12.0))
                 .py(px(10.0))
                 .rounded(radius_2xl())
-                .bg(gpui_kit::Hsla { a: 0.1, ..s.green })
+                .bg(s.surface)
+                .border_1()
+                .border_color(s.edge)
                 .text_sm()
                 .line_height(px(20.0))
                 .text_color(s.note)
@@ -321,7 +325,7 @@ impl FuwaApp {
                     .flex_shrink(1.0)
                     .items_center()
                     .gap(px(8.0))
-                    .child(icon("shield-check").size(px(20.0)).text_color(s.icon))
+                    .child(icon("shield-check").size(px(20.0)).text_color(s.green))
                     .child(
                         div()
                             .truncate()
@@ -428,6 +432,7 @@ impl FuwaApp {
                 action,
                 files: can_attach,
                 thread: None,
+                drop_to: Some(t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&channel.name))])),
             },
             window,
             cx,

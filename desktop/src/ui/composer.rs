@@ -196,7 +196,7 @@ impl FuwaApp {
     /// 16px, the card's border and 12px, and 44px for each button after it
     /// (the GIFs, the poll, then send or the microphone).
     pub(crate) fn tool_right(&self, tool: Tool) -> f32 {
-        let gifs = self.gif_place().and_then(|(key, _, _)| self.gifs_on(&key)).is_some();
+        let gifs = self.gif_key().and_then(|key| self.gifs_on(&key)).is_some();
         let mut after = 1 + usize::from(self.can_poll());
         if tool != Tool::Gif {
             after += usize::from(gifs);

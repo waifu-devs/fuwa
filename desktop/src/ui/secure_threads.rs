@@ -644,6 +644,7 @@ impl FuwaApp {
                 action: None,
                 files: can_attach,
                 thread: Some((parent, name)),
+                drop_to: None,
             },
             window,
             cx,

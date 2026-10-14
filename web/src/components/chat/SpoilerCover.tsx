@@ -31,6 +31,7 @@ export function SpoilerCover({
   look,
   animate = false,
   className,
+  onShown,
   children,
 }: {
   spoiler: boolean;
@@ -39,6 +40,8 @@ export function SpoilerCover({
   animate?: boolean;
   /** Its size and corners, the same as what it covers. */
   className?: string;
+  /** Told once it's uncovered (the picture viewer steps only through what's been shown). */
+  onShown?: () => void;
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -50,6 +53,7 @@ export function SpoilerCover({
     event.preventDefault();
     event.stopPropagation();
     setShown(true);
+    onShown?.();
     // From the keyboard, focus goes on to what was covered (its player, its download) rather than getting lost.
     if (event.detail === 0) {
       requestAnimationFrame(() => inside.current?.querySelector<HTMLElement>("button, a[href], video, audio, [tabindex]")?.focus());

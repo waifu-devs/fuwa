@@ -22,8 +22,8 @@ const KEYS: Record<"one" | "two" | "three" | "several", Key> = {
 };
 
 /**
- * "Ana is typing" just above a composer: overlaid on the bottom of the
- * messages, so it never pushes anything around. `nameOf` names someone as
+ * "Ana is typing" just above a composer, in a row of its own that's always
+ * there, so it never covers the last message nor pushes anything around. `nameOf` names someone as
  * the place shows them, or says null to leave them out.
  */
 export function TypingLine({ instanceKey, target, nameOf }: { instanceKey: string; target: TypingTarget; nameOf: (id: string) => string | null }) {
@@ -33,7 +33,7 @@ export function TypingLine({ instanceKey, target, nameOf }: { instanceKey: strin
     .filter((n): n is string => n !== null);
   const label = typingLabel(names);
   return (
-    <div className="pointer-events-none relative h-0">
+    <div className="pointer-events-none relative h-5 shrink-0">
       <AnimatePresence initial={false}>
         {label && (
           <motion.div
@@ -44,7 +44,7 @@ export function TypingLine({ instanceKey, target, nameOf }: { instanceKey: strin
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.96 }}
             transition={SPRING}
-            className="absolute bottom-1 left-2 z-10 flex max-w-[calc(100%-1rem)] origin-bottom-left items-center gap-1.5 rounded-full bg-background/85 px-2 py-0.5 text-xs text-muted-foreground backdrop-blur-sm"
+            className="absolute inset-y-0 left-2 flex max-w-[calc(100%-1rem)] origin-bottom-left items-center gap-1.5 rounded-full px-2 text-xs text-muted-foreground"
           >
             <Dots />
             <AnimatePresence mode="popLayout" initial={false}>
