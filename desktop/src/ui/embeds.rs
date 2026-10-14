@@ -146,15 +146,17 @@ fn preview(
     });
     let card = div().id(SharedString::from(format!("embed-card|{id}"))).group(group).relative().text_sm();
     if !words {
-        // Only a picture: itself, linking to the page.
+        // Only a picture: itself, linking to the page, at its own size but no
+        // wider than the card or taller than 320px (the web's `max-h-80
+        // max-w-full`). Rows, so neither it nor its link stretches wider than
+        // it is, and both may shrink to the card.
         let picture = crate::ui::widgets::picture(image?.to_owned())
-            .max_w_full()
+            .min_w_0()
             .max_h(px(320.0))
             .rounded(radius)
             .object_fit(ObjectFit::Contain);
-        return Some(
-            card.max_w(px(448.0)).child(picture_link(format!("preview-picture|{id}"), picture, url)).children(hide),
-        );
+        let link = picture_link(format!("preview-picture|{id}"), picture, url).flex().items_start().min_w_0();
+        return Some(card.max_w(px(448.0)).flex().items_start().child(link).children(hide));
     }
     let mut text = div().flex_1().min_w_0().flex().flex_col().gap(px(2.0));
     if !embed.site_name.is_empty() {

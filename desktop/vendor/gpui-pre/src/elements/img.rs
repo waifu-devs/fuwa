@@ -261,6 +261,39 @@ struct ImgState {
     next_frame: Option<(Instant, Task<()>)>,
 }
 
+/// fuwa: the size of a picture of `image_size` whose width isn't a fixed length
+/// and whose height isn't set (see `request_layout`): `known` sizes win, the
+/// width is the space there is (`relative`) or the picture's own width no wider
+/// than that space, the height keeps the picture's shape, and `max_height`
+/// shortens it, narrowing it too when the width was the picture's own.
+fn measure_picture(
+    image_size: crate::Size<Pixels>,
+    relative: bool,
+    max_height: Option<Pixels>,
+    known: crate::Size<Option<Pixels>>,
+    available: crate::Size<crate::AvailableSpace>,
+) -> crate::Size<Pixels> {
+    let ratio = image_size.height / image_size.width;
+    let width = known.width.unwrap_or(match available.width {
+        crate::AvailableSpace::Definite(space) if relative => space,
+        crate::AvailableSpace::Definite(space) => image_size.width.min(space),
+        crate::AvailableSpace::MinContent if relative => px(0.),
+        _ => image_size.width,
+    });
+    let mut height = known.height.unwrap_or(width * ratio);
+    let mut width = width;
+    if known.height.is_none()
+        && let Some(max) = max_height
+        && height > max
+    {
+        height = max;
+        if known.width.is_none() && !relative {
+            width = max / ratio;
+        }
+    }
+    crate::Size { width, height }
+}
+
 /// fuwa: how long before a frame is due an animated image stops waiting on a
 /// timer and asks for animation frames, so the new frame shows on the first
 /// vsync past it rather than a timer's tick (15.6 ms apart on Windows) and a
@@ -327,6 +360,7 @@ impl Element for Img {
                 cx,
                 |mut style, window, cx| {
                     let mut replacement_id = None;
+                    let mut measured = None;
 
                     match self.source.use_data(
                         self.image_cache
@@ -370,11 +404,42 @@ impl Element for Img {
 
                             let image_size = data.render_size(frame_index);
 
-                            if style.aspect_ratio.is_none() {
+                            // fuwa: a width that isn't a fixed length (`w_full`, or none
+                            // under `max_w_full`) with no height scales the picture like
+                            // a browser's `<img>`: as wide as it may be (never past its
+                            // own width when none is asked), as tall as that width keeps
+                            // its shape, then no taller than an absolute `max_h`, which
+                            // narrows it when no width was asked. Stock GPUI made it as
+                            // tall as the file, so `w_full().max_h(..)` cut the picture.
+                            let absolute_width = matches!(
+                                style.size.width,
+                                Length::Definite(DefiniteLength::Absolute(_))
+                            );
+                            if !absolute_width
+                                && matches!(style.size.height, Length::Auto)
+                                && style.aspect_ratio.is_none()
+                                && image_size.width > px(0.)
+                                && image_size.height > px(0.)
+                            {
+                                let relative = !matches!(style.size.width, Length::Auto);
+                                let max_height = match style.max_size.height {
+                                    Length::Definite(DefiniteLength::Absolute(abs)) => {
+                                        Some(abs.to_pixels(window.rem_size()))
+                                    }
+                                    _ => None,
+                                };
+                                measured = Some((image_size, relative, max_height));
+                            }
+
+                            if measured.is_some() {
+                                // Measured below.
+                            } else if style.aspect_ratio.is_none() {
                                 style.aspect_ratio = Some(image_size.width / image_size.height);
                             }
 
-                            if let Length::Auto = style.size.width {
+                            if measured.is_none()
+                                && let Length::Auto = style.size.width
+                            {
                                 style.size.width = match style.size.height {
                                     Length::Definite(DefiniteLength::Absolute(abs_length)) => {
                                         let height_px = abs_length.to_pixels(window.rem_size());
@@ -388,7 +453,9 @@ impl Element for Img {
                                 };
                             }
 
-                            if let Length::Auto = style.size.height {
+                            if measured.is_none()
+                                && let Length::Auto = style.size.height
+                            {
                                 style.size.height = match style.size.width {
                                     Length::Definite(DefiniteLength::Absolute(abs_length)) => {
                                         let width_px = abs_length.to_pixels(window.rem_size());
@@ -465,7 +532,15 @@ impl Element for Img {
                         }
                     }
 
-                    window.request_layout(style, replacement_id, cx)
+                    match measured {
+                        Some((image_size, relative, max_height)) => window.request_measured_layout(
+                            style,
+                            move |known, available, _, _| {
+                                measure_picture(image_size, relative, max_height, known, available)
+                            },
+                        ),
+                        None => window.request_layout(style, replacement_id, cx),
+                    }
                 },
             );
 

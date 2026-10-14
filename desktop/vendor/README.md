@@ -109,6 +109,15 @@ drawn somewhere else can take the opacity around its placeholder, and
 `RenderImage::into_frames` hands back the frames' buffers so a camera's
 pictures can be reused rather than allocated anew.
 
+**Pictures that keep their shape.** An `img` whose width isn't a fixed
+length (`w_full()`, or none at all) and whose height isn't set is measured
+like a browser's `<img>`: as wide as it may be (no wider than its own width
+when none is asked), as tall as that width keeps its shape, and no taller
+than an absolute `max_h`, which narrows it too when no width was asked.
+Stock GPUI made it as tall as the file whatever its width, so
+`w_full().max_h(..)` with `ObjectFit::Cover` cut most of a wide picture
+away, and one with no width stayed a box the size of the file.
+
 ## Checking the renderers
 
 Only Linux can be built and run here. The wgpu renderer has headless tests
