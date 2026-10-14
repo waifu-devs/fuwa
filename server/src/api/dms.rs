@@ -753,6 +753,35 @@ impl DirectMessageService for Api {
         )
     }
 
+    async fn send_conversation_typing(
+        &self,
+        request: Request<pb::SendConversationTypingRequest>,
+    ) -> Result<Response<pb::SendConversationTypingResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let dms = self.app.dms()?;
+                let conversation = dms.conversation_of(&account.id, &request.get_ref().conversation_id).await?;
+                if !crate::typing::pass(&conversation.id, &account.id, now_ms()) {
+                    return Ok(pb::SendConversationTypingResponse {});
+                }
+                // Only those the caller could write to now: never someone who
+                // blocked them (who isn't told why), nor someone they blocked.
+                let mut to = Vec::new();
+                for other in conversation.participants.iter().filter(|id| **id != account.id) {
+                    if matches!(self.may_message(&account.id, other, true).await, Ok(Reach::Seen)) {
+                        to.push(other.clone());
+                    }
+                }
+                let typing = pb::DmTyping { conversation_id: conversation.id.clone(), user_id: account.id.clone() };
+                let payload = pb::direct_message_event::Payload::Typing(typing);
+                dms.publish(&to, pb::DirectMessageEvent { payload: Some(payload) });
+                Ok(pb::SendConversationTypingResponse {})
+            }
+            .await,
+        )
+    }
+
     async fn pin_record(
         &self,
         request: Request<pb::PinRecordRequest>,

@@ -97,7 +97,14 @@ export interface MessageContext {
   send(content: Outgoing): Promise<Message>;
   /** Reacts to it (see `agent.react`). */
   react(emoji: ReactionEmoji): Promise<Reaction>;
+  /** Shows the agent typing in the channel `reply` and `send` post to (see `agent.typing`). */
+  typing(): Promise<void>;
+  /** Shows the agent typing there until `work` settles (see `agent.typingWhile`). */
+  typingWhile<T>(work: Promise<T> | (() => Promise<T>)): Promise<T>;
 }
+
+/** How often `typingWhile` says the agent is still typing: apps show it for 10 seconds after each. */
+const TYPING_EVERY_MS = 6_000;
 
 /** A command someone sent, such as "/dice 2d6". */
 export interface CommandContext extends MessageContext {
@@ -379,6 +386,39 @@ export class Agent {
     };
   }
 
+  /**
+   * Shows the agent as typing in a channel, or in a thread's reply box with
+   * `threadId` (the thread's first message's id), to the people who have it
+   * open: for 10 seconds, or until the agent's next message there. Needs
+   * Send Messages there, and an instance with the `typing` feature. Others
+   * typing come as "typingStarted" events, the agent's own included
+   * (compare `userId` with `agent.me.id`).
+   */
+  async typing(serverId: string, channelId: string, threadId = ""): Promise<void> {
+    await this.api.messages.sendTyping({ serverId, channelId, threadId });
+  }
+
+  /**
+   * Shows the agent as typing while `work` runs, saying so again every few
+   * seconds, and resolves with its result. Typing that fails (an older
+   * instance, a missing permission) never fails the work.
+   */
+  async typingWhile<T>(
+    serverId: string,
+    channelId: string,
+    work: Promise<T> | (() => Promise<T>),
+    threadId = "",
+  ): Promise<T> {
+    const signal = () => void this.typing(serverId, channelId, threadId).catch(() => {});
+    signal();
+    const timer = setInterval(signal, TYPING_EVERY_MS);
+    try {
+      return await (typeof work === "function" ? work() : work);
+    } finally {
+      clearInterval(timer);
+    }
+  }
+
   /** Answers a message in its channel. */
   reply(to: Message, content: Outgoing): Promise<Message> {
     const req = typeof content === "string" ? { content } : content;
@@ -633,6 +673,8 @@ export class Agent {
       reply: (content) => this.reply(message, content),
       send: (content) => this.send(message.serverId, message.channelId, content),
       react: (emoji) => this.react(message, emoji),
+      typing: () => this.typing(message.serverId, message.channelId),
+      typingWhile: (work) => this.typingWhile(message.serverId, message.channelId, work),
     };
   }
 

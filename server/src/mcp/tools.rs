@@ -273,6 +273,23 @@ const TOOLS: &[Tool] = &[
         destructive: false,
     },
     Tool {
+        name: "send_typing",
+        title: "Show this agent typing",
+        description: "Shows this agent as typing in a channel, or in a thread's reply box, to the people who have \
+                      it open: for 10 seconds, or until its next message there. Call it again while still \
+                      working on a long answer. Needs a role that can send messages there.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "thread_id": { "type": "string", "description": "The thread's id (its first message's), to show it typing in the thread." }
+            })
+        },
+        required: &["server_id", "channel_id"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
         name: "list_reactors",
         title: "Who reacted",
         description: "Who reacted to a message with one emoji, the earliest first.",
@@ -904,6 +921,14 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             };
             call!(cx, message_service_client::MessageServiceClient.react(req))
                 .map(|r| json!({ "reaction": r.reaction.as_ref().map(view::reaction) }))
+        }
+        "send_typing" => {
+            let req = pb::SendTypingRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                thread_id: args.optional("thread_id")?,
+            };
+            call!(cx, message_service_client::MessageServiceClient.send_typing(req)).map(|_| json!({ "typing": true }))
         }
         "list_reactors" => {
             let (emoji, emoji_id) = reaction_emoji(&args.text("emoji")?);

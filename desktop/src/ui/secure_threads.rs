@@ -78,7 +78,7 @@ pub(crate) fn side_of(channel: &str) -> Option<Side> {
 }
 
 /// The thread open beside the shown secure channel: its channel and message.
-fn open_thread(app: &FuwaApp) -> Option<(String, String, String, i64)> {
+pub(crate) fn open_thread(app: &FuwaApp) -> Option<(String, String, String, i64)> {
     let Some(Target::Secure { channel: shown, .. }) = app.target() else { return None };
     match side_of(&shown)? {
         Side::Thread { key, server, channel, parent } => Some((key, server, channel, parent)),

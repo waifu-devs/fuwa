@@ -76,6 +76,7 @@ own fields to these.
 | `keybinds` | changed defaults: action to combo, or null for none |
 | `customKeybinds` | `[{ id, action, combo }]` |
 | `developerMode`, `shareReports` | boolean |
+| `sendTyping` | boolean: others see you typing (docs/typing.md) |
 | `inputMode` | `"voice"` or `"ptt"` |
 | `pttRelease` | milliseconds |
 | `userVolumes` | `"instance/user id"` to percent, up to 200 |

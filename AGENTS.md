@@ -105,6 +105,19 @@
     is `desktop/src/core/presence/people.rs` (the stream, put in at most
     every 400 ms, and idle after 10 minutes without input) and
     `desktop/src/ui/presence.rs`.
+  - `typing.rs`: typing indicators (docs/typing.md). `MessageService.SendTyping`
+    publishes a `TypingStarted` event with sequence 0 (never stored, scoped by
+    channel, only to live connections with the channel in focus or agents
+    asking for everything: `Interest::take` drops it elsewhere, without a
+    head); `DirectMessageService.SendConversationTyping` sends `DmTyping` to
+    the others in a conversation that the typist could write to
+    (`may_message`). `typing::pass` folds signals to one per person and place
+    every 3 seconds, in memory. Nothing typed travels, so secure channels
+    and DMs have it too. Apps send at most every 6 seconds and show someone
+    for 10, unless the person turned off `sendTyping`. Web: `lib/typing.ts`
+    (pure), `fuwa/typing.ts` (its own small store) and
+    `components/chat/TypingLine.tsx`; desktop: `core/typing.rs` and
+    `ui/typing.rs`.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all

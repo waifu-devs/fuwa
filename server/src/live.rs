@@ -4,6 +4,7 @@
 //! Messages, reactions, polls, pins and thread changes come whole only for
 //! the channels in focus and for messages that mention the caller; the rest
 //! only move the channel's head, sent at most every [`HEADS_EVERY`].
+//! Someone typing comes only for the channels in focus.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -178,6 +179,15 @@ impl Interest {
     /// the sequence does). `roles` are the member's, when known.
     pub fn take(&mut self, event: &pb::Event, roles: Option<&[String]>, visible: bool) -> bool {
         let Some(payload) = &event.payload else { return true };
+        // Someone typing matters only where the channel is on screen, and
+        // moves no head: it's dropped everywhere else.
+        if let Payload::TypingStarted(typing) = payload {
+            return match self.intent {
+                Intent::All => true,
+                Intent::Focused => self.focus.borrow().channel_ids.contains(&typing.channel_id),
+                Intent::Mentions => false,
+            };
+        }
         let Some(channel_id) = messageish(payload) else { return true };
         let whole = match self.intent {
             Intent::All => true,
@@ -256,6 +266,32 @@ mod tests {
             payload: Some(Payload::MessageCreated(pb::MessageCreated { message: Some(message) })),
             ..Default::default()
         }
+    }
+
+    fn typing(channel: &str) -> pb::Event {
+        pb::Event {
+            server_id: "s".into(),
+            payload: Some(Payload::TypingStarted(pb::TypingStarted {
+                channel_id: channel.into(),
+                thread_id: String::new(),
+                user_id: "ana".into(),
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn typing_comes_only_for_the_channels_in_focus_and_moves_no_heads() {
+        let (_tx, rx) = watch::channel(Arc::new(pb::Focus { channel_ids: vec!["a".into()], ..Default::default() }));
+        let mut focused = Interest::new(Intent::Focused, "me", rx.clone());
+        assert!(focused.take(&typing("a"), None, true));
+        assert!(!focused.take(&typing("b"), None, true));
+        assert!(focused.take_heads().is_none());
+        let mut all = Interest::new(Intent::All, "bot", rx.clone());
+        assert!(all.take(&typing("b"), None, true));
+        let mut mentions = Interest::new(Intent::Mentions, "bot", rx);
+        assert!(!mentions.take(&typing("a"), None, true));
+        assert!(mentions.take_heads().is_none());
     }
 
     #[test]

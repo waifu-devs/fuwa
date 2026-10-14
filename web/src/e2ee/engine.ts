@@ -7,6 +7,7 @@ import { byId, memberById } from "@/fuwa/lists";
 import { store, updateDms, updateInstance, without, type DmMember, type FuwaState } from "@/fuwa/store";
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
 import { onDmPinEvent } from "@/fuwa/pins";
+import { onDmTypingEvent } from "@/fuwa/typing";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -509,6 +510,7 @@ export class DmEngine {
   }
 
   private onEvent(event: DirectMessageEvent) {
+    onDmTypingEvent(this.key, event);
     const p = event.payload;
     switch (p.case) {
       case "conversationOpened":

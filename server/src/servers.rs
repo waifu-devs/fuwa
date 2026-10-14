@@ -165,6 +165,7 @@ fn may_change_rules(payload: &Payload) -> bool {
             | Payload::BoardUpdated(_)
             | Payload::CardUpdated(_)
             | Payload::CardDeleted(_)
+            | Payload::TypingStarted(_)
     )
 }
 

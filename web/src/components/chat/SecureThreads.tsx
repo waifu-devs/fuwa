@@ -279,6 +279,8 @@ export function SecureThreadPanel({
         locked={!canSend ? t("chat.secure.noPermission") : locked && !canModerate ? t("chat.secureThreads.locked") : ""}
         action={null}
         thread={{ parent, channelName: channel.name }}
+        // A secure thread has no message on the server: it's named by its first message's place in the channel.
+        typing={{ serverId, channelId: id, threadId: String(parent) }}
       />
     </div>
   );

@@ -204,6 +204,40 @@ test("an agent reacts to messages and hears others react", async () => {
   await agent.stop();
 });
 
+test("an agent shows it's typing and hears people type", async () => {
+  const agent = newAgent();
+  const typing: string[] = [];
+  agent.on("typingStarted", (payload) => {
+    if (payload.userId !== agent.me.id) typing.push(`${payload.channelId}/${payload.threadId}`);
+  });
+  await agent.start();
+  await person.messages.sendTyping({ serverId, channelId });
+  await until("the person typing", () => typing.includes(`${channelId}/`) || undefined);
+  // A burst folds into one: the next one passes only after a few seconds.
+  await person.messages.sendTyping({ serverId, channelId });
+  const { message } = await say("typed it");
+  await person.messages.sendTyping({ serverId, channelId, threadId: message!.id });
+  await until("the person typing in the thread", () => typing.includes(`${channelId}/${message!.id}`) || undefined);
+  assert.equal(typing.filter((t) => t === `${channelId}/`).length, 1);
+  // Someone following the server sees the agent typing while it works.
+  const abort = new AbortController();
+  const stream = person.events.subscribe({ servers: [{ serverId }] }, { signal: abort.signal });
+  let answer: Promise<string> | undefined;
+  const seen = (async () => {
+    for await (const res of stream) {
+      if (res.ready) answer = agent.typingWhile(serverId, channelId, async () => "done");
+      const payload = res.event?.payload;
+      if (payload?.case === "typingStarted" && payload.value.userId === agent.me.id) return payload.value.channelId;
+    }
+    return "";
+  })();
+  assert.equal(await seen, channelId);
+  abort.abort();
+  assert.equal(await answer, "done");
+  await assert.rejects(agent.typing(serverId, "nope"), (e: FuwaError) => e instanceof NotFoundError || e.code === Code.PermissionDenied);
+  await agent.stop();
+});
+
 test("an agent reports a message to the server's moderators", async () => {
   const agent = newAgent();
   await agent.start();

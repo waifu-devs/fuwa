@@ -87,6 +87,8 @@ export type Prefs = {
   developerMode: boolean;
   /** Anonymous reports of errors and slow paths, sent to your instance (see lib/reports.ts). */
   shareReports: boolean;
+  /** Others see a typing line while you write (lib/typing.ts); off, nothing about it is sent. */
+  sendTyping: boolean;
   /** Voice and audio. Device ids are this browser's; "" is the system default. */
   inputDevice: string;
   outputDevice: string;
@@ -169,6 +171,7 @@ export const DEFAULT_PREFS: Prefs = {
   customKeybinds: [],
   developerMode: false,
   shareReports: true,
+  sendTyping: true,
   inputDevice: "",
   outputDevice: "",
   inputVolume: 100,
@@ -276,6 +279,7 @@ function sanitize(p: Prefs): Prefs {
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
         : {},
     shareReports: p.shareReports !== false,
+    sendTyping: p.sendTyping !== false,
     syncSettings: p.syncSettings !== false,
     othersEffects: p.othersEffects !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},

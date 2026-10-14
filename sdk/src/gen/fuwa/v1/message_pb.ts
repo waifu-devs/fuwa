@@ -29,8 +29,9 @@ export type SendTypingRequest = Message<"fuwa.v1.SendTypingRequest"> & {
   channelId: string;
 
   /**
-   * The thread whose reply box they're typing in (its parent message's id);
-   * empty for the channel.
+   * The thread whose reply box they're typing in (its parent message's id;
+   * in a secure channel, its parent record's sequence in digits); empty for
+   * the channel.
    *
    * @generated from field: string thread_id = 3;
    */
