@@ -52,6 +52,7 @@ import {
   StickyNoteIcon,
   NotebookPenIcon,
   CoinsIcon,
+  DicesIcon,
   StoreIcon,
   HandCoinsIcon,
   PackageXIcon,
@@ -150,6 +151,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.SHOP_LISTING_UPDATE]: { label: "serversettings.audit.kind.listingUpdate", icon: StoreIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.SHOP_LISTING_DELETE]: { label: "serversettings.audit.kind.listingDelete", icon: PackageXIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.CURRENCY_GRANT]: { label: "serversettings.audit.kind.currencyGrant", icon: HandCoinsIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.GACHA_BANNER_CREATE]: { label: "serversettings.audit.kind.bannerCreate", icon: DicesIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.GACHA_BANNER_UPDATE]: { label: "serversettings.audit.kind.bannerUpdate", icon: DicesIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.GACHA_BANNER_DELETE]: { label: "serversettings.audit.kind.bannerDelete", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
 };
 
 /** What each changed field is called; catalog keys. Fields this app doesn't know show as they are. */
@@ -207,6 +211,8 @@ const FIELD: Record<string, Key> = {
   stock: "serversettings.audit.field.stock",
   available: "serversettings.audit.field.available",
   target: "serversettings.audit.field.listingTarget",
+  gacha_only: "serversettings.audit.field.gachaOnly",
+  rates: "serversettings.audit.field.rates",
 };
 
 /** A changed field's name in the app's language. */
@@ -229,6 +235,8 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.SHOP_LISTING_CREATE]: "after",
   [AuditAction.SHOP_LISTING_DELETE]: "before",
   [AuditAction.CURRENCY_GRANT]: "after",
+  [AuditAction.GACHA_BANNER_CREATE]: "after",
+  [AuditAction.GACHA_BANNER_DELETE]: "before",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -793,6 +801,15 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
       if (toRole) return say(raw < 0 ? "serversettings.audit.s.currencyTakeRole" : "serversettings.audit.s.currencyGiveRole", { amount, role });
       return say(raw < 0 ? "serversettings.audit.s.currencyTake" : "serversettings.audit.s.currencyGive", { amount, target });
     }
+    case AuditAction.GACHA_BANNER_CREATE:
+      return say("serversettings.audit.s.bannerCreate", { name: <b>{change("name")?.after || lang.t("serversettings.audit.aBanner")}</b> });
+    case AuditAction.GACHA_BANNER_UPDATE: {
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1) return say("serversettings.audit.s.renamed", { before: <b>{renamed.before}</b>, after: <b>{renamed.after}</b> });
+      return say("serversettings.audit.s.bannerUpdate", { name: <b>{renamed?.after || lang.t("serversettings.audit.aBanner")}</b> });
+    }
+    case AuditAction.GACHA_BANNER_DELETE:
+      return say("serversettings.audit.s.bannerDelete", { name: <b>{change("name")?.before || lang.t("serversettings.audit.aBanner")}</b> });
     default:
       return say("serversettings.audit.s.unknown");
   }
