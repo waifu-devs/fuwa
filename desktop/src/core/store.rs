@@ -77,6 +77,10 @@ pub struct InstanceState {
     /// Per channel, only for channels someone opened.
     pub messages: HashMap<String, ChannelMessages>,
     pub pending: HashMap<String, Vec<PendingMessage>>,
+    /// Messages of yours the server took, newest last: each with the nonce of
+    /// the pending message it took the place of, so the list keeps drawing it
+    /// as the same row (its rise goes on rather than starting over).
+    pub landed: Vec<(String, u64)>,
     /// Per channel: messages from others that arrived while it wasn't open.
     pub unread: HashMap<String, u32>,
     /// Per channel: the newest message id heard of, whole or as a live
@@ -153,6 +157,7 @@ impl InstanceState {
             users: HashMap::new(),
             messages: HashMap::new(),
             pending: HashMap::new(),
+            landed: Vec::new(),
             unread: HashMap::new(),
             newest: HashMap::new(),
             notified: HashMap::new(),
@@ -568,6 +573,17 @@ pub fn apply_event(
                 heard_of(i, &message.channel_id, &message.id);
             }
             let mine = i.me.as_ref().is_some_and(|me| me.id == message.author_id);
+            if created && mine {
+                // Heard of before the send itself came back: it takes its pending copy's place now.
+                let at = if message.thread_id.is_empty() {
+                    message.channel_id.clone()
+                } else {
+                    threads::thread_key(&message.thread_id)
+                };
+                if let Some(nonce) = pending_for(i, &at, message) {
+                    land(i, &at, nonce, &message.id);
+                }
+            }
             if !message.thread_id.is_empty() {
                 let mut seen = false;
                 if let Some(replies) = i.messages.get_mut(&threads::thread_key(&message.thread_id)) {
@@ -744,6 +760,38 @@ pub fn newest_known<'a>(i: &'a InstanceState, channel_id: &str) -> Option<&'a st
 }
 
 /// Notes a message heard of in a channel (ids sort by time), whether or not the channel is loaded.
+/// The pending message of yours at `at` (a channel, or a thread's key)
+/// that `message` is the server's copy of: the first still sending with the
+/// same words and files.
+fn pending_for(i: &InstanceState, at: &str, message: &pb::Message) -> Option<u64> {
+    i.pending.get(at)?.iter().find_map(|p| {
+        (p.failed.is_none() && p.content == message.content && p.attachments.len() == message.attachments.len())
+            .then_some(p.nonce)
+    })
+}
+
+/// How many sent messages `InstanceState::landed` remembers.
+const LANDED: usize = 32;
+
+/// A message you sent made it: its pending copy goes, and the message
+/// remembers which one it was.
+pub fn land(i: &mut InstanceState, at: &str, nonce: u64, message_id: &str) {
+    if let Some(list) = i.pending.get_mut(at) {
+        list.retain(|p| p.nonce != nonce);
+    }
+    if !i.landed.iter().any(|(id, _)| id == message_id) {
+        if i.landed.len() >= LANDED {
+            i.landed.remove(0);
+        }
+        i.landed.push((message_id.to_owned(), nonce));
+    }
+}
+
+/// The nonce of the pending message `message_id` took the place of, or 0.
+pub fn landed_from(i: &InstanceState, message_id: &str) -> u64 {
+    i.landed.iter().rev().find(|(id, _)| id == message_id).map_or(0, |(_, nonce)| *nonce)
+}
+
 pub fn heard_of(i: &mut InstanceState, channel_id: &str, message_id: &str) {
     let known = newest_known(i, channel_id).map(str::to_owned);
     if known.as_deref().is_none_or(|known| message_id > known) {
@@ -832,6 +880,40 @@ mod tests {
         let ids: Vec<_> = i.messages["c"].items.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["01", "02", "03"]);
         assert_eq!(i.unread["c"], 1);
+    }
+
+    #[test]
+    fn a_sent_message_heard_of_first_takes_its_pending_copys_place() {
+        let mut i = InstanceState::new("k", "https://k");
+        i.me = Some(pb::User { id: "me".into(), ..Default::default() });
+        i.messages.insert("c".into(), ChannelMessages::default());
+        let pending = |nonce, content: &str| PendingMessage {
+            nonce,
+            content: content.into(),
+            emojis: Vec::new(),
+            attachments: Vec::new(),
+            created_at_ms: 0,
+            failed: None,
+        };
+        i.pending.insert("c".into(), vec![pending(1, "hi"), pending(2, "there")]);
+        let created = |m| event("s", Payload::MessageCreated(pb::MessageCreated { message: Some(m) }));
+        let mine = |id: &str, content: &str| pb::Message { content: content.into(), ..message(id, "c", "me") };
+        apply_event(&mut i, &created(mine("02", "there")), Some("c"), None);
+        assert_eq!(i.pending["c"].iter().map(|p| p.nonce).collect::<Vec<_>>(), [1]);
+        assert_eq!(landed_from(&i, "02"), 2);
+        // Someone else's words, or a different message of yours, leave it be.
+        apply_event(
+            &mut i,
+            &created(pb::Message { content: "hi".into(), ..message("03", "c", "them") }),
+            Some("c"),
+            None,
+        );
+        apply_event(&mut i, &created(mine("04", "bye")), Some("c"), None);
+        assert_eq!(i.pending["c"].len(), 1);
+        assert_eq!(landed_from(&i, "04"), 0);
+        // The send coming back after the event changes nothing more.
+        land(&mut i, "c", 2, "02");
+        assert_eq!(i.landed.len(), 1);
     }
 
     #[test]

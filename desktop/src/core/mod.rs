@@ -1211,10 +1211,13 @@ impl Core {
         .await;
         self.shared.instance(key, |i| match &res {
             Ok(sent) => {
-                if let Some(list) = i.pending.get_mut(&at) {
-                    list.retain(|p| p.nonce != nonce);
-                }
-                let Some(message) = &sent.message else { return };
+                let Some(message) = &sent.message else {
+                    if let Some(list) = i.pending.get_mut(&at) {
+                        list.retain(|p| p.nonce != nonce);
+                    }
+                    return;
+                };
+                store::land(i, &at, nonce, &message.id);
                 store::add_shared_authors(&mut i.users, std::slice::from_ref(message));
                 // Known here, so a live connection's head for it isn't news.
                 if thread.is_none() || message.also_in_channel {

@@ -49,7 +49,7 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, hideLinkPreviews, loadMessages, run, sendMessage, trimToLatest } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
-import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { store, threadKey, useFuwa, type Landed, type PendingMessage } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
 import type { FuwaError } from "@/fuwa/errors";
 import { pinMessage } from "@/fuwa/pins";
@@ -238,7 +238,8 @@ export const MessageList = forwardRef<
           {beginning && (threadId ? header : <Beginning channel={channel} />)}
           {(!state || (state.loading && items.length === 0)) && <Skeleton rows={6} />}
           {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
-          <AnimatePresence initial={false} presenceAffectsLayout={false}>
+          {/* A pending message the server took goes at once: its message is already drawn in its place. */}
+          <AnimatePresence initial={false} presenceAffectsLayout={false} custom={draw.landed}>
             {scroll.shown.map((row) => drawRow(row, draw))}
           </AnimatePresence>
         </motion.div>
@@ -512,6 +513,8 @@ function useListScroll({
 /** Everything drawing a row needs beyond the row itself. */
 type RowContext = {
   instanceKey: string;
+  /** Messages of yours that took a pending copy's place (`land`). */
+  landed: Record<string, Landed> | undefined;
   serverId: string;
   threadId: string;
   me: User | undefined;
@@ -568,6 +571,7 @@ function useRowContext({
   reactCatalog: Catalog;
 }): RowContext {
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
+  const landed = useFuwa((s) => s.instances[instanceKey]?.landed);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
   const access = useAccess(instanceKey, serverId);
   const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
@@ -585,6 +589,7 @@ function useRowContext({
   const clock = usePrefs((p) => p.clock);
   return {
     instanceKey,
+    landed,
     serverId,
     threadId,
     me,
@@ -675,6 +680,7 @@ function drawRow(row: Row, c: RowContext): ReactNode {
       instanceKey={c.instanceKey}
       canDelete={message.authorId === c.me?.id || (c.manager && !(c.guestSide && from))}
       animate={animate}
+      sentAt={c.landed?.[message.id]?.createdAt}
       editing={c.editing === message.id}
       canThread={!message.threadId && (message.thread ? c.canReply : c.canStart)}
       canPin={c.canPin && message.kind === MessageKind.UNSPECIFIED}
@@ -781,6 +787,28 @@ const webhookAuthor = (w: MessageWebhook): User =>
 const runKey = (m: Message) => (m.webhook ? `${m.authorId}\n${m.webhook.name}\n${m.webhook.avatarUrl}` : m.authorId);
 
 const enter = { initial: { opacity: 0, y: 12, scale: 0.98 }, animate: { opacity: 1, y: 0, scale: 1 } };
+
+/**
+ * A message you sent, taking its pending copy's place: it carries on from
+ * where that copy's rise (`PendingRow`, the same spring) had got to when it
+ * came in `sentAt`, rather than rising in a second time.
+ */
+function landing(sentAt: number) {
+  // The spring's progress (stiffness 500, damping 34, mass 1) that long after it started.
+  const t = Math.max(0, (Date.now() - sentAt) / 1000);
+  const w = Math.sqrt(500), z = 34 / (2 * w), wd = w * Math.sqrt(1 - z * z);
+  const p = Math.min(1, 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + ((z * w) / wd) * Math.sin(wd * t)));
+  return { initial: { opacity: PENDING_OPACITY * p, y: 12 * (1 - p), scale: 1 }, animate: enter.animate };
+}
+
+/** How faint a message still sending is. */
+const PENDING_OPACITY = 0.55;
+
+/** A pending message goes with a fade, unless it went because its message took its place (`custom` is `landed`). */
+const pendingExit = (nonce: string) => ({
+  gone: (landed: Record<string, Landed> | undefined) =>
+    landed && Object.values(landed).some((l) => l.nonce === nonce) ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0 },
+});
 
 /**
  * The parts of a message line every message shares: avatar or time, name and
@@ -994,6 +1022,7 @@ const MessageRow = memo(function MessageRow({
   instanceKey,
   canDelete,
   animate,
+  sentAt,
   editing,
   canThread,
   canPin,
@@ -1019,6 +1048,8 @@ const MessageRow = memo(function MessageRow({
   instanceKey: string;
   canDelete: boolean;
   animate: boolean;
+  /** Sent from here: when its pending copy, whose place it took, showed up. */
+  sentAt?: number;
   editing: boolean;
   /** Can open the thread under it: reply in the one there, or start one. */
   canThread: boolean;
@@ -1087,9 +1118,11 @@ const MessageRow = memo(function MessageRow({
     // Picking one you already reacted with keeps it, as other apps do.
     if (!had?.me) actions.react(message, emoji, true);
   };
+  // Worked out once: it only matters as the row first draws.
+  const [comeIn] = useState(() => (!animate ? {} : sentAt === undefined ? enter : landing(sentAt)));
   return (
     <motion.div
-      {...(animate ? enter : {})}
+      {...comeIn}
       {...menu}
       data-confirming={confirming || picking ? "" : undefined}
       exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
@@ -1730,6 +1763,7 @@ const PendingRow = memo(function PendingRow({
   actions: RowActions;
 }) {
   const { t } = useI18n();
+  const exit = useMemo(() => pendingExit(pending.nonce), [pending.nonce]);
   const onRetry = () => actions.retry(pending);
   const onDismiss = () => actions.dismiss(pending.nonce);
   // A message AutoMod stopped: why, without a retry that would only be stopped again.
@@ -1748,8 +1782,9 @@ const PendingRow = memo(function PendingRow({
     <motion.div
       {...menu}
       initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: pending.failed ? 1 : 0.55, y: 0 }}
-      exit={{ opacity: 0 }}
+      animate={{ opacity: pending.failed ? 1 : PENDING_OPACITY, y: 0 }}
+      variants={exit}
+      exit="gone"
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
