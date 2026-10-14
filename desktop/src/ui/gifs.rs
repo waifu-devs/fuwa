@@ -1173,6 +1173,16 @@ pub(crate) fn gif_in_message(
     let (w, h) = gifs::fit(gif.width, gif.height);
     let group = SharedString::from(format!("gif-msg|{mid}"));
     let credit = gifs::provider_name(gif.provider);
+    // A click opens it in the viewer (the star stops its own clicks).
+    let open = {
+        let name = if gif.title.is_empty() { "GIF".to_owned() } else { gif.title.clone() };
+        let picture = crate::ui::viewer::Viewed::url(&gif.url, &name, gif.width, gif.height);
+        let (this, key) = (this.clone(), key.to_owned());
+        move |_: &gpui_kit::ClickEvent, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+            let picture = picture.clone();
+            let _ = this.update(cx, |this, cx| this.view_pictures(&key, vec![picture], 0, window, cx));
+        }
+    };
     let (this, key, url) = (this.clone(), key.to_owned(), gif.url.clone());
     let star = div()
         .id(SharedString::from(format!("gif-msg-star|{mid}")))
@@ -1208,6 +1218,8 @@ pub(crate) fn gif_in_message(
         .rounded(corner(12.0))
         .overflow_hidden()
         .bg(p.muted)
+        .cursor_pointer()
+        .on_click(open)
         // `shadow-sm`.
         .shadow(vec![gpui_kit::BoxShadow {
             color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.05),

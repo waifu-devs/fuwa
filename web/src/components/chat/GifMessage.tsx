@@ -5,8 +5,10 @@ import type { MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
 import { isSaved, providerName, saveGif, unsaveGif, useSavedGifs } from "@/fuwa/gifs";
 import { GifImage } from "@/components/chat/GifImage";
+import { ImageViewer, savePicture } from "@/components/chat/ImageViewer";
 import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
+import { shownPicture } from "@/lib/shown";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -24,13 +26,15 @@ function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H) {
 /**
  * A GIF in a message: sized before it loads (so the list doesn't jump),
  * with a star to save it on hover. With reduce motion it stays still until
- * it's pointed at or tapped.
+ * it's pointed at or tapped. A click opens it in the picture viewer (with
+ * reduce motion on a touch screen, the first tap only plays it).
  */
 export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | undefined; instanceKey: string; animate: boolean }) {
   const { t } = useI18n();
   const still = usePrefs(reduceMotion);
   const [hover, setHover] = useState(false);
   const [tapped, setTapped] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const saved = useSavedGifs(instanceKey);
   if (!gif?.url) return null;
   const size = fitGif(gif.width, gif.height);
@@ -57,11 +61,11 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
     >
       <button
         type="button"
-        onClick={() => still && setTapped((on) => !on)}
+        onClick={() => (playing ? setViewing(true) : setTapped(true))}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
         aria-label={gif.title || t("chat.gif.gif")}
-        className={cn("block size-full", still ? "cursor-pointer" : "cursor-default")}
+        className="block size-full cursor-zoom-in"
       >
         <GifImage src={gif.url} playing={playing} alt={gif.title || t("chat.gif.gif")} className="size-full object-cover" />
       </button>
@@ -94,6 +98,22 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
           {t("chat.gif.via", { provider: credit })}
         </span>
       )}
+      <ImageViewer
+        pictures={[
+          {
+            key: gif.url,
+            src: shownPicture(gif.url),
+            name: gif.title || t("chat.gif.gif"),
+            width: gif.width,
+            height: gif.height,
+            original: shownPicture(gif.url),
+            save: () => savePicture(shownPicture(gif.url), `${gif.title || "gif"}.gif`),
+          },
+        ]}
+        index={viewing ? 0 : null}
+        onIndex={() => {}}
+        onClose={() => setViewing(false)}
+      />
     </motion.div>
   );
 }

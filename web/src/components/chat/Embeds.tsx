@@ -1,6 +1,8 @@
 import { XIcon } from "lucide-react";
 import { m as motion } from "motion/react";
+import { useState } from "react";
 import type { Embed } from "@/gen/fuwa/v1/types_pb";
+import { ImageViewer, savePicture, type ViewerPicture } from "@/components/chat/ImageViewer";
 import { guardMasked } from "@/components/LeavingDialog";
 import { InlineMarkdown, Markdown } from "@/components/Markdown";
 import { useI18n } from "@/i18n/react";
@@ -10,6 +12,33 @@ import { cn } from "@/lib/utils";
 
 /** Only links a browser should open: http(s). */
 const safe = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
+
+/** A picture's name for the viewer and its download: the last part of its address. */
+function nameOf(url: string, fallback: string) {
+  try {
+    const last = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "");
+    return last || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** An embed's pictures as the viewer shows them, the big one first. */
+function viewerPictures(urls: string[], fallback: string): ViewerPicture[] {
+  return [...new Set(urls.filter(Boolean))].map((src) => {
+    const name = nameOf(src, fallback);
+    return { key: src, src, name, original: src, save: () => savePicture(src, name) };
+  });
+}
+
+/** A picture in an embed that opens in the viewer. */
+function Opens({ label, onOpen, className, children }: { label: string; onOpen: () => void; className?: string; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onOpen} aria-label={label} title={label} className={cn("block cursor-zoom-in", className)}>
+      {children}
+    </button>
+  );
+}
 
 /**
  * Rich cards under a message, as apps post them through webhooks: a colored
@@ -40,7 +69,10 @@ function LinkPreview({ embed, delay, animate, onHide }: { embed: Embed; delay: n
   const thumbnail = shownPicture(safe(embed.thumbnailUrl));
   const image = shownPicture(safe(embed.imageUrl));
   const words = !!(embed.title || embed.description);
+  const [open, setOpen] = useState<number | null>(null);
   if (!url || (!words && !image)) return null;
+  const pictures = viewerPictures([image, thumbnail], embed.title || embed.siteName || t("chat.viewer.view"));
+  const openOn = (src: string) => setOpen(Math.max(0, pictures.findIndex((p) => p.src === src)));
   const edge = embed.color ? colorCss(embed.color) : "var(--border)";
   const hide = onHide && (
     <motion.button
@@ -77,29 +109,39 @@ function LinkPreview({ embed, delay, animate, onHide }: { embed: Embed; delay: n
               )}
               {embed.description && <p className="line-clamp-3 text-[0.9em] break-words whitespace-pre-line text-muted-foreground">{embed.description}</p>}
             </div>
-            {thumbnail && <img src={thumbnail} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg object-cover" />}
+            {thumbnail && (
+              <Opens label={t("chat.viewer.view")} onOpen={() => openOn(thumbnail)} className="shrink-0">
+                <img src={thumbnail} alt="" loading="lazy" className="size-16 rounded-lg object-cover" />
+              </Opens>
+            )}
           </div>
           {image && (
-            <a href={url} target="_blank" rel="noreferrer noopener" className="mt-2 block">
+            <Opens label={t("chat.viewer.view")} onOpen={() => openOn(image)} className="mt-2 w-full">
               <img src={image} alt="" loading="lazy" className="max-h-72 w-full rounded-lg object-cover" />
-            </a>
+            </Opens>
           )}
         </>
       ) : (
-        <a href={url} target="_blank" rel="noreferrer noopener" className="block">
+        // Just a picture (a link straight to one): it opens in the viewer, whose "open the original" goes to the link.
+        <Opens label={t("chat.viewer.view")} onOpen={() => openOn(image)}>
           <img src={image} alt="" loading="lazy" className="max-h-80 max-w-full rounded-xl object-contain" />
-        </a>
+        </Opens>
       )}
+      <ImageViewer pictures={pictures} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
     </motion.div>
   );
 }
 
 function EmbedCard({ embed, delay, animate }: { embed: Embed; delay: number; animate: boolean }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState<number | null>(null);
   const url = safe(embed.url);
   // Pictures load only from fuwa instances, never straight from other sites.
   const thumbnail = shownPicture(safe(embed.thumbnailUrl));
   const image = shownPicture(safe(embed.imageUrl));
   const edge = embed.color ? colorCss(embed.color) : "var(--border)";
+  const pictures = viewerPictures([image, thumbnail], embed.title || t("chat.viewer.view"));
+  const openOn = (src: string) => setOpen(Math.max(0, pictures.findIndex((p) => p.src === src)));
   return (
     <motion.div
       initial={animate ? { opacity: 0, x: -10, scale: 0.98 } : false}
@@ -156,9 +198,18 @@ function EmbedCard({ embed, delay, animate }: { embed: Embed; delay: number; ani
             </div>
           )}
         </div>
-        {thumbnail && <img src={thumbnail} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg object-cover" />}
+        {thumbnail && (
+          <Opens label={t("chat.viewer.view")} onOpen={() => openOn(thumbnail)} className="shrink-0">
+            <img src={thumbnail} alt="" loading="lazy" className="size-16 rounded-lg object-cover" />
+          </Opens>
+        )}
       </div>
-      {image && <img src={image} alt="" loading="lazy" className="relative mt-2 max-h-72 w-full rounded-lg object-cover" />}
+      {image && (
+        <Opens label={t("chat.viewer.view")} onOpen={() => openOn(image)} className="relative mt-2 w-full">
+          <img src={image} alt="" loading="lazy" className="max-h-72 w-full rounded-lg object-cover" />
+        </Opens>
+      )}
+      <ImageViewer pictures={pictures} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
     </motion.div>
   );
 }
