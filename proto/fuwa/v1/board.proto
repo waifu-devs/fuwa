@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Boards (docs/boards.md): channels of type CHANNEL_TYPE_BOARD, whose
+// columns hold cards people move along. A card's body is a message in the
+// channel, written like any message (Markdown, mentions, emoji, files), and
+// its comments are the thread under it (MessageService.SendMessage with
+// thread_id set to the card's id, which needs only SEND_MESSAGES). Deleting
+// a card is MessageService.DeleteMessage on its body: its author, or anyone
+// with MANAGE_MESSAGES.
+//
+// Seeing a board takes VIEW_CHANNELS; creating, moving and changing cards
+// MANAGE_CARDS; its columns and labels MANAGE_CHANNELS.
+service BoardService {
+  // The board's columns, labels and cards not archived, with each card's
+  // body and the people they name.
+  rpc GetBoard(GetBoardRequest) returns (GetBoardResponse);
+  // The archived cards, the latest archived first.
+  rpc ListArchivedCards(ListArchivedCardsRequest) returns (ListArchivedCardsResponse);
+  // MANAGE_CARDS and SEND_MESSAGES (ATTACH_FILES for files). Slow mode and
+  // AutoMod apply as to a message; the title is read with the body.
+  rpc CreateCard(CreateCardRequest) returns (CreateCardResponse);
+  // MANAGE_CARDS. Changing the body's text or files reads it again with
+  // AutoMod and marks the body edited.
+  rpc UpdateCard(UpdateCardRequest) returns (UpdateCardResponse);
+  // MANAGE_CARDS: to another column, or another place in its own.
+  rpc MoveCard(MoveCardRequest) returns (MoveCardResponse);
+  // MANAGE_CHANNELS: the whole list of columns and labels, in order.
+  rpc SetBoard(SetBoardRequest) returns (SetBoardResponse);
+}
+
+message GetBoardRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message GetBoardResponse {
+  repeated BoardColumn columns = 1;
+  repeated BoardLabel labels = 2;
+  // In each column's order.
+  repeated Card cards = 3;
+  // The cards' bodies, with their reactions and thread summaries.
+  repeated Message bodies = 4;
+  // The bodies' authors and the people assigned.
+  repeated User users = 5;
+}
+
+message ListArchivedCardsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The last card of the page before.
+  string after_id = 3;
+  // 1 to 100; 50 when unset.
+  int32 limit = 4;
+}
+
+message ListArchivedCardsResponse {
+  repeated Card cards = 1;
+  repeated Message bodies = 2;
+  repeated User users = 3;
+  bool has_more = 4;
+}
+
+message CreateCardRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The column it goes in; the first one when empty.
+  string column_id = 3;
+  string title = 4;
+  // The body, as SendMessageRequest has it. It may be empty.
+  string content = 5;
+  repeated Attachment attachments = 6;
+  repeated Emoji emojis = 7;
+  repeated string label_ids = 8;
+  repeated string assignee_ids = 9;
+  google.protobuf.Timestamp due_at = 10;
+  // Placed just above this card; at the bottom of the column when empty.
+  string before_id = 11;
+}
+
+message CreateCardResponse {
+  Card card = 1;
+  Message body = 2;
+}
+
+// What UpdateCard changes; anything not set stays as it is.
+message CardChange {
+  optional string title = 1;
+  // Sets the due date to due_at, or takes it off when due_at is unset.
+  bool set_due = 2;
+  google.protobuf.Timestamp due_at = 3;
+  bool set_labels = 4;
+  repeated string label_ids = 5;
+  bool set_assignees = 6;
+  repeated string assignee_ids = 7;
+  // Archives it (off the board) or brings it back.
+  optional bool archived = 8;
+  // Sets the body's text and files: content and emojis as
+  // UpdateMessageRequest has them, attachments as the whole list. Files
+  // the body has keep their url; new ones are uploaded as for SendMessage.
+  bool set_body = 9;
+  string content = 10;
+  repeated Emoji emojis = 11;
+  repeated Attachment attachments = 12;
+}
+
+message UpdateCardRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string card_id = 3;
+  CardChange change = 4;
+}
+
+message UpdateCardResponse {
+  Card card = 1;
+  Message body = 2;
+}
+
+message MoveCardRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string card_id = 3;
+  string column_id = 4;
+  // Placed just above this card in the column; at the bottom when empty.
+  string before_id = 5;
+}
+
+message MoveCardResponse {
+  Card card = 1;
+}
+
+message SetBoardRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // 1 to 20, in order. A column left out must hold no cards but archived
+  // ones, which move to the first column.
+  repeated BoardColumn columns = 3;
+  // Up to 50. A label left out comes off every card.
+  repeated BoardLabel labels = 4;
+}
+
+message SetBoardResponse {
+  repeated BoardColumn columns = 1;
+  repeated BoardLabel labels = 2;
+}

@@ -576,7 +576,7 @@ function ChannelGroups({
                 shape={shape}
                 canConnect={hasIn(access, c.id, Permission.CONNECT)}
                 canEdit={hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)}
-                canInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE)}
+                canInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && c.type !== ChannelType.BOARD && hasIn(access, c.id, Permission.CREATE_INVITE)}
                 onSettings={onSettings}
                 onInvite={onInvite}
                 onMenuEdit={onMenuEdit}

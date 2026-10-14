@@ -170,6 +170,8 @@ pub(super) async fn check_reply(
         return Err(Error::invalid("threads only go under messages someone wrote"));
     }
     match load(conn, thread_id).await? {
+        // A card's comments need no more than sending.
+        None if channel.r#type == pb::ChannelType::Board as i32 => {}
         None => access.require_in(&channel.id, Permission::CreateThreads)?,
         Some(t) if t.locked && !access.has_in(&channel.id, Permission::ManageMessages) => {
             return Err(Error::denied("this thread is locked"));
@@ -236,8 +238,12 @@ pub(super) async fn after_delete(
         if query_one(conn, "SELECT 1 FROM messages WHERE id = ?1", [thread_id], |_| Ok(())).await?.is_some() {
             refresh(conn, channel_id, thread_id, events).await?;
         }
-    } else if load(conn, message_id).await?.is_some() {
-        return remove(conn, channel_id, message_id, events).await;
+    } else {
+        // A card goes with its body.
+        super::boards::forget_card(conn, channel_id, message_id, events).await?;
+        if load(conn, message_id).await?.is_some() {
+            return remove(conn, channel_id, message_id, events).await;
+        }
     }
     Ok(vec![])
 }

@@ -14,6 +14,7 @@ import { effectiveNotifications } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
 import { forgetEconomy, forgetEconomyServer, loadEconomy, onEconomyEvent } from "./economy";
+import { forgetBoards, onBoardEvent } from "./board";
 import { forgetModeration, onModEvent } from "./moderation";
 import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { fromItems } from "@/lib/rail";
@@ -156,6 +157,7 @@ function leave(key: string) {
   forgetPins(key);
   forgetModeration(key);
   forgetEconomy(key);
+  forgetBoards(key);
   clearToasts();
   for (const fn of leaving) fn(key);
 }
@@ -439,6 +441,7 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
           forgetPins(key);
           forgetModeration(key);
           forgetEconomy(key);
+          forgetBoards(key);
           if (userId) void forgetAccount(key, userId);
           patchInstance(key, { connection: "signed-out", problem: i18n().t("workspace.session.ended") });
         } else {
@@ -735,6 +738,7 @@ const followEvents = (
           onPinEvent(key, event);
           onModEvent(key, event);
           onEconomyEvent(key, event);
+          onBoardEvent(key, event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));

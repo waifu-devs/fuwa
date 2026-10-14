@@ -34,7 +34,7 @@ export type ChannelMenuActions = {
   collapsed?: boolean;
 };
 
-const texty = (c: Channel) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE;
+const texty = (c: Channel) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE || c.type === ChannelType.BOARD;
 
 /**
  * A copy of a channel: its name, kind, category, topic, slow mode and who can

@@ -1,6 +1,6 @@
 //! The tools for running a server: its settings, channels, roles, invites,
 //! emoji, webhooks, AutoMod, the way in, shared channels, profile items, Mod
-//! View and the economy.
+//! View, the economy and boards.
 //! Each wraps one gRPC call whose arguments are the request itself, read
 //! from proto3 JSON (field names as in the .proto), and answers with the
 //! response the same way. The input schema is built from the request's
@@ -363,6 +363,30 @@ tools! {
     "delete_shop_listing" => economy_service_client::EconomyServiceClient.delete_shop_listing(DeleteShopListingRequest), Destroys,
         "Take a listing down",
         "Deletes a listing; what was bought stays with its buyers. Needs Manage Economy.";
+
+    // Boards (docs/boards.md). Comments are send_message with the card's id as thread_id.
+    "get_board" => board_service_client::BoardServiceClient.get_board(GetBoardRequest), Reads,
+        "Read a board",
+        "A board channel's columns, labels and cards (not archived), in order, with each card's body message \
+         and the people named.";
+    "list_archived_cards" => board_service_client::BoardServiceClient.list_archived_cards(ListArchivedCardsRequest), Reads,
+        "List archived cards",
+        "A board's archived cards, the latest archived first; page with after_id.";
+    "create_card" => board_service_client::BoardServiceClient.create_card(CreateCardRequest), Writes,
+        "Create a card",
+        "Adds a card to a board: its title, a Markdown body, labels, people and a due date, in a column (the \
+         first when empty), above before_id or at the bottom. Needs Manage Cards and Send Messages.";
+    "update_card" => board_service_client::BoardServiceClient.update_card(UpdateCardRequest), Writes,
+        "Change a card",
+        "Changes what the change sets on a card: title, due date, labels, people, archived, or its body \
+         (set_body with content and the whole list of attachments). Needs Manage Cards.";
+    "move_card" => board_service_client::BoardServiceClient.move_card(MoveCardRequest), Writes,
+        "Move a card",
+        "Moves a card to a column, above before_id or at the bottom. Needs Manage Cards.";
+    "set_board" => board_service_client::BoardServiceClient.set_board(SetBoardRequest), Writes,
+        "Set a board's columns and labels",
+        "Replaces a board's columns and labels with the lists given, in order (no id for new ones). A column \
+         removed must hold no cards. Needs Manage Channels.";
 }
 
 /// Whether there's a tool by that name here.

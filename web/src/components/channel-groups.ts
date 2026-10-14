@@ -1,10 +1,11 @@
-import { HashIcon, MegaphoneIcon, ShieldCheckIcon, Volume2Icon } from "lucide-react";
+import { HashIcon, MegaphoneIcon, ShieldCheckIcon, SquareKanbanIcon, Volume2Icon } from "lucide-react";
 import { ChannelType, type Channel } from "@/gen/fuwa/v1/types_pb";
 
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
   [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
   [ChannelType.VOICE]: Volume2Icon,
   [ChannelType.SECURE]: ShieldCheckIcon,
+  [ChannelType.BOARD]: SquareKanbanIcon,
 };
 
 export type Group = { category: Channel | null; channels: Channel[] };
@@ -13,7 +14,7 @@ export type Group = { category: Channel | null; channels: Channel[] };
 export const openableChannels = (channels: Channel[]) =>
   groupChannels(channels)
     .flatMap((g) => g.channels)
-    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE);
+    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE || c.type === ChannelType.BOARD);
 
 export function groupChannels(channels: Channel[]): Group[] {
   const categories = channels.filter((c) => c.type === ChannelType.CATEGORY);

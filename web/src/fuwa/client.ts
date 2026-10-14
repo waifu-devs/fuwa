@@ -18,6 +18,7 @@ import { GifService } from "@/gen/fuwa/v1/gif_pb";
 import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
 import { EconomyService } from "@/gen/fuwa/v1/economy_pb";
+import { BoardService } from "@/gen/fuwa/v1/board_pb";
 import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { ModerationService } from "@/gen/fuwa/v1/moderation_pb";
@@ -65,6 +66,7 @@ export type Api = {
   profileItems: Client<typeof ProfileItemService>;
   moderation: Client<typeof ModerationService>;
   economy: Client<typeof EconomyService>;
+  boards: Client<typeof BoardService>;
 };
 
 /**
@@ -111,5 +113,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     profileItems: createClient(ProfileItemService, transport),
     moderation: createClient(ModerationService, transport),
     economy: createClient(EconomyService, transport),
+    boards: createClient(BoardService, transport),
   };
 }

@@ -440,6 +440,7 @@ pub async fn forget_account(servers: &Servers, account_id: &str, placeholder: &p
                 crate::api::forget_reactor(conn, account_id, events).await?;
                 crate::api::forget_mod_person(conn, &sdb.id, account_id, events).await?;
                 crate::api::forget_economy(conn, account_id).await?;
+                crate::api::forget_assignee(conn, account_id, events).await?;
                 store::upsert_user(conn, placeholder).await?;
                 events.push(Payload::UserUpdated(pb::UserUpdated { user: Some(placeholder.clone()) }));
                 Ok(left)

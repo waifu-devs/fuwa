@@ -471,6 +471,15 @@ enum Permission {
   // Give currency to a member or a role, or take it away, with a reason
   // that goes in the audit log. Also reads anyone's wallet.
   PERMISSION_GRANT_CURRENCY = 31;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Boards (BoardService, docs/boards.md): create cards, move them, and
+  // change any card's title, body, labels, people and due date. Creating a
+  // card also takes SEND_MESSAGES, since its body is a message; commenting
+  // on one takes only SEND_MESSAGES. Deleting someone else's card takes
+  // MANAGE_MESSAGES.
+  PERMISSION_MANAGE_CARDS = 32;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -945,6 +954,11 @@ enum ChannelType {
   // messages never go through MessageService. A channel can't become secure,
   // or stop being secure, once made.
   CHANNEL_TYPE_SECURE = 6;
+  // A board: columns of cards people move along (BoardService,
+  // docs/boards.md). Each card's body is a message in the channel and its
+  // comments are the thread under that message; the channel has no other
+  // messages. A channel can't become a board, or stop being one, once made.
+  CHANNEL_TYPE_BOARD = 7;
 }
 
 message Channel {
@@ -1441,6 +1455,13 @@ message Event {
     // MANAGE_ECONOMY get it, so agents can hand out what a custom listing
     // promises.
     PurchaseMade purchase_made = 49;
+    // A board's columns or labels changed (BoardService.SetBoard).
+    BoardUpdated board_updated = 50;
+    // A card was created, moved, changed or archived. Its body is a message:
+    // its text and files change with MessageUpdated.
+    CardUpdated card_updated = 51;
+    // A card was deleted, with its body (MessageDeleted) and comments.
+    CardDeleted card_deleted = 52;
   }
 }
 
@@ -2006,4 +2027,67 @@ message WalletsChanged {
 message PurchaseMade {
   LedgerEntry entry = 1;
   ShopListing listing = 2;
+}
+
+// A board's column (CHANNEL_TYPE_BOARD), in order on the board.
+message BoardColumn {
+  // Empty in SetBoard for a new column.
+  string id = 1;
+  // 1 to 50 characters.
+  string name = 2;
+  // 0xRRGGBB, 0 for none.
+  int32 color = 3;
+  // Cards here are finished: apps stop showing their due dates as late.
+  bool done = 4;
+  // How many cards it's meant to hold at most (a work-in-progress limit),
+  // which apps show; 0 for none. Nothing refuses a card over it.
+  int32 card_limit = 5;
+}
+
+// A label cards on a board can carry.
+message BoardLabel {
+  // Empty in SetBoard for a new label.
+  string id = 1;
+  // 1 to 30 characters.
+  string name = 2;
+  // 0xRRGGBB.
+  int32 color = 3;
+}
+
+// A card on a board. Its body (text, files, mentions, reactions) is the
+// message with the same id, and its comments are that message's thread.
+message Card {
+  // Its body message's id too.
+  string id = 1;
+  string channel_id = 2;
+  string column_id = 3;
+  // Where it sits in its column: cards sort by rank, then id. Opaque; the
+  // server works ranks out (MoveCard).
+  string rank = 4;
+  // 1 to 200 characters.
+  string title = 5;
+  repeated string label_ids = 6;
+  // Up to 10 people, each able to see the board.
+  repeated string assignee_ids = 7;
+  google.protobuf.Timestamp due_at = 8;
+  string author_id = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  // Set once it's archived: off the board, listed by ListArchivedCards.
+  google.protobuf.Timestamp archived_at = 12;
+}
+
+message BoardUpdated {
+  string channel_id = 1;
+  repeated BoardColumn columns = 2;
+  repeated BoardLabel labels = 3;
+}
+
+message CardUpdated {
+  Card card = 1;
+}
+
+message CardDeleted {
+  string channel_id = 1;
+  string card_id = 2;
 }

@@ -144,7 +144,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
 }
 
 /** While a channel is open: it's the one being read, and the page's title names it. */
-function useFocusAndTitle(instanceKey: string, serverId: string, channel: Channel) {
+export function useFocusAndTitle(instanceKey: string, serverId: string, channel: Channel) {
   const { t } = useI18n();
   useEffect(() => {
     focusChannel(instanceKey, channel.id);
@@ -159,7 +159,7 @@ function useFocusAndTitle(instanceKey: string, serverId: string, channel: Channe
 }
 
 /** The channel's icon and name, sliding over when another channel opens. */
-function ChannelTitle({ channel }: { channel: Channel }) {
+export function ChannelTitle({ channel }: { channel: Channel }) {
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   return (
     <AnimatePresence mode="popLayout" initial={false}>
@@ -207,7 +207,7 @@ function SlowModeBadge({ instanceKey, serverId, channel }: { instanceKey: string
 }
 
 /** How the connection is doing, shown only while it isn't live. */
-function ConnectionBadge({ instanceKey }: { instanceKey: string }) {
+export function ConnectionBadge({ instanceKey }: { instanceKey: string }) {
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
   return (
     <AnimatePresence>

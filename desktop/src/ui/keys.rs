@@ -719,6 +719,7 @@ impl FuwaApp {
                         pb::ChannelType::Announcement => "megaphone",
                         pb::ChannelType::Voice => "volume-2",
                         pb::ChannelType::Secure => "shield-check",
+                        pb::ChannelType::Board => "square-kanban",
                         _ => "hash",
                     })
                     .size(px(16.0)),

@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, commands, economy, polls, reactions, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, boards, commands, economy, polls, reactions, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -137,7 +137,7 @@ pub(super) fn emoji_tokens(content: &str) -> Vec<&str> {
 /// ones the app sent along, checked (see [`App::check_emojis`]). Emoji of
 /// `server_id` itself are left out: everyone there has them already. When
 /// checking fails the message still goes, and they show as their names.
-async fn outside_emojis(
+pub(super) async fn outside_emojis(
     app: &App,
     account_id: &str,
     server_id: &str,
@@ -243,7 +243,7 @@ fn name_tokens(content: &str) -> Vec<String> {
 /// The members `content` names, for [`pb::Message::mention_user_ids`]: as
 /// `<@id>` or as `@username`. Anyone not in the server is left out, so a
 /// client can trust them.
-async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
+pub(super) async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
     let mut ids = Vec::new();
     // Looked up one by one, so only so many names are looked at.
     for id in user_tokens(content).into_iter().take(2 * MAX_USER_MENTIONS) {
@@ -289,7 +289,7 @@ async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<
 /// Who a message pings, given what its author can do in its channel: everyone
 /// if they may, and the roles it names that are mentionable or that they may
 /// mention anyway.
-async fn mentions(
+pub(super) async fn mentions(
     conn: &turso::Connection,
     server_id: &str,
     access: &Access,
@@ -906,11 +906,26 @@ impl Api {
     pub(crate) async fn send_as(
         &self,
         account: Account,
-        mut req: pb::SendMessageRequest,
+        req: pb::SendMessageRequest,
     ) -> Result<pb::SendMessageResponse> {
+        let (message, _) = self.send_with(account, req, None).await?;
+        Ok(pb::SendMessageResponse { message: Some(message) })
+    }
+
+    /// [`Api::send_as`], or with `card` a board's new card, whose body the
+    /// message is (boards.rs).
+    pub(super) async fn send_with(
+        &self,
+        account: Account,
+        mut req: pb::SendMessageRequest,
+        card: Option<boards::NewCard>,
+    ) -> Result<(pb::Message, Option<pb::Card>)> {
         let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
         check_not_timed_out(&member)?;
         access.require_in(&req.channel_id, Permission::SendMessages)?;
+        if card.is_some() {
+            access.require_in(&req.channel_id, Permission::ManageCards)?;
+        }
         if !req.attachments.is_empty() || req.gif.is_some() {
             access.require_in(&req.channel_id, Permission::AttachFiles)?;
         }
@@ -929,9 +944,10 @@ impl Api {
         }
         // Only GIFs this instance stored and sealed.
         let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
+        // A card's title is enough without a body.
         check_content(
             &req.content,
-            !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some(),
+            !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some() || card.is_some(),
         )?;
         check_extras(&mut req.attachments, &req.embeds)?;
         check_embed_links(&self.app, &mut req.embeds)?;
@@ -975,7 +991,7 @@ impl Api {
             // (`shared::own_emojis`).
             req.emojis.clear();
             let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
-            return Ok(pb::SendMessageResponse { message: Some(message) });
+            return Ok((message, None));
         }
         let emojis =
             outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis)).await;
@@ -1004,7 +1020,10 @@ impl Api {
             attachments: req.attachments.clone(),
             ..Default::default()
         };
-        let reviewed = reviewed_text(&draft).into_owned();
+        let mut reviewed = reviewed_text(&draft).into_owned();
+        if let Some(card) = &card {
+            reviewed = format!("{}\n{reviewed}", card.title);
+        }
         let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
         // The GIF too: providers read its first frame. Then emoji
         // from other servers, the smallest.
@@ -1028,7 +1047,18 @@ impl Api {
         let message = sdb
             .write(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-                if !matches!(
+                let board = channel.r#type == pb::ChannelType::Board as i32;
+                if board {
+                    // A board holds cards, and comments in the thread under each.
+                    if card.is_none() && req.thread_id.is_empty() {
+                        return Err(Error::invalid("a board takes cards; comment on one with its id as thread_id"));
+                    }
+                    if poll.is_some() || answering || !components.is_empty() || req.also_send_to_channel {
+                        return Err(Error::invalid("polls, buttons and interactions aren't on boards"));
+                    }
+                } else if card.is_some() {
+                    return Err(Error::invalid("cards only go on boards"));
+                } else if !matches!(
                     pb::ChannelType::try_from(channel.r#type),
                     Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
                 ) {
@@ -1124,6 +1154,10 @@ impl Api {
                 }
                 insert_message(conn, &message, now).await?;
                 events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+                let made = match &card {
+                    Some(new) => Some(boards::insert(conn, &message, new, now, events).await?),
+                    None => None,
+                };
                 if let Some(parent) = parent {
                     threads::follow_quietly(conn, &parent.id, &account.id).await?;
                     if parent.webhook.is_none() {
@@ -1132,17 +1166,18 @@ impl Api {
                     threads::refresh(conn, &channel.id, &parent.id, events).await?;
                 }
                 economy::earn(conn, &sdb.id, &account.id, pb::CurrencyAction::Message, now, events).await?;
-                Ok(Ok(message))
+                Ok(Ok((message, made)))
             })
             .await?
             .map_err(Error::denied)?;
+        let (message, made) = message;
         for file in &message.attachments {
             self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
         }
         if let Some(checking) = later {
             checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
         }
-        Ok(pb::SendMessageResponse { message: Some(message) })
+        Ok((message, made))
     }
 }
 

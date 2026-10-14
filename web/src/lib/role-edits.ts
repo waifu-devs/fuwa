@@ -5,33 +5,33 @@
  */
 
 /** The switches turned on and off here. */
-export type Switches = { on: number; off: number };
+export type Switches = { on: bigint; off: bigint };
 
-export const NO_SWITCHES: Switches = { on: 0, off: 0 };
+export const NO_SWITCHES: Switches = { on: 0n, off: 0n };
 
 /** The role's permissions as they are `now`, with the switches flipped here on top. */
-export const switched = (s: Switches, now: number): number => (now | s.on) & ~s.off;
+export const switched = (s: Switches, now: bigint): bigint => (now | s.on) & ~s.off;
 
 /**
  * The switches after the permissions shown go from `from` to `to`. A switch
  * put back as the role has it `now` isn't being changed any more.
  */
-export const flip = (s: Switches, from: number, to: number, now: number): Switches => {
+export const flip = (s: Switches, from: bigint, to: bigint, now: bigint): Switches => {
   const on = to & ~from;
   const off = from & ~to;
   return { on: (s.on | on) & ~off & ~now, off: (s.off | off) & ~on & now };
 };
 
 /** What saving `mine` turns on and off in the role as it is `now`. */
-export const changes = (mine: number, now: number) => ({ grant: mine & ~now, revoke: now & ~mine });
+export const changes = (mine: bigint, now: bigint) => ({ grant: mine & ~now, revoke: now & ~mine });
 
 /**
  * The permissions part of a save. An instance with "role-permission-changes"
  * (`kept`) takes just the switches flipped; an older one ignores those and
  * only takes every permission at once.
  */
-export const permissionPatch = (mine: number, now: number, kept: boolean): { grant?: number; revoke?: number; permissions?: number } => {
+export const permissionPatch = (mine: bigint, now: bigint, kept: boolean): { grant?: bigint; revoke?: bigint; permissions?: bigint } => {
   const { grant, revoke } = changes(mine, now);
-  if ((grant | revoke) === 0) return {};
+  if ((grant | revoke) === 0n) return {};
   return kept ? { grant, revoke } : { permissions: mine };
 };

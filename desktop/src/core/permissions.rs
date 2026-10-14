@@ -7,13 +7,13 @@ use std::collections::HashMap;
 use crate::core::store::InstanceState;
 use crate::pb::{self, Permission as P};
 
-pub type Bits = u32;
+pub type Bits = u64;
 
 pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 31] = [
+pub const KNOWN: [P; 32] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -45,6 +45,7 @@ pub const KNOWN: [P; 31] = [
     P::Moderate,
     P::ManageEconomy,
     P::GrantCurrency,
+    P::ManageCards,
 ];
 
 pub const ALL: Bits = {
@@ -61,6 +62,7 @@ pub const ALL: Bits = {
 pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::CreateThreads)
     | bit(P::CreatePolls)
+    | bit(P::ManageCards)
     | bit(P::AddReactions)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
@@ -114,6 +116,7 @@ pub const GROUPS: [(&str, &[P]); 5] = [
             P::SendMessages,
             P::CreateThreads,
             P::CreatePolls,
+            P::ManageCards,
             P::AddReactions,
             P::EmbedLinks,
             P::AttachFiles,
@@ -194,6 +197,9 @@ pub fn info(p: P) -> (&'static str, &'static str) {
             "Grant currency",
             "Give currency to a member or a role, or take it away. Every grant goes in the audit log.",
         ),
+        P::ManageCards => {
+            ("Manage cards", "Add, move, edit and archive cards on boards. Commenting on a card needs Send messages.")
+        }
     }
 }
 
@@ -206,6 +212,7 @@ pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
             P::SendMessages,
             P::CreateThreads,
             P::CreatePolls,
+            P::ManageCards,
             P::AddReactions,
             P::EmbedLinks,
             P::AttachFiles,
@@ -223,6 +230,7 @@ pub fn channel_about(p: P) -> &'static str {
         P::ManageChannels => "Edit or delete this channel. Also skips its slow mode.",
         P::ViewChannels => "See this channel and read its messages.",
         P::CreatePolls => "Ask a question in this channel with answers people vote on.",
+        P::ManageCards => "Add, move, edit and archive cards on this board.",
         P::AddReactions => "React to messages in this channel with emoji.",
         P::CreateInvite => "Make invite links that open this channel.",
         P::Connect => "Join this voice channel.",

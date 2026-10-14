@@ -5,6 +5,7 @@ mod admin;
 mod agents;
 mod auth;
 mod automod;
+mod boards;
 mod calls;
 mod channels;
 mod commands;
@@ -39,6 +40,7 @@ mod threads;
 mod webhooks;
 
 pub(crate) use account::export_server;
+pub(crate) use boards::forget_assignee;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub(crate) use economy::forget_account as forget_economy;
 pub use economy::spawn_voice_earnings;

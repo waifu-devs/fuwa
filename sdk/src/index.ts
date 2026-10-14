@@ -109,6 +109,7 @@ export * from "./gen/fuwa/v1/join_pb.js";
 export * from "./gen/fuwa/v1/live_tile_pb.js";
 export * from "./gen/fuwa/v1/media_pb.js";
 export * from "./gen/fuwa/v1/economy_pb.js";
+export * from "./gen/fuwa/v1/board_pb.js";
 export * from "./gen/fuwa/v1/message_pb.js";
 export * from "./gen/fuwa/v1/moderation_pb.js";
 export * from "./gen/fuwa/v1/node_pb.js";

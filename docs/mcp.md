@@ -122,6 +122,7 @@ nothing comes back as `{"done": true}`.
 | Profile items | `list_profile_items`, `create_profile_item`, `update_profile_item`, `delete_profile_item` | `ProfileItemService`'s server calls ([docs/profile-items.md](profile-items.md)) |
 | Mod View | `report_message`, `report_member`, `list_mod_cases`, `get_mod_case`, `update_mod_case`, `get_member_overview`, `list_member_messages`, `find_people`, `add_mod_note`, `delete_mod_note` | `ModerationService` ([docs/mod-view.md](mod-view.md)) |
 | The economy | `list_currencies`, `list_shop`, `get_wallet`, `list_ledger`, `transfer_currency`, `buy_listing`, `grant_currency`, `get_economy_overview`, `create_currency`, `update_currency`, `delete_currency`, `create_shop_listing`, `update_shop_listing`, `delete_shop_listing` | `EconomyService` ([docs/economy.md](economy.md)) |
+| Boards | `get_board`, `list_archived_cards`, `create_card`, `update_card`, `move_card`, `set_board` | `BoardService` ([docs/boards.md](boards.md)) |
 
 They need the same permissions as in the apps (Manage Server, Manage
 Channels, Manage Roles and so on), and rank still decides what an agent can

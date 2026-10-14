@@ -1,8 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon, ShieldCheckIcon, Volume2Icon } from "lucide-react";
+import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon, ShieldCheckIcon, SquareKanbanIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type FormEvent } from "react";
 import { ChannelType, createChannel } from "@/fuwa/actions";
+import { useBoardsHere } from "@/fuwa/board";
 import { useAction } from "@/fuwa/hooks";
 import { SwapText } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
@@ -17,6 +18,7 @@ const TYPES = [
   { type: ChannelType.TEXT, icon: HashIcon, label: "workspace.createChannel.type.text", hint: "workspace.createChannel.type.textHint" },
   { type: ChannelType.ANNOUNCEMENT, icon: MegaphoneIcon, label: "workspace.createChannel.type.announcement", hint: "workspace.createChannel.type.announcementHint" },
   { type: ChannelType.SECURE, icon: ShieldCheckIcon, label: "workspace.createChannel.type.secure", hint: "workspace.createChannel.type.secureHint" },
+  { type: ChannelType.BOARD, icon: SquareKanbanIcon, label: "workspace.createChannel.type.board", hint: "workspace.createChannel.type.boardHint" },
   { type: ChannelType.VOICE, icon: Volume2Icon, label: "workspace.createChannel.type.voice", hint: "workspace.createChannel.type.voiceHint" },
   { type: ChannelType.CATEGORY, icon: FolderIcon, label: "workspace.createChannel.type.category", hint: "workspace.createChannel.type.categoryHint" },
 ] as const;
@@ -58,6 +60,8 @@ function CreateChannelForm({ onOpenChange, instanceKey, serverId, parentId = "",
   const [type, setType] = useState<ChannelType>(ChannelType.TEXT);
   const [name, setName] = useState("");
   const create = useAction(createChannel);
+  // Boards only where the instance has them.
+  const boards = useBoardsHere(instanceKey);
   const category = type === ChannelType.CATEGORY;
   /** Named as typed, like categories: "Lounge", not "#lounge". */
   const free = category || type === ChannelType.VOICE;
@@ -73,7 +77,7 @@ function CreateChannelForm({ onOpenChange, instanceKey, serverId, parentId = "",
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div role="radiogroup" aria-label={t("workspace.createChannel.typeLabel")} className="grid gap-2">
-        {TYPES.map((kind) => (
+        {TYPES.filter((kind) => boards || kind.type !== ChannelType.BOARD).map((kind) => (
           <TypeChoice key={kind.type} kind={kind} active={type === kind.type} onPick={() => setType(kind.type)} />
         ))}
       </div>
@@ -141,14 +145,22 @@ function NameIcon({ type }: { type: ChannelType }) {
     <AnimatePresence initial={false}>
       {!category && (
         <motion.span
-          key={type === ChannelType.VOICE ? "voice" : type === ChannelType.SECURE ? "secure" : "text"}
+          key={type === ChannelType.VOICE ? "voice" : type === ChannelType.SECURE ? "secure" : type === ChannelType.BOARD ? "board" : "text"}
           initial={{ opacity: 0, scale: 0.4, rotate: -30 }}
           animate={{ opacity: 1, scale: 1, rotate: 0 }}
           exit={{ opacity: 0, scale: 0.4 }}
           transition={SPRING}
           className="pointer-events-none absolute top-3.5 left-3 text-muted-foreground"
         >
-          {type === ChannelType.VOICE ? <Volume2Icon className="size-4" /> : type === ChannelType.SECURE ? <ShieldCheckIcon className="size-4" /> : <HashIcon className="size-4" />}
+          {type === ChannelType.VOICE ? (
+            <Volume2Icon className="size-4" />
+          ) : type === ChannelType.SECURE ? (
+            <ShieldCheckIcon className="size-4" />
+          ) : type === ChannelType.BOARD ? (
+            <SquareKanbanIcon className="size-4" />
+          ) : (
+            <HashIcon className="size-4" />
+          )}
         </motion.span>
       )}
     </AnimatePresence>
