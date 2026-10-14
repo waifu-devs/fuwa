@@ -9,7 +9,7 @@
 //!
 //! [`InlinePlugin`] draws `$…$` (and `$$…$$` amid text, in display style)
 //! where it sits in the line; [`BlockPlugin`] draws a `$$…$$` alone in its
-//! paragraph, and ```math / ```latex blocks, centered on a line of their own.
+//! paragraph, and ```math / ```latex blocks, on a line of their own.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -177,7 +177,7 @@ impl gpui_kit::component::text::MarkdownPlugin for InlinePlugin {
     }
 }
 
-/// Draws a `$$…$$` alone in its paragraph, and ```math / ```latex blocks, centered on their own line.
+/// Draws a `$$…$$` alone in its paragraph, and ```math / ```latex blocks, on a line of their own.
 pub struct BlockPlugin;
 
 impl gpui_kit::component::text::MarkdownPlugin for BlockPlugin {
@@ -216,7 +216,7 @@ impl gpui_kit::component::text::MarkdownPlugin for BlockPlugin {
         let formula = node.data::<Formula>();
         let size = f32::from(window.rem_size()) * SCALE;
         let painted = formula.and_then(|f| painted(&f.tex, f.mode, size, p.foreground, window.scale_factor()));
-        let line = div().w_full().flex().justify_center().overflow_hidden().py(px(2.0));
+        let line = div().w_full().flex().overflow_hidden().py(px(2.0));
         match painted {
             Some(painted) => {
                 line.child(img(painted.image.clone()).flex_none().w(px(painted.width)).h(px(painted.height)))
