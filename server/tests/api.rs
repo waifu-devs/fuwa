@@ -2083,6 +2083,58 @@ async fn server_arrangements_follow_the_account() {
 }
 
 #[tokio::test]
+async fn app_settings_follow_the_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let get = |token: &str| authed(token, pb::GetAppSettingsRequest {});
+    let set = |token: &str, document: &str, version: u64| {
+        authed(token, pb::SetAppSettingsRequest { document: document.into(), version })
+    };
+
+    let empty = c.account.get_app_settings(get(&juan)).await.unwrap().into_inner();
+    assert!(empty.document.is_empty() && empty.version == 0 && empty.updated_at.is_none());
+
+    let first = r#"{"format":"fuwa.app-settings.v1","settings":{"theme":{"at":1,"value":"yoru"}}}"#;
+    let v1 = c.account.set_app_settings(set(&juan, first, 0)).await.unwrap().into_inner();
+    assert_eq!(v1.version, 1);
+    let got = c.account.get_app_settings(get(&juan)).await.unwrap().into_inner();
+    assert_eq!((got.document.as_str(), got.version), (first, 1));
+    assert!(got.updated_at.is_some());
+    // Only yours.
+    assert_eq!(c.account.get_app_settings(get(&mika)).await.unwrap().into_inner().version, 0);
+
+    // A device that merged from an older version is told to read again.
+    let second = r#"{"format":"fuwa.app-settings.v1","settings":{"theme":{"at":2,"value":"sakura"}}}"#;
+    for stale in [0, 2] {
+        let err = c.account.set_app_settings(set(&juan, second, stale)).await.unwrap_err();
+        assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+    let v2 = c.account.set_app_settings(set(&juan, second, 1)).await.unwrap().into_inner();
+    assert_eq!(v2.version, 2);
+    assert_eq!(c.account.get_app_settings(get(&juan)).await.unwrap().into_inner().document, second);
+
+    // Only a JSON object, and not a huge one.
+    for bad in ["[1,2]".to_string(), "nope".into(), format!(r#"{{"x":"{}"}}"#, "a".repeat(1 << 20))] {
+        let err = c.account.set_app_settings(set(&juan, &bad, 2)).await.unwrap_err();
+        assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    // In the export.
+    let mut chunks = c.account.export_data(authed(&juan, pb::ExportDataRequest {})).await.unwrap().into_inner();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        bytes.extend(chunk.unwrap().chunk);
+    }
+    let exported: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(exported["app_settings"]["settings"]["theme"]["value"], "sakura");
+
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn data_export_and_account_deletion() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;

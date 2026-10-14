@@ -546,6 +546,12 @@ pub struct Prefs {
     pub overlay_speakers_only: bool,
     /// Messages that would notify you show in it, instead of the system's notifications.
     pub overlay_notifications: bool,
+    /// Keeps the synced settings the same on every device, through the
+    /// instances you're signed in to (`core::settings_sync`). This computer's alone.
+    pub sync_settings: bool,
+    /// When each synced setting last changed here, or the stamp of the value
+    /// taken from another device, by its name in the document (unix ms).
+    pub sync_stamps: std::collections::BTreeMap<String, i64>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -644,6 +650,8 @@ impl Default for Prefs {
             overlay_opacity: 85,
             overlay_speakers_only: false,
             overlay_notifications: true,
+            sync_settings: true,
+            sync_stamps: Default::default(),
         }
     }
 }
@@ -734,6 +742,7 @@ impl Prefs {
         self.ptt_release = self.ptt_release.min(2000);
         self.overlay_opacity = self.overlay_opacity.clamp(30, 100);
         self.user_volumes.retain(|_, v| *v <= 200);
+        self.sync_stamps.retain(|_, at| *at > 0);
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }

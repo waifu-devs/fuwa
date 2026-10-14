@@ -44,6 +44,7 @@ import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { i18n } from "@/i18n/i18n";
 import { makeApi } from "./client";
+import { pullAppSettings } from "./app-settings";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { accountKey, instanceKey, normalizeUrl } from "./saved";
 import { outsideEmojis } from "@/lib/emoji-catalog";
@@ -594,9 +595,26 @@ export const arrangeServers = (key: string, layout: RailLayout) =>
   });
 
 /**
+ * Reads your own account and profile again: a decoration or effect changed
+ * on another device reaches this one by an event only through a server
+ * you're in, and an effect alone sends none.
+ */
+export const refreshMe = (key: string) =>
+  Effect.gen(function* () {
+    const { user } = yield* call((signal) => api(key).auth.getMe({}, { signal }));
+    if (!user) return;
+    const { profile } = yield* call((signal) => api(key).auth.getProfile({ userId: user.id }, { signal }));
+    updateInstance(key, (i) => {
+      if (i.me?.id !== user.id) return i;
+      const next = withUpdatedUser(i, user);
+      return profile ? { ...next, profiles: { ...next.profiles, [user.id]: profile } } : next;
+    });
+  });
+
+/**
  * Picks up what changed without an event while you were away: notification
- * settings and server arrangement from another device, and the instance's
- * details and announcement.
+ * settings, server arrangement, app settings and your profile from another
+ * device, and the instance's details and announcement.
  */
 export function refreshOnFocus() {
   let last = Date.now();
@@ -608,6 +626,8 @@ export function refreshOnFocus() {
         run(refreshNotifications(key)).catch(() => {});
         run(refreshRail(key)).catch(() => {});
         run(refreshNode(key)).catch(() => {});
+        run(refreshMe(key)).catch(() => {});
+        void pullAppSettings(key);
       }
     }
   });

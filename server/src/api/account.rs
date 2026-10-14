@@ -29,6 +29,10 @@ const ARRANGED_FOLDERS: usize = 200;
 const FOLDER_ID_CHARS: usize = 32;
 const FOLDER_NAME_CHARS: usize = 32;
 
+/// The biggest app settings document, so a row stays small next to a
+/// person's custom themes and shortcuts.
+const APP_SETTINGS_BYTES: usize = 1 << 20;
+
 type ExportStream = Pin<Box<dyn Stream<Item = Result<pb::ExportDataResponse, Status>> + Send>>;
 
 impl Api {
@@ -477,6 +481,49 @@ impl AccountService for Api {
         )
     }
 
+    async fn get_app_settings(
+        &self,
+        request: Request<pb::GetAppSettingsRequest>,
+    ) -> Result<Response<pb::GetAppSettingsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let saved = self.app.node()?.app_settings(&account.id).await?;
+                let (document, version, updated_at) = saved.unwrap_or_default();
+                Ok(pb::GetAppSettingsResponse {
+                    document,
+                    version: version as u64,
+                    updated_at: (version > 0).then(|| timestamp(updated_at)),
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn set_app_settings(
+        &self,
+        request: Request<pb::SetAppSettingsRequest>,
+    ) -> Result<Response<pb::SetAppSettingsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                if account.kind == pb::AccountKind::Agent {
+                    return Err(Error::denied("agents have no app settings"));
+                }
+                let request = request.into_inner();
+                check_app_settings(&request.document)?;
+                let version =
+                    i64::try_from(request.version).map_err(|_| Error::invalid("that version doesn't exist"))?;
+                let (version, updated_at) =
+                    self.app.node()?.set_app_settings(&account.id, &request.document, version).await?.ok_or_else(
+                        || Error::FailedPrecondition("your app settings changed meanwhile; read them again".into()),
+                    )?;
+                Ok(pb::SetAppSettingsResponse { version: version as u64, updated_at: Some(timestamp(updated_at)) })
+            }
+            .await,
+        )
+    }
+
     type ExportDataStream = ExportStream;
 
     async fn export_data(&self, request: Request<pb::ExportDataRequest>) -> Result<Response<ExportStream>, Status> {
@@ -546,6 +593,12 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
     let friend_settings = friends.settings(&account.id).await?;
     let (arrangement, _) = node.server_arrangement(&account.id).await?;
     let arrangement = tidy_arrangement(arrangement, |id| app.index.is_member(&account.id, id))?;
+    // Checked as JSON when written, so it reads back; anything else is left out.
+    let app_settings = node
+        .app_settings(&account.id)
+        .await?
+        .and_then(|(document, _, _)| serde_json::from_str::<Value>(&document).ok())
+        .unwrap_or(Value::Null);
     let settings = app.settings();
     let head = json!({
         "format": "fuwa.export.v1",
@@ -621,6 +674,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             })),
             None => None,
         }).collect::<Vec<_>>(),
+        "app_settings": app_settings,
     });
     let mut head = serde_json::to_string_pretty(&head).map_err(|err| Error::internal(err.to_string()))?;
     head.truncate(head.trim_end().len() - 1); // the closing brace, reopened for the servers
@@ -784,6 +838,21 @@ fn invisible(c: char) -> bool {
             | '\u{e0001}'
             | '\u{e0020}'..='\u{e007f}'
     )
+}
+
+/// An app settings document is empty (forgetting them) or a JSON object
+/// small enough to keep; what's inside is the apps' business.
+fn check_app_settings(document: &str) -> Result<()> {
+    if document.is_empty() {
+        return Ok(());
+    }
+    if document.len() > APP_SETTINGS_BYTES {
+        return Err(Error::invalid("app settings can be at most 1 MiB"));
+    }
+    match serde_json::from_str::<Value>(document) {
+        Ok(Value::Object(_)) => Ok(()),
+        _ => Err(Error::invalid("app settings must be a JSON object")),
+    }
 }
 
 /// Checks an arrangement and keeps only what applies: servers the person is

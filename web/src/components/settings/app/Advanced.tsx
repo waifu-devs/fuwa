@@ -3,6 +3,7 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { Count } from "@/components/motion";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
+import { pullAllAppSettings } from "@/fuwa/app-settings";
 import { useFuwa } from "@/fuwa/store";
 import { type Key, T, useI18n } from "@/i18n/react";
 import { setPrefs, usePrefs } from "@/lib/prefs";
@@ -13,8 +14,20 @@ import { PrefSetting } from "./common";
 export function Advanced() {
   const { t } = useI18n();
   const on = usePrefs((p) => p.developerMode);
+  const sync = usePrefs((p) => p.syncSettings);
   return (
     <div className="flex flex-col">
+      <PrefSetting id="sync-settings" title={t("appsettings.advanced.sync")} keys={["syncSettings"]}>
+        <Toggle
+          checked={sync}
+          onChange={(syncSettings) => {
+            setPrefs({ syncSettings });
+            if (syncSettings) pullAllAppSettings();
+          }}
+          label={t("appsettings.advanced.syncToggle")}
+          hint={t("appsettings.advanced.syncToggleHint")}
+        />
+      </PrefSetting>
       <ShareReports />
       <PrefSetting id="developer-mode" title={t("appsettings.advanced.developer")} keys={["developerMode"]}>
         <Toggle

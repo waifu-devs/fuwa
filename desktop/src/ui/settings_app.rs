@@ -1072,8 +1072,26 @@ impl SettingsView {
                         ))
                     }),
             );
+        let sync = toggle(
+            "sync-settings",
+            &t("appsettings.advanced.syncToggle"),
+            Some(&t("appsettings.advanced.syncToggleHint")),
+            prefs.sync_settings,
+            false,
+            p,
+            window,
+            cx,
+            |this, on, cx| this.set(cx, |pr| pr.sync_settings = on),
+        );
         self.stack(
             [
+                (
+                    "sync-settings",
+                    t("appsettings.advanced.sync"),
+                    None,
+                    pref!(prefs, sync_settings),
+                    sync.into_any_element(),
+                ),
                 ("share-reports", t("appsettings.advanced.reports"), None, pref!(prefs, share_reports), reports),
                 (
                     "developer-mode",
