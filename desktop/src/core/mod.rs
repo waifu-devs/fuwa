@@ -44,6 +44,7 @@ pub mod linked;
 pub mod links;
 mod live;
 pub mod live_tiles;
+pub mod math;
 pub mod mod_view;
 pub mod moderation;
 pub mod notifications;

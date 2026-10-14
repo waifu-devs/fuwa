@@ -995,6 +995,16 @@
     `components/Spoiler.tsx` until the reader reveals it; `hideSpoilers`
     blanks them in plain-text places (system notifications). Link previews
     skip links inside them. Desktop: the same in its Markdown.
+  - Math: `$inline$`, `$$display$$` and ```math / ```latex blocks in block
+    Markdown. `lib/math.ts` decides on the source which dollars are math
+    (prices like "$5 and $10" stay text) and makes each formula a code span
+    starting with a private-use mark, so the other plugins leave it alone;
+    `remarkMath` turns those into elements `components/Math.tsx` draws with
+    KaTeX (`trust` off, sizes and expansions capped, its own chunk and fonts,
+    loaded once a formula is on screen). Formulas that define commands
+    (`\def`, `\newcommand`...) aren't drawn. Desktop: `core/math.rs` is the
+    same rules, case for case, and `ui/math.rs` paints formulas with RaTeX
+    (KaTeX in Rust, its fonts built in) into pictures in the line.
   - Masked links (a Markdown link whose words aren't its address, and an
     app embed's title link): `lib/links.ts` marks them (`remarkMaskedLinks`)
     and `components/LeavingDialog.tsx` asks before opening one, showing the
