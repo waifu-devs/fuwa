@@ -249,6 +249,42 @@ test("an agent gives currency and hears what's bought", async () => {
   await agent.stop();
 });
 
+test("an agent pulls on a gacha banner and hears every pull", async () => {
+  const { currency } = await person.economy.createCurrency({ serverId, currency: { name: "Stars", iconEmoji: "⭐" } });
+  const { role } = await person.roles.createRole({
+    serverId,
+    name: "Croupier",
+    permissions: [Permission.GRANT_CURRENCY, Permission.MANAGE_ECONOMY],
+  });
+  const { listing } = await person.economy.createShopListing({
+    serverId,
+    listing: { currencyId: currency!.id, kind: ShopListingKind.CUSTOM, name: "Sticker", price: 100n, available: true, gachaOnly: true },
+  });
+  const { banner } = await person.economy.createGachaBanner({
+    serverId,
+    banner: {
+      name: "Lucky",
+      currencyId: currency!.id,
+      pullPrice: 5n,
+      tiers: [{ id: "only", name: "Only", rate: 1_000_000 }],
+      prizes: [{ tierId: "only", listingId: listing!.id, weight: 1 }],
+      available: true,
+    },
+  });
+  assert.equal(banner!.prizes[0]!.chance, 1_000_000);
+  const agent = newAgent();
+  const pulled: string[] = [];
+  agent.on("gachaPulled", (payload) => void pulled.push(payload.pull?.results[0]?.prizeName ?? ""));
+  await agent.start();
+  await person.roles.addMemberRole({ serverId, userId: agent.me.id, roleId: role!.id });
+  await agent.grant({ serverId, userId: agent.me.id }, currency!.id, 10, "pocket money");
+  const { pull } = await agent.pull(serverId, banner!.id);
+  assert.equal(pull!.results[0]!.listingId, listing!.id);
+  assert.equal(pull!.cost, 5n);
+  await until("the pull reaches the agent", () => (pulled.includes("Sticker") ? true : undefined));
+  await agent.stop();
+});
+
 test("an agent catches up on what it missed while stopped", async () => {
   const first = newAgent();
   await first.start();
