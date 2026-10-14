@@ -71,6 +71,21 @@ pub fn channel(c: &pb::Channel) -> Value {
     }))
 }
 
+/// A board's card; its body is the message with the same id.
+pub fn card(c: &pb::Card) -> Value {
+    trim(json!({
+        "id": c.id,
+        "channel_id": c.channel_id,
+        "column_id": c.column_id,
+        "title": c.title,
+        "label_ids": c.label_ids,
+        "assignee_ids": c.assignee_ids,
+        "due_at": time(&c.due_at),
+        "author_id": c.author_id,
+        "archived_at": time(&c.archived_at),
+    }))
+}
+
 pub fn role(r: &pb::Role) -> Value {
     let permissions: Vec<String> = r
         .permissions
@@ -438,6 +453,10 @@ pub fn event(e: &pb::Event) -> Value {
             }),
         ),
         Some(Payload::WalletsChanged(p)) => ("wallets_changed", json!({ "currency_id": p.currency_id })),
+        // Boards: get_board has the columns and labels.
+        Some(Payload::BoardUpdated(p)) => ("board_updated", json!({ "channel_id": p.channel_id })),
+        Some(Payload::CardUpdated(p)) => ("card_updated", json!({ "card": p.card.as_ref().map(card) })),
+        Some(Payload::CardDeleted(p)) => ("card_deleted", json!({ "channel_id": p.channel_id, "card_id": p.card_id })),
         // The buyer, and agents with Manage Economy, which may hand out what
         // a custom listing promises.
         Some(Payload::PurchaseMade(p)) => (

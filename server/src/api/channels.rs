@@ -150,6 +150,9 @@ impl ChannelService for Api {
                             write_overwrites(conn, &channel.id, &kept).await?;
                             channel = load_channel(conn, &sdb.id, &channel.id).await?.ok_or(Error::NotFound("channel"))?;
                         }
+                        if kind == pb::ChannelType::Board {
+                            super::boards::start(conn, &channel.id, events).await?;
+                        }
                         if kind == pb::ChannelType::Secure {
                             conn.execute(
                                 "INSERT INTO secure_groups (channel_id, updated_at) VALUES (?1, ?2)",
@@ -317,6 +320,7 @@ impl ChannelService for Api {
                 .await?;
                 conn.execute("DELETE FROM threads WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 super::polls::forget_channel(conn, &req.channel_id).await?;
+                super::boards::forget_channel(conn, &req.channel_id).await?;
                 let (secure_messages, secure_bytes) = super::secure::forget_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // Its webhooks go too: they have nowhere left to post.

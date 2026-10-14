@@ -82,6 +82,9 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) }) => Some(&i.channel_id),
         Payload::LiveTileUpdated(pb::LiveTileUpdated { tile: Some(t) }) => Some(&t.channel_id),
         Payload::LiveTileEnded(e) => Some(&e.channel_id),
+        Payload::BoardUpdated(b) => Some(&b.channel_id),
+        Payload::CardUpdated(pb::CardUpdated { card: Some(c) }) => Some(&c.channel_id),
+        Payload::CardDeleted(d) => Some(&d.channel_id),
         _ => None,
     }
 }

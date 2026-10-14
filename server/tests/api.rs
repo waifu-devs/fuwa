@@ -85,6 +85,7 @@ struct Clients {
     profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
     moderation: pb::moderation_service_client::ModerationServiceClient<Channel>,
     economy: pb::economy_service_client::EconomyServiceClient<Channel>,
+    boards: pb::board_service_client::BoardServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -110,7 +111,8 @@ async fn clients(instance: &Instance) -> Clients {
         live_tiles: pb::live_tile_service_client::LiveTileServiceClient::new(channel.clone()),
         profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel.clone()),
         moderation: pb::moderation_service_client::ModerationServiceClient::new(channel.clone()),
-        economy: pb::economy_service_client::EconomyServiceClient::new(channel),
+        economy: pb::economy_service_client::EconomyServiceClient::new(channel.clone()),
+        boards: pb::board_service_client::BoardServiceClient::new(channel),
     }
 }
 
@@ -12651,4 +12653,356 @@ async fn economy_currencies_earning_shop_and_grants() {
     assert!(wallet(&mut c, &rin, &sid, "").await.unwrap().balances.is_empty());
     assert!(ledger(&juan, "*").await.unwrap().entries.is_empty());
     instance.stop().await;
+}
+
+async fn board(c: &mut Clients, token: &str, server_id: &str, channel_id: &str) -> pb::GetBoardResponse {
+    let request = pb::GetBoardRequest { server_id: server_id.into(), channel_id: channel_id.into() };
+    c.boards.get_board(authed(token, request)).await.unwrap().into_inner()
+}
+
+/// The titles on a board, column by column.
+fn board_titles(b: &pb::GetBoardResponse) -> Vec<Vec<String>> {
+    b.columns
+        .iter()
+        .map(|column| b.cards.iter().filter(|c| c.column_id == column.id).map(|c| c.title.clone()).collect())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn boards_hold_cards_whose_bodies_are_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    let sid = create_server(&mut c, &juan, "Studio", true).await.id;
+    for token in [&mika, &rin] {
+        join(&mut c, token, &sid).await;
+    }
+    let roadmap = new_channel(&mut c, &juan, &sid, "Roadmap", pb::ChannelType::Board).await;
+    let bid = roadmap.id.clone();
+    let general = new_channel(&mut c, &juan, &sid, "chat", pb::ChannelType::Text).await.id;
+    let messages_before = usage(&mut c, &juan, &sid).await.messages;
+
+    // A new board starts with three columns, the last one done.
+    let start = board(&mut c, &mika, &sid, &bid).await;
+    let names: Vec<_> = start.columns.iter().map(|col| col.name.as_str()).collect();
+    assert_eq!(names, ["To do", "Doing", "Done"]);
+    assert!(start.columns[2].done && !start.columns[0].done);
+    let [todo, doing, done] = [0, 1, 2].map(|i| start.columns[i].id.clone());
+
+    // Plain messages don't go on a board, and cards don't go elsewhere.
+    let plain = send(&mut c, &mika, &sid, &bid, "hi").await.unwrap_err();
+    assert_eq!(plain.code(), Code::InvalidArgument);
+    let card = |token: &str, channel: &str, title: &str, content: &str| {
+        authed(
+            token,
+            pb::CreateCardRequest {
+                server_id: sid.clone(),
+                channel_id: channel.into(),
+                title: title.into(),
+                content: content.into(),
+                ..Default::default()
+            },
+        )
+    };
+    let elsewhere = c.boards.create_card(card(&mika, &general, "Nope", "")).await.unwrap_err();
+    assert_eq!(elsewhere.code(), Code::InvalidArgument);
+    let untitled = c.boards.create_card(card(&mika, &bid, "  ", "body")).await.unwrap_err();
+    assert_eq!(untitled.code(), Code::InvalidArgument);
+
+    // Labels first: only Manage Channels sets columns and labels.
+    let labels = vec![
+        pb::BoardLabel { name: "bug".into(), color: 0xFF8A80, ..Default::default() },
+        pb::BoardLabel { name: "feature".into(), color: 0xB388FF, ..Default::default() },
+    ];
+    let set = |token: &str, columns: Vec<pb::BoardColumn>, labels: Vec<pb::BoardLabel>| {
+        authed(token, pb::SetBoardRequest { server_id: sid.clone(), channel_id: bid.clone(), columns, labels })
+    };
+    let refused = c.boards.set_board(set(&mika, start.columns.clone(), labels.clone())).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let set_up = c.boards.set_board(set(&juan, start.columns.clone(), labels)).await.unwrap().into_inner();
+    let (bug, feature) = (set_up.labels[0].id.clone(), set_up.labels[1].id.clone());
+
+    // Anyone who can send messages manages cards by default; a card's body
+    // is a message with Markdown, mentions and files.
+    let file = attach(&mut c, &instance, &mika, &sid, b"notes".to_vec()).await;
+    let made = c
+        .boards
+        .create_card(authed(
+            &mika,
+            pb::CreateCardRequest {
+                server_id: sid.clone(),
+                channel_id: bid.clone(),
+                title: "Fix the overlay".into(),
+                content: format!("**Flickers** on Wayland, <@{}> knows", rin_user.id),
+                attachments: vec![pb::Attachment {
+                    url: file.clone(),
+                    filename: "notes.txt".into(),
+                    ..Default::default()
+                }],
+                label_ids: vec![bug.clone(), bug.clone()],
+                assignee_ids: vec![rin_user.id.clone()],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let (overlay, body) = (made.card.unwrap(), made.body.unwrap());
+    assert_eq!(overlay.id, body.id);
+    assert_eq!((overlay.column_id.as_str(), overlay.label_ids.clone()), (todo.as_str(), vec![bug.clone()]));
+    assert_eq!(body.attachments.len(), 1);
+    assert_eq!(body.mention_user_ids, vec![rin_user.id.clone()]);
+    // Only people who can see the board go on a card, and only its labels.
+    let mut stranger = pb::CreateCardRequest {
+        server_id: sid.clone(),
+        channel_id: bid.clone(),
+        title: "x".into(),
+        assignee_ids: vec![kai_user.id.clone()],
+        ..Default::default()
+    };
+    let refused = c.boards.create_card(authed(&mika, stranger.clone())).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    stranger.assignee_ids.clear();
+    stranger.label_ids = vec!["01J00000000000000000000000".into()];
+    let refused = c.boards.create_card(authed(&mika, stranger)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound);
+    let _ = kai;
+
+    // New cards go to the bottom, or above the one named.
+    let mut make = async |title: &str, column: &str, before: &str| {
+        c.boards
+            .create_card(authed(
+                &rin,
+                pb::CreateCardRequest {
+                    server_id: sid.clone(),
+                    channel_id: bid.clone(),
+                    column_id: column.into(),
+                    title: title.into(),
+                    before_id: before.into(),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .card
+            .unwrap()
+    };
+    let docs = make("Docs", &todo, "").await;
+    let search = make("Search", &todo, &docs.id).await;
+    let shipped = make("Ship it", &done, "").await;
+    assert_eq!(
+        board_titles(&board(&mut c, &juan, &sid, &bid).await),
+        vec![vec!["Fix the overlay", "Search", "Docs"], vec![], vec!["Ship it"]]
+    );
+
+    // Moving: to the bottom of another column, then above a card there.
+    let move_to = |token: &str, card: &str, column: &str, before: &str| {
+        authed(
+            token,
+            pb::MoveCardRequest {
+                server_id: sid.clone(),
+                channel_id: bid.clone(),
+                card_id: card.into(),
+                column_id: column.into(),
+                before_id: before.into(),
+            },
+        )
+    };
+    c.boards.move_card(move_to(&mika, &docs.id, &doing, "")).await.unwrap();
+    c.boards.move_card(move_to(&mika, &overlay.id, &doing, &docs.id)).await.unwrap();
+    c.boards.move_card(move_to(&mika, &search.id, &todo, "")).await.unwrap();
+    let missing = c.boards.move_card(move_to(&mika, &search.id, &todo, &shipped.id)).await.unwrap_err();
+    assert_eq!(missing.code(), Code::NotFound);
+    // Many moves to the top keep the order.
+    for _ in 0..30 {
+        c.boards.move_card(move_to(&mika, &docs.id, &doing, &overlay.id)).await.unwrap();
+        c.boards.move_card(move_to(&mika, &overlay.id, &doing, &docs.id)).await.unwrap();
+    }
+    let now = board(&mut c, &juan, &sid, &bid).await;
+    assert_eq!(board_titles(&now), vec![vec!["Search"], vec!["Fix the overlay", "Docs"], vec!["Ship it"]]);
+    assert_eq!(now.bodies.len(), 4);
+    assert!(now.users.iter().any(|u| u.id == rin_user.id));
+
+    // Changing a card: title, labels, people, due date and its body's text and files.
+    let file2 = attach(&mut c, &instance, &rin, &sid, b"more".to_vec()).await;
+    let changed = c
+        .boards
+        .update_card(authed(
+            &rin,
+            pb::UpdateCardRequest {
+                server_id: sid.clone(),
+                channel_id: bid.clone(),
+                card_id: overlay.id.clone(),
+                change: Some(pb::CardChange {
+                    title: Some("Fix the overlay flicker".into()),
+                    set_labels: true,
+                    label_ids: vec![feature.clone()],
+                    set_assignees: true,
+                    assignee_ids: vec![mika_user.id.clone(), rin_user.id.clone()],
+                    set_due: true,
+                    due_at: Some(prost_types::Timestamp { seconds: 1_900_000_000, nanos: 0 }),
+                    set_body: true,
+                    content: "Only with two monitors".into(),
+                    attachments: vec![pb::Attachment {
+                        url: file2.clone(),
+                        filename: "more.txt".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let (edited, body) = (changed.card.unwrap(), changed.body.unwrap());
+    assert_eq!(edited.title, "Fix the overlay flicker");
+    assert_eq!(edited.label_ids, vec![feature.clone()]);
+    assert_eq!(edited.assignee_ids, vec![mika_user.id.clone(), rin_user.id.clone()]);
+    assert_eq!(edited.due_at.map(|t| t.seconds), Some(1_900_000_000));
+    assert_eq!(body.content, "Only with two monitors");
+    assert_eq!(body.author_id, mika_user.id, "the body stays its author's");
+    assert!(body.edited_at.is_some());
+    assert_eq!(body.attachments.iter().map(|a| a.filename.as_str()).collect::<Vec<_>>(), ["more.txt"]);
+    // The file taken off is gone; the new one is served.
+    assert_eq!(fetch(&instance, &file).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(fetch(&instance, &file2).await.0, reqwest::StatusCode::OK);
+
+    // Comments are the thread under the card: sending is enough.
+    let comment = c
+        .messages
+        .send_message(authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: sid.clone(),
+                channel_id: bid.clone(),
+                content: "On it".into(),
+                thread_id: overlay.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert_eq!(comment.thread_id, overlay.id);
+    let read = board(&mut c, &juan, &sid, &bid).await;
+    let body = read.bodies.iter().find(|m| m.id == overlay.id).unwrap();
+    assert_eq!(body.thread.as_ref().map(|t| t.reply_count), Some(1));
+
+    // Taking Manage Cards away from @everyone stops changes, not comments.
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                revoke: vec![pb::Permission::ManageCards as i32],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let refused = c.boards.move_card(move_to(&mika, &docs.id, &todo, "")).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let refused = c.boards.create_card(card(&mika, &bid, "More", "")).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let comment = pb::SendMessageRequest {
+        server_id: sid.clone(),
+        channel_id: bid.clone(),
+        content: "+1".into(),
+        thread_id: docs.id.clone(),
+        ..Default::default()
+    };
+    c.messages.send_message(authed(&mika, comment)).await.unwrap();
+
+    // Archiving takes a card off the board; bringing it back puts it at the bottom.
+    let archive = |card: &str, archived: bool| {
+        authed(
+            &juan,
+            pb::UpdateCardRequest {
+                server_id: sid.clone(),
+                channel_id: bid.clone(),
+                card_id: card.into(),
+                change: Some(pb::CardChange { archived: Some(archived), ..Default::default() }),
+            },
+        )
+    };
+    c.boards.update_card(archive(&shipped.id, true)).await.unwrap();
+    assert_eq!(board_titles(&board(&mut c, &juan, &sid, &bid).await)[2], Vec::<String>::new());
+    let archived = c
+        .boards
+        .list_archived_cards(authed(
+            &mika,
+            pb::ListArchivedCardsRequest { server_id: sid.clone(), channel_id: bid.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(archived.cards.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Ship it"]);
+    assert_eq!(archived.bodies.len(), 1);
+
+    // A column with cards can't go; one with only archived cards can, and
+    // they move to the first column. Labels removed come off cards.
+    let without_doing = vec![set_up.columns[0].clone(), set_up.columns[2].clone()];
+    let refused = c.boards.set_board(set(&juan, without_doing, vec![])).await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+    let without_done = vec![
+        set_up.columns[0].clone(),
+        set_up.columns[1].clone(),
+        pb::BoardColumn { name: "Review".into(), color: 0x81C784, ..Default::default() },
+    ];
+    let next = c.boards.set_board(set(&juan, without_done, vec![])).await.unwrap().into_inner();
+    assert_eq!(next.columns.len(), 3);
+    assert!(next.labels.is_empty());
+    c.boards.update_card(archive(&shipped.id, false)).await.unwrap();
+    let after = board(&mut c, &juan, &sid, &bid).await;
+    assert_eq!(board_titles(&after), vec![vec!["Search", "Ship it"], vec!["Fix the overlay flicker", "Docs"], vec![]]);
+    assert!(after.cards.iter().all(|c| c.label_ids.is_empty()));
+
+    // Deleting the body deletes the card and its comments: the author, or Manage Messages.
+    let delete = |token: &str, id: &str| {
+        authed(
+            token,
+            pb::DeleteMessageRequest { server_id: sid.clone(), channel_id: bid.clone(), message_id: id.into() },
+        )
+    };
+    let refused = c.messages.delete_message(delete(&rin, &overlay.id)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    c.messages.delete_message(delete(&juan, &overlay.id)).await.unwrap();
+    let after = board(&mut c, &juan, &sid, &bid).await;
+    assert_eq!(board_titles(&after), vec![vec!["Search", "Ship it"], vec!["Docs"], vec![]]);
+    assert_eq!(fetch(&instance, &file2).await.0, reqwest::StatusCode::NOT_FOUND);
+
+    // Events: everyone who sees the board hears of cards and columns.
+    let events = c
+        .events
+        .list_events(authed(&mika, pb::ListEventsRequest { server_id: sid.clone(), after_sequence: 0, limit: 500 }))
+        .await
+        .unwrap()
+        .into_inner()
+        .events;
+    let kinds = |f: fn(&Payload) -> bool| events.iter().filter_map(|e| e.payload.as_ref()).filter(|p| f(p)).count();
+    assert!(kinds(|p| matches!(p, Payload::CardUpdated(_))) >= 10);
+    assert_eq!(kinds(|p| matches!(p, Payload::CardDeleted(_))), 1);
+    assert_eq!(kinds(|p| matches!(p, Payload::BoardUpdated(_))), 3);
+
+    // Deleting the board takes everything with it.
+    c.channels
+        .delete_channel(authed(&juan, pb::DeleteChannelRequest { server_id: sid.clone(), channel_id: bid.clone() }))
+        .await
+        .unwrap();
+    let gone = c
+        .boards
+        .get_board(authed(&juan, pb::GetBoardRequest { server_id: sid.clone(), channel_id: bid.clone() }))
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+    assert_eq!(usage(&mut c, &juan, &sid).await.messages, messages_before);
 }

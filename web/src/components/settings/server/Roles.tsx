@@ -684,7 +684,7 @@ function Permissions({
           variant="ghost"
           size="sm"
           disabled={locked || !count}
-          onClick={() => set({ permissions: draft.permissions & ~toList(draft.permissions).reduce((b, p) => (mayChange(access, bit(p), access.server) ? b | bit(p) : b), 0) })}
+          onClick={() => set({ permissions: draft.permissions & ~toList(draft.permissions).reduce((b, p) => (mayChange(access, bit(p), access.server) ? b | bit(p) : b), 0n) })}
           className="rounded-xl"
         >
           {t("serversettings.roles.clearAll")}

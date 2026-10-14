@@ -4,9 +4,9 @@ import { changes, flip, NO_SWITCHES, permissionPatch, switched } from "./role-ed
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
 
-const MANAGE = 1 << 1;
-const KICK = 1 << 2;
-const BAN = 1 << 3;
+const MANAGE = 1n << 1n;
+const KICK = 1n << 2n;
+const BAN = 1n << 3n;
 
 test("a role saved elsewhere while it's open keeps both people's changes", () => {
   // Opened with Manage; here Ban goes on and Manage off, while someone else saves Kick.
@@ -19,7 +19,7 @@ test("a role saved elsewhere while it's open keeps both people's changes", () =>
 test("a switch flipped and put back doesn't undo someone else's change to it", () => {
   // Ban goes on and off again here, then someone else grants Ban.
   const mine = flip(flip(NO_SWITCHES, MANAGE, MANAGE | BAN, MANAGE), MANAGE | BAN, MANAGE, MANAGE);
-  assert.deepEqual(changes(switched(mine, MANAGE | BAN), MANAGE | BAN), { grant: 0, revoke: 0 });
+  assert.deepEqual(changes(switched(mine, MANAGE | BAN), MANAGE | BAN), { grant: 0n, revoke: 0n });
 });
 
 test("an instance without role-permission-changes gets every permission, since it ignores the switches", () => {

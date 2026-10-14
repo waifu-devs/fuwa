@@ -1,7 +1,7 @@
 import { BarChart3Icon, HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SmileIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type RefObject } from "react";
-import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage, uploadVoice } from "@/fuwa/actions";
 import { voiceLimits } from "@/fuwa/dms";
 import { instanceHas } from "@/lib/compat";
@@ -487,7 +487,8 @@ function useCanPoll(instanceKey: string, serverId: string, channel: Channel, inT
   const access = useAccess(instanceKey, serverId);
   // Polls are counted where a channel lives: in a shared one, once this instance takes them there.
   const pollsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-polls"));
-  // Polls stay out of threads in shared channels.
+  // Polls stay out of threads in shared channels, and out of boards.
+  if (channel.type === ChannelType.BOARD) return false;
   return hasIn(access, channel.id, Permission.CREATE_POLLS) && (!channel.shared || (pollsShared && !inThread));
 }
 
@@ -623,7 +624,8 @@ function ComposerFooter({
   const { t } = useI18n();
   return (
     <div className="mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground">
-      {thread && gate.canSend && !thread.locked && (
+      {/* A board's comments stay with their card. */}
+      {thread && gate.canSend && !thread.locked && channel.type !== ChannelType.BOARD && (
         <label className="flex shrink-0 cursor-pointer items-center gap-1.5 font-bold select-none">
           <input
             type="checkbox"

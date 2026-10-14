@@ -15,10 +15,11 @@ import type { Key } from "@/i18n/i18n";
  * `server/src/permissions.rs`, so the app only offers what will work.
  */
 
-/** A set of permissions: bit `1 << n` for each `fuwa.v1.Permission` n. */
-export type Bits = number;
+/** A set of permissions: bit `1 << n` for each `fuwa.v1.Permission` n (past 31, so a bigint). */
+export type Bits = bigint;
 
-export const bit = (p: P): Bits => 1 << p;
+export const NONE: Bits = 0n;
+export const bit = (p: P): Bits => 1n << BigInt(p);
 
 export const KNOWN: P[] = [
   P.ADMINISTRATOR,
@@ -52,9 +53,10 @@ export const KNOWN: P[] = [
   P.MODERATE,
   P.MANAGE_ECONOMY,
   P.GRANT_CURRENCY,
+  P.MANAGE_CARDS,
 ];
 
-export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
+export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), NONE);
 
 /** The permissions a channel's overwrites can change. */
 export const CHANNEL: Bits = [
@@ -63,6 +65,7 @@ export const CHANNEL: Bits = [
   P.VIEW_CHANNELS,
   P.SEND_MESSAGES,
   P.CREATE_THREADS,
+  P.MANAGE_CARDS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
@@ -76,11 +79,12 @@ export const CHANNEL: Bits = [
   P.ADD_REACTIONS,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
-].reduce((bits, p) => bits | bit(p), 0);
+].reduce((bits, p) => bits | bit(p), NONE);
 
 /** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
 export const TALK: Bits = [
   P.SEND_MESSAGES,
+  P.MANAGE_CARDS,
   P.ADD_REACTIONS,
   P.CREATE_THREADS,
   P.CREATE_POLLS,
@@ -92,10 +96,7 @@ export const TALK: Bits = [
   P.CONNECT,
   P.SPEAK,
   P.VIDEO,
-].reduce(
-  (bits, p) => bits | bit(p),
-  0,
-);
+].reduce((bits, p) => bits | bit(p), NONE);
 
 /**
  * What a role anyone can get by themselves may never carry, as the server
@@ -122,13 +123,13 @@ export const POWERS: Bits = [
   P.MODERATE,
   P.MANAGE_ECONOMY,
   P.GRANT_CURRENCY,
-].reduce((bits, p) => bits | bit(p), 0);
+].reduce((bits, p) => bits | bit(p), NONE);
 
-export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), 0);
-export const toList = (bits: Bits): P[] => KNOWN.filter((p) => bits & bit(p));
+export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), NONE);
+export const toList = (bits: Bits): P[] => KNOWN.filter((p) => (bits & bit(p)) !== NONE);
 
 /** Whether anyone may get a role by themselves (onboarding, the shop): it carries none of the `POWERS`. */
-export const harmless = (role: Pick<Role, "permissions">) => (fromList(role.permissions) & POWERS) === 0;
+export const harmless = (role: Pick<Role, "permissions">) => (fromList(role.permissions) & POWERS) === NONE;
 
 /** A permission's name, what it does, and (`channel`) what it does in one channel's settings where that reads differently; catalog keys (serversettings.permission.*). */
 type PermissionInfo = { label: Key; about: Key; channel?: Key };
@@ -202,6 +203,11 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
   [P.MODERATE]: { label: "serversettings.permission.moderate", about: "serversettings.permission.moderateAbout" },
   [P.MANAGE_ECONOMY]: { label: "serversettings.permission.manageEconomy", about: "serversettings.permission.manageEconomyAbout" },
   [P.GRANT_CURRENCY]: { label: "serversettings.permission.grantCurrency", about: "serversettings.permission.grantCurrencyAbout" },
+  [P.MANAGE_CARDS]: {
+    label: "serversettings.permission.manageCards",
+    about: "serversettings.permission.manageCardsAbout",
+    channel: "serversettings.permission.manageCardsChannel",
+  },
 };
 
 /** A known permission's catalog keys (every permission the settings pages list is one). */
@@ -224,7 +230,7 @@ export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
   },
   {
     title: "serversettings.permission.group.textChannels",
-    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.MANAGE_CARDS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "serversettings.permission.group.economy", permissions: [P.MANAGE_ECONOMY, P.GRANT_CURRENCY] },
@@ -237,7 +243,7 @@ export const CHANNEL_GROUPS: { kind: "general" | "text" | "voice"; title: Key; p
   {
     kind: "text",
     title: "serversettings.permission.group.text",
-    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.MANAGE_CARDS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { kind: "voice", title: "serversettings.permission.group.voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
@@ -255,7 +261,7 @@ export type Access = {
   pending: boolean;
 };
 
-export const NO_ACCESS: Access = { owner: false, server: 0, rank: 0, channels: new Map(), pending: false };
+export const NO_ACCESS: Access = { owner: false, server: NONE, rank: 0, channels: new Map(), pending: false };
 
 const isRole = (o: PermissionOverwrite) => o.target !== OverwriteTarget.MEMBER;
 
@@ -274,8 +280,8 @@ function channelBits(
   for (const layer of layers) {
     const everyone = layer.permissionOverwrites.find((o) => o.targetId === everyoneId && isRole(o));
     if (everyone) bits = (bits & ~fromList(everyone.deny)) | fromList(everyone.allow);
-    let allow = 0;
-    let deny = 0;
+    let allow = NONE;
+    let deny = NONE;
     for (const o of layer.permissionOverwrites) {
       if (!isRole(o) || !roleIds.has(o.targetId)) continue;
       allow |= fromList(o.allow);
@@ -285,7 +291,7 @@ function channelBits(
     const own = layer.permissionOverwrites.find((o) => o.targetId === userId && !isRole(o));
     if (own) bits = (bits & ~fromList(own.deny)) | fromList(own.allow);
   }
-  return bits & bit(P.VIEW_CHANNELS) ? bits : 0;
+  return bits & bit(P.VIEW_CHANNELS) ? bits : NONE;
 }
 
 /**
@@ -308,7 +314,7 @@ export function accessOf(
   const mine = new Set(roleIds);
   const held = roles.filter((r) => mine.has(r.id));
   const everyone = roles.find((r) => r.id === everyoneId);
-  const base = held.reduce((bits, r) => bits | fromList(r.permissions), everyone ? fromList(everyone.permissions) : 0);
+  const base = held.reduce((bits, r) => bits | fromList(r.permissions), everyone ? fromList(everyone.permissions) : NONE);
   const rank = owner ? Number.MAX_SAFE_INTEGER : Math.max(0, ...held.map((r) => r.position));
   const unbound = owner || !!(base & bit(P.ADMINISTRATOR));
   const byId = new Map(channels.map((c) => [c.id, c]));
@@ -335,7 +341,7 @@ export function accessOf(
 
 export const has = (a: Access, p: P) => !!(a.server & bit(p));
 export const canSee = (a: Access, channelId: string) => a.channels.has(channelId);
-export const inChannel = (a: Access, channelId: string) => a.channels.get(channelId) ?? 0;
+export const inChannel = (a: Access, channelId: string) => a.channels.get(channelId) ?? NONE;
 export const hasIn = (a: Access, channelId: string, p: P) => !!(inChannel(a, channelId) & bit(p));
 /** Whether they rank above someone else: the owner above everyone, others by their highest roles. */
 export const outranks = (a: Pick<Access, "owner" | "rank">, other: Pick<Access, "owner" | "rank">) =>
@@ -350,7 +356,7 @@ export const standing = (ownerId: string, roles: readonly Role[], member: Member
 export const above = (a: Access, position: number) => a.owner || a.rank > position;
 /** Whether they may grant or take away `changed`, given `have`. */
 export const mayChange = (a: Access, changed: Bits, have: Bits) =>
-  a.owner || has(a, P.ADMINISTRATOR) || (changed & ~have) === 0;
+  a.owner || has(a, P.ADMINISTRATOR) || (changed & ~have) === NONE;
 
 /** Highest first, as the server lists them. */
 export const sortRoles = (roles: readonly Role[]) =>

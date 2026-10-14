@@ -219,6 +219,19 @@
     `spawn_shared_fanout` passes message events back, published at the guest
     as sequence 0. Message calls on a channel check `shared::link_of` first;
     new channel kinds or message paths must too.
+    Boards (`api/boards.rs`, `BoardService`, docs/boards.md): channels of
+    type BOARD whose cards are messages: a card's id is its body message's,
+    sent through `send_with` with a `NewCard` (so Markdown, files, mentions
+    and AutoMod are the message's), and `board_cards` holds its column,
+    fractional `rank` (the same `between` as `web/src/lib/board.ts`),
+    title, labels, assignees and due date; comments are its thread.
+    `board_columns` and `board_labels` are set whole by `SetBoard`. Moving,
+    editing and archiving take Manage Cards (`PERMISSION_MANAGE_CARDS`,
+    given wherever Send Messages was by migration 0042); deleting a card is
+    deleting its body, so `threads::after_delete` calls `boards::forget_card`.
+    Events `BoardUpdated`, `CardUpdated`, `CardDeleted`. Web:
+    `fuwa/board.ts`, `lib/board.ts`, `hooks/use-card-drag.ts` and
+    `components/board/`.
     Polls (`api/polls.rs`): a message can carry a poll (`Message.poll`),
     kept in the server file's `polls` (question, answers and the tally, which
     every vote rewrites, so votes at once clash and run again and the counts

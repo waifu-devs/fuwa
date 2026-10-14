@@ -35,6 +35,7 @@ pub(crate) fn channel_glyph(c: &pb::Channel) -> &'static str {
         pb::ChannelType::Voice => "volume-2",
         pb::ChannelType::Announcement => "megaphone",
         pb::ChannelType::Secure => "shield-check",
+        pb::ChannelType::Board => "square-kanban",
         _ => "hash",
     }
 }

@@ -20,7 +20,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { T, useI18n } from "@/i18n/react";
 import { memberName } from "@/lib/format";
-import { accessOf, bit, canSee, CHANNEL_GROUPS, fromList, inChannel, mayChange, permissionInfo, toList, type Bits } from "@/lib/permissions";
+import { accessOf, bit, canSee, CHANNEL_GROUPS, fromList, inChannel, mayChange, NONE, permissionInfo, toList, type Bits } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 /**
@@ -50,7 +50,7 @@ const key = (list: Overwrite[]) =>
   JSON.stringify(
     list
       .filter((o) => o.allow || o.deny)
-      .map((o) => [o.targetId, o.member, o.allow, o.deny])
+      .map((o) => [o.targetId, o.member, String(o.allow), String(o.deny)])
       .sort(),
   );
 
@@ -78,7 +78,7 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
   }, [base]);
 
   const find = (id: string) => draft.find((o) => o.targetId === id);
-  const everyone = find(serverId) ?? { targetId: serverId, member: false, allow: 0, deny: 0 };
+  const everyone = find(serverId) ?? { targetId: serverId, member: false, allow: NONE, deny: NONE };
   const isPrivate = !!(everyone.deny & VIEW);
   const dirty = key(draft) !== key(base);
   const changes = useMemo(() => countChanges(base, draft), [base, draft]);
@@ -86,7 +86,7 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
   /** Changes one target's overwrite, adding it if it's new. */
   const put = (targetId: string, member: boolean, fn: (o: Overwrite) => Overwrite) =>
     setDraft((list) => {
-      const current = list.find((o) => o.targetId === targetId) ?? { targetId, member, allow: 0, deny: 0 };
+      const current = list.find((o) => o.targetId === targetId) ?? { targetId, member, allow: NONE, deny: NONE };
       const next = fn(current);
       const rest = list.filter((o) => o.targetId !== targetId);
       return [...rest, next];
@@ -139,8 +139,8 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
         viewers={targets.filter((o) => o.allow & VIEW)}
         badge={badge}
         onHide={(o) => put(o.targetId, o.member, (x) => ({ ...x, allow: x.allow & ~VIEW }))}
-        roles={roles.filter((r) => r.id !== serverId && !((find(r.id)?.allow ?? 0) & VIEW))}
-        members={members.filter((m) => !((find(m.user?.id ?? "")?.allow ?? 0) & VIEW))}
+        roles={roles.filter((r) => r.id !== serverId && !((find(r.id)?.allow ?? NONE) & VIEW))}
+        members={members.filter((m) => !((find(m.user?.id ?? "")?.allow ?? NONE) & VIEW))}
         onAdd={(id, member) => add(id, member, true)}
       />
 
@@ -181,7 +181,7 @@ function countChanges(base: Overwrite[], draft: Overwrite[]) {
   for (const id of new Set([...before.keys(), ...after.keys()])) {
     const a = before.get(id);
     const b = after.get(id);
-    if ((a?.allow ?? 0) !== (b?.allow ?? 0) || (a?.deny ?? 0) !== (b?.deny ?? 0)) n++;
+    if ((a?.allow ?? NONE) !== (b?.allow ?? NONE) || (a?.deny ?? NONE) !== (b?.deny ?? NONE)) n++;
   }
   return n;
 }

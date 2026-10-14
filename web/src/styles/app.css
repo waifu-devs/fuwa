@@ -1159,3 +1159,7 @@ button:active > .rail-folder { scale: 0.92; }
 
 /* Lists that draw only the lines in view (components/virtual.ts): a line whose height was just measured jumps into place rather than gliding. */
 [data-settling] .member-line { transition: none; }
+
+/* Boards (components/board): the line where a dragged card will land, and the card it left behind. */
+.board-drop-line { border-radius: 9999px; background: var(--primary); box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 70%, transparent); }
+[data-card][data-dragging] { opacity: 0.35; }

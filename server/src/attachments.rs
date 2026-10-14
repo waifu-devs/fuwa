@@ -172,6 +172,11 @@ pub async fn forget_thread(conn: &turso::Connection, thread_id: &str) -> Result<
     forget(conn, "message_id IN (SELECT id FROM messages WHERE thread_id = ?1)", thread_id).await
 }
 
+/// [`forget_message`] for one file taken off a message (a card's body).
+pub async fn forget_file(conn: &turso::Connection, media_id: &str) -> Result<Vec<String>> {
+    forget(conn, "media_id = ?1", media_id).await
+}
+
 /// Whether `media_id` is a file uploaded for the server that no message has.
 pub async fn is_loose(conn: &turso::Connection, media_id: &str) -> Result<bool> {
     Ok(query_one(conn, "SELECT 1 FROM loose_files WHERE media_id = ?1", [media_id], |r| r.get::<i64>(0))

@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 31] = [
+const KNOWN: [P; 32] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -53,6 +53,7 @@ const KNOWN: [P; 31] = [
     P::Moderate,
     P::ManageEconomy,
     P::GrantCurrency,
+    P::ManageCards,
 ];
 
 /// Every permission there is.
@@ -72,6 +73,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::ViewChannels)
     | bit(P::SendMessages)
     | bit(P::CreateThreads)
+    | bit(P::ManageCards)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -89,6 +91,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
 /// What @everyone can do in a new server.
 pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::SendMessages)
+    | bit(P::ManageCards)
     | bit(P::AddReactions)
     | bit(P::CreateThreads)
     | bit(P::CreatePolls)
@@ -122,6 +125,7 @@ pub const ADMIN: Bits = bit(P::ManageServer)
 /// What a member who hasn't agreed to the server's rules yet can't do: talk
 /// (in text or voice), bring people in, or rename themselves.
 pub const TALK: Bits = bit(P::SendMessages)
+    | bit(P::ManageCards)
     | bit(P::AddReactions)
     | bit(P::CreateThreads)
     | bit(P::CreatePolls)
@@ -182,6 +186,7 @@ pub fn label(p: P) -> &'static str {
         P::Moderate => "Use Mod View",
         P::ManageEconomy => "Manage economy",
         P::GrantCurrency => "Grant currency",
+        P::ManageCards => "Manage cards",
     }
 }
 

@@ -10,6 +10,7 @@ import { lazyComponent } from "@/components/lazy";
 /** A voice channel's stage, from its own file (fetched once the app is idle). */
 const VoiceStage = lazyComponent(() => import("@/components/calls/VoiceStage").then((m) => m.VoiceStage), undefined, { idle: true });
 /** A secure channel, with the encrypted message list it shares with direct messages, from its own file too. */
+const BoardView = lazyComponent(() => import("@/components/board/BoardView").then((m) => m.BoardView), undefined, { idle: true });
 const SecureChannelView = lazyComponent(() => import("@/components/chat/SecureChannelView").then((m) => m.SecureChannelView), undefined, { idle: true });
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SsoGate, useSsoLocked } from "@/components/join/SsoGate";
@@ -76,5 +77,6 @@ export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey:
   }
   if (channel.type === ChannelType.VOICE) return <VoiceStage instanceKey={instanceKey} serverId={serverId} channel={channel} />;
   if (channel.type === ChannelType.SECURE) return <SecureChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
+  if (channel.type === ChannelType.BOARD) return <BoardView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
 }

@@ -1955,8 +1955,8 @@ mod tests {
         use crate::core::permissions::Access;
         let nobody = Access::default();
         assert!(pages(&nobody, false).is_empty());
-        let channels = std::iter::once(("general".to_owned(), u32::MAX)).collect();
-        let owner = Access { owner: true, server: u32::MAX, channels, ..Access::default() };
+        let channels = std::iter::once(("general".to_owned(), u64::MAX)).collect();
+        let owner = Access { owner: true, server: u64::MAX, channels, ..Access::default() };
         assert_eq!(words("ManageServer"), "Manage server");
         let mut all = ALL.to_vec();
         all.retain(|p| *p != Page::Limits);

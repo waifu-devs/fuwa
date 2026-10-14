@@ -58,6 +58,7 @@ pub(super) fn permission_name(p: P) -> String {
         P::Moderate => t("desktop.modView.permission"),
         P::ManageEconomy => t("desktop.economy.permission.manage"),
         P::GrantCurrency => t("desktop.economy.permission.grant"),
+        P::ManageCards => t("serversettings.permission.manageCards"),
     }
 }
 
@@ -96,6 +97,7 @@ pub(super) fn permission_about(p: P) -> String {
         P::Moderate => t("desktop.modView.permissionAbout"),
         P::ManageEconomy => t("desktop.economy.permission.manageAbout"),
         P::GrantCurrency => t("desktop.economy.permission.grantAbout"),
+        P::ManageCards => t("serversettings.permission.manageCardsAbout"),
     }
 }
 
@@ -106,6 +108,7 @@ pub(super) fn permission_here(p: P) -> String {
         P::ManageChannels => t("serversettings.permission.manageChannelsChannel"),
         P::ViewChannels => t("serversettings.permission.viewChannelsChannel"),
         P::CreatePolls => t("serversettings.permission.createPollsChannel"),
+        P::ManageCards => t("serversettings.permission.manageCardsChannel"),
         P::AddReactions => t("serversettings.permission.addReactionsChannel"),
         P::CreateInvite => t("serversettings.permission.createInviteChannel"),
         P::Connect => t("serversettings.permission.connectChannel"),

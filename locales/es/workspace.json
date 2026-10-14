@@ -171,6 +171,8 @@
   "createChannel.type.announcementHint": "Novedades que la gente sigue",
   "createChannel.type.secure": "Seguro",
   "createChannel.type.secureHint": "Cifrado de extremo a extremo: ni siquiera el servidor puede leerlo",
+  "createChannel.type.board": "Tablero",
+  "createChannel.type.boardHint": "Tarjetas en columnas, cada una con sus comentarios",
   "createChannel.type.voice": "Voz",
   "createChannel.type.voiceHint": "Hablar, pasar el rato, jugar juntos",
   "createChannel.type.category": "Categoría",

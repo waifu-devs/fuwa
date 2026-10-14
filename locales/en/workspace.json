@@ -171,6 +171,8 @@
   "createChannel.type.announcementHint": "News people follow",
   "createChannel.type.secure": "Secure",
   "createChannel.type.secureHint": "End-to-end encrypted: not even the server can read it",
+  "createChannel.type.board": "Board",
+  "createChannel.type.boardHint": "Cards in columns, each with its own comments",
   "createChannel.type.voice": "Voice",
   "createChannel.type.voiceHint": "Talk, hang out, play together",
   "createChannel.type.category": "Category",
