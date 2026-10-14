@@ -23,7 +23,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Member, MessageGif, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
@@ -65,6 +65,7 @@ import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { GifButton } from "@/components/chat/GifPicker";
 import { insertAtCaret } from "@/lib/caret";
+import { filesIn } from "@/lib/pasted";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
@@ -1241,6 +1242,14 @@ function ComposerBox({
     }
   }
 
+  // Pasted pictures and files join the ones picked, sealed on this device like them.
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = filesIn(e.clipboardData);
+    if (!pasted.length || !files || status !== "ready") return;
+    e.preventDefault();
+    pickFiles(draft, pasted);
+  }
+
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
       <TypingLine instanceKey={instanceKey} target={typing} nameOf={nameOf} />
@@ -1281,6 +1290,7 @@ function ComposerBox({
                 if (e.target.value) typed(instanceKey, typing);
               }}
               onKeyDown={onKeyDown}
+              onPaste={onPaste}
               placeholder={placeholder}
               aria-label={placeholder}
               className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"

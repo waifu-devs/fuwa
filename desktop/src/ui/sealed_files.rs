@@ -52,6 +52,30 @@ fn state_of(media_id: &str) -> Option<State> {
     FILES.with(|f| f.borrow().get(media_id).cloned())
 }
 
+/// A picture this device opened, to draw large (`viewer.rs`), with its bytes to save.
+pub(crate) fn opened_picture(media_id: &str) -> Option<(Arc<Image>, Arc<Vec<u8>>)> {
+    match state_of(media_id)? {
+        State::Open { bytes, picture: Some(picture) } => Some((picture, bytes)),
+        _ => None,
+    }
+}
+
+/// The message's pictures the viewer steps through: opened here, and not still covered.
+fn viewable(files: &[FileRef]) -> Vec<crate::ui::viewer::Viewed> {
+    files
+        .iter()
+        .filter(|f| opened_picture(&f.media_id).is_some())
+        .filter(|f| spoilers::file_shown(&f.media_id, f.spoiler) == spoilers::Shown::Revealed)
+        .map(|f| crate::ui::viewer::Viewed {
+            source: crate::ui::viewer::Source::Sealed(f.media_id.clone()),
+            name: f.name.clone(),
+            width: f.width as i32,
+            height: f.height as i32,
+            bytes: opened_picture(&f.media_id).map_or(0, |(_, b)| b.len() as i64),
+        })
+        .collect()
+}
+
 /// Opens a file on this device, once (and again after it failed, when asked).
 fn open(this: &WeakEntity<FuwaApp>, key: &str, file: &FileRef, cx: &mut gpui_kit::App) {
     if matches!(state_of(&file.media_id), Some(State::Opening | State::Open { .. })) {
@@ -83,6 +107,10 @@ fn open(this: &WeakEntity<FuwaApp>, key: &str, file: &FileRef, cx: &mut gpui_kit
 }
 
 /// Saves an opened file where the person picks, under its cleaned name.
+pub(crate) fn save_opened(this: &WeakEntity<FuwaApp>, name: String, bytes: Arc<Vec<u8>>, cx: &mut gpui_kit::App) {
+    save(this, name, bytes, cx)
+}
+
 fn save(this: &WeakEntity<FuwaApp>, name: String, bytes: Arc<Vec<u8>>, cx: &mut gpui_kit::App) {
     let _ = this.update(cx, |_, cx| {
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
@@ -118,8 +146,9 @@ pub(crate) fn files_view(
     cx: &mut gpui_kit::App,
 ) -> AnyElement {
     let mut out = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
+    let all: Arc<Vec<FileRef>> = Arc::new(files.to_vec());
     for (n, file) in files.iter().enumerate() {
-        out = out.child(one_file(&format!("{mid}|{n}"), file, p, this, key, cx));
+        out = out.child(one_file(&format!("{mid}|{n}"), file, &all, p, this, key, cx));
     }
     out.into_any_element()
 }
@@ -127,6 +156,7 @@ pub(crate) fn files_view(
 fn one_file(
     id: &str,
     file: &FileRef,
+    all: &Arc<Vec<FileRef>>,
     p: &Palette,
     this: &WeakEntity<FuwaApp>,
     key: &str,
@@ -156,6 +186,18 @@ fn one_file(
     if let Some(State::Open { bytes, picture: Some(picture) }) = &state {
         let (w, h) = attachments::fit_box(file.width as i32, file.height as i32, MEDIA_BOX);
         let (this, name, bytes) = (this.clone(), file.name.clone(), bytes.clone());
+        // A click opens it in the viewer, with the message's other opened pictures.
+        let open_viewer = {
+            let (this, all, key, media_id) = (this.clone(), all.clone(), key.to_owned(), file.media_id.clone());
+            move |_: &gpui_kit::ClickEvent, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+                let pictures = viewable(&all);
+                let at = pictures
+                    .iter()
+                    .position(|v| v.source == crate::ui::viewer::Source::Sealed(media_id.clone()))
+                    .unwrap_or(0);
+                let _ = this.update(cx, |this, cx| this.view_pictures(&key, pictures, at, window, cx));
+            }
+        };
         let cover = (shown != spoilers::Shown::Revealed)
             .then(|| spoilers::picture_cover(id, &file.media_id, shown == spoilers::Shown::Fading, p));
         if shown == spoilers::Shown::Covered {
@@ -183,6 +225,8 @@ fn one_file(
             .border_1()
             .border_color(p.border)
             .bg(alpha(p.muted, 0.6))
+            .cursor_pointer()
+            .on_click(open_viewer)
             .child(
                 img(picture.clone())
                     .id(SharedString::from(format!("sealed-img|{id}")))
@@ -218,7 +262,10 @@ fn one_file(
                             .build(window, cx)
                         }
                     })
-                    .on_click(move |_, _, cx| save(&this, name.clone(), bytes.clone(), cx))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        save(&this, name.clone(), bytes.clone(), cx)
+                    })
                     .child(icon("download").size(px(16.0))),
             )
             .children(cover)
@@ -545,31 +592,26 @@ impl FuwaApp {
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let read = cx
-                .background_executor()
-                .spawn(async move {
-                    paths
-                        .into_iter()
-                        .filter_map(|path| {
-                            let bytes = std::fs::read(&path).ok()?;
-                            let name = path.file_name()?.to_string_lossy().into_owned();
-                            let content_type = attachments::content_type_of(&name).to_owned();
-                            Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false, gif: None })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await;
-            let _ = this.update(cx, |_, cx| {
-                PICKED.with(|p| {
-                    let mut p = p.borrow_mut();
-                    let list = p.entry(place.clone()).or_default();
-                    list.extend(read);
-                    list.truncate(sealed_files::MAX_FILES);
-                });
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.add_sealed_files(place, paths, cx));
         })
         .detach();
+    }
+
+    /// Adds files to the next message in `place`, up to what one can carry (the
+    /// web's `pickFiles`): any that can't go are left out, and why is said.
+    pub(crate) fn add_picked(&mut self, place: String, read: Vec<Outgoing>, cx: &mut Context<Self>) {
+        if read.is_empty() {
+            return;
+        }
+        let mut next = picked(&place);
+        next.extend(read);
+        if let Some(why) = sealed_files::cant_send(&next) {
+            self.toast("paperclip", why, String::new(), None, None, cx);
+        }
+        next.retain(|f| sealed_files::cant_send(std::slice::from_ref(f)).is_none());
+        next.truncate(sealed_files::MAX_FILES);
+        PICKED.with(|p| p.borrow_mut().insert(place, next));
+        cx.notify();
     }
 
     /// The files waiting to go (the web's `PickedTray`), each with a way to take it out.

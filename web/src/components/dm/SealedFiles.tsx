@@ -1,9 +1,10 @@
 import { DownloadIcon, EyeIcon, LoaderCircleIcon, LockKeyholeIcon, PlayIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { FileBadge } from "@/components/chat/Attachments";
 import { FirstFrame } from "@/components/chat/GifImage";
 import { fitGif } from "@/components/chat/GifMessage";
+import { ImageViewer, type ViewerPicture } from "@/components/chat/ImageViewer";
 import { GifProvider } from "@/gen/fuwa/v1/types_pb";
 import { providerName } from "@/fuwa/gifs";
 import { SpoilerBadge, SpoilerCover } from "@/components/chat/SpoilerCover";
@@ -68,18 +69,42 @@ function useBlobUrl(opened: Opened | null): string | null {
  * when their own bytes say they're a type that's safe to draw. Everything
  * else is a card to download. A file marked as a spoiler stays covered until
  * it's clicked (it may still open behind the cover, so uncovering is quick).
+ * A shown picture opens in the picture viewer on a click, which steps through
+ * the message's other pictures opened here (and uncovered, for spoilers);
+ * they're never opened in a tab, so it has no "open the original".
  */
 export const SealedFiles = memo(function SealedFiles({ instanceKey, files, animate }: { instanceKey: string; files: FileRef[]; animate: boolean }) {
+  const [viewable, setViewable] = useState<Record<string, ViewerPicture>>({});
+  const [open, setOpen] = useState<number | null>(null);
+  const report = useCallback((mediaId: string, picture: ViewerPicture | null) => {
+    setViewable((was) => {
+      if (picture ? was[mediaId]?.src === picture.src : !was[mediaId]) return was;
+      const next = { ...was };
+      if (picture) next[mediaId] = picture;
+      else delete next[mediaId];
+      return next;
+    });
+  }, []);
   if (!files.length) return null;
+  const pictures = files.flatMap((f) => viewable[f.mediaId] ?? []);
   return (
     <div className="mt-1 flex flex-col gap-1.5">
       {files.map((file, n) =>
         file.gif ? (
           <SealedGif key={file.mediaId} instanceKey={instanceKey} file={file} animate={animate} />
         ) : (
-          <SealedFile key={file.mediaId} instanceKey={instanceKey} file={file} delay={animate ? n * 0.04 : 0} animate={animate} />
+          <SealedFile
+            key={file.mediaId}
+            instanceKey={instanceKey}
+            file={file}
+            delay={animate ? n * 0.04 : 0}
+            animate={animate}
+            onViewable={report}
+            onView={() => setOpen(Math.max(0, pictures.findIndex((p) => p.key === file.mediaId)))}
+          />
         ),
       )}
+      <ImageViewer pictures={pictures} index={pictures.length ? open : null} onIndex={setOpen} onClose={() => setOpen(null)} />
     </div>
   );
 });
@@ -124,13 +149,44 @@ function useOpening(instanceKey: string, file: FileRef, auto: boolean) {
   return { state, open, place };
 }
 
-function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string; file: FileRef; delay: number; animate: boolean }) {
+function SealedFile({
+  instanceKey,
+  file,
+  delay,
+  animate,
+  onViewable,
+  onView,
+}: {
+  instanceKey: string;
+  file: FileRef;
+  delay: number;
+  animate: boolean;
+  /** Says whether it's a picture the viewer can show now (opened, and uncovered if it's a spoiler). */
+  onViewable: (mediaId: string, picture: ViewerPicture | null) => void;
+  onView: () => void;
+}) {
   const lang = useI18n();
   const hinted = file.type.startsWith("image/") || file.type.startsWith("video/") || file.width > 0;
   const auto = hinted && (file.fileSize || file.size) <= AUTO_OPEN_BYTES;
   const { state, open, place } = useOpening(instanceKey, file, auto);
   const opened = state.at === "open" ? state.opened : null;
   const url = useBlobUrl(opened);
+  const [uncovered, setUncovered] = useState(false);
+  const picture = !!url && opened?.preview?.kind !== "video" && (!file.spoiler || uncovered);
+
+  useEffect(() => {
+    if (!picture || !url || !opened) return onViewable(file.mediaId, null);
+    onViewable(file.mediaId, {
+      key: file.mediaId,
+      src: url,
+      name: file.name,
+      bytes: opened.blob.size,
+      width: file.width,
+      height: file.height,
+      save: () => save(opened.blob, file.name),
+    });
+    return () => onViewable(file.mediaId, null);
+  }, [picture, url, opened, file, onViewable]);
 
   const download = async () => {
     const o = await open();
@@ -145,9 +201,9 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
     const size = fitBox(file.width, file.height, MEDIA_BOX);
     // The same cover as the card's below, so uncovering one stays uncovered once it opens.
     return (
-      <SpoilerCover spoiler={!!file.spoiler} look="media" animate={animate} className="self-start rounded-xl">
+      <SpoilerCover spoiler={!!file.spoiler} look="media" animate={animate} className="self-start rounded-xl" onShown={() => setUncovered(true)}>
         <motion.div {...enterWith} className="group/sealed relative max-w-full" style={{ width: size.width }}>
-          <Shown file={file} opened={opened} url={url} size={size} />
+          <Shown file={file} opened={opened} url={url} size={size} onView={onView} />
           <button
             type="button"
             onClick={() => save(opened.blob, file.name)}
@@ -207,6 +263,8 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
   );
 }
 
+const noop = () => {};
+
 /**
  * A GIF sent from the picker, sealed as a file: opened by itself once it's on
  * screen and shown like a GIF in a channel (sized before it opens, playing
@@ -222,7 +280,7 @@ function SealedGif({ instanceKey, file, animate }: { instanceKey: string; file: 
   const opened = state.at === "open" ? state.opened : null;
   const url = useBlobUrl(opened);
   if (state.at === "failed" || (opened && opened.preview?.kind !== "image")) {
-    return <SealedFile instanceKey={instanceKey} file={file} delay={0} animate={animate} />;
+    return <SealedFile instanceKey={instanceKey} file={file} delay={0} animate={animate} onViewable={noop} onView={noop} />;
   }
   const size = fitGif(file.width || 240, file.height || 180);
   const playing = !still || hover || tapped;
@@ -280,22 +338,25 @@ function SealedGif({ instanceKey, file, animate }: { instanceKey: string; file: 
   );
 }
 
-/** An opened picture or video; a moving picture holds still under reduce motion. */
-function Shown({ file, opened, url, size }: { file: FileRef; opened: Opened; url: string; size: { width: number; height: number } }) {
+/** An opened picture or video; a moving picture holds still under reduce motion. A picture opens in the viewer on a click. */
+function Shown({ file, opened, url, size, onView }: { file: FileRef; opened: Opened; url: string; size: { width: number; height: number }; onView: () => void }) {
+  const { t } = useI18n();
   usePrefs((p) => p.reduceMotion);
   const calm = reduceMotion();
   if (opened.preview?.kind === "video") {
     return <video src={url} controls playsInline preload="metadata" className="max-h-80 w-full rounded-xl border bg-black" aria-label={file.name} />;
   }
-  if (opened.moves && calm) return <Still url={url} name={file.name} width={size.width} height={size.height} />;
+  if (opened.moves && calm) return <Still url={url} name={file.name} width={size.width} height={size.height} onView={onView} />;
   return (
-    <img
-      src={url}
-      alt={file.name}
-      draggable={false}
-      style={{ aspectRatio: file.width > 0 && file.height > 0 ? `${size.width} / ${size.height}` : undefined }}
-      className="w-full rounded-xl border bg-muted/60 object-contain"
-    />
+    <button type="button" onClick={onView} aria-label={t("chat.attachments.open", { name: file.name })} className="block w-full cursor-zoom-in">
+      <img
+        src={url}
+        alt={file.name}
+        draggable={false}
+        style={{ aspectRatio: file.width > 0 && file.height > 0 ? `${size.width} / ${size.height}` : undefined }}
+        className="w-full rounded-xl border bg-muted/60 object-contain"
+      />
+    </button>
   );
 }
 
@@ -333,9 +394,9 @@ function CardButton({ label, onClick, disabled, children }: { label: string; onC
 
 /**
  * A moving picture under reduce motion: its first frame, drawn once, until
- * it's clicked.
+ * it's clicked; once moving, a click opens it in the viewer.
  */
-function Still({ url, name, width, height }: { url: string; name: string; width: number; height: number }) {
+function Still({ url, name, width, height, onView }: { url: string; name: string; width: number; height: number; onView: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(false);
   const { t } = useI18n();
@@ -351,7 +412,13 @@ function Still({ url, name, width, height }: { url: string; name: string; width:
     };
     img.src = url;
   }, [url, playing]);
-  if (playing) return <img src={url} alt={name} draggable={false} className="w-full rounded-xl border bg-muted/60 object-contain" />;
+  if (playing) {
+    return (
+      <button type="button" onClick={onView} aria-label={t("chat.attachments.open", { name })} className="block w-full cursor-zoom-in">
+        <img src={url} alt={name} draggable={false} className="w-full rounded-xl border bg-muted/60 object-contain" />
+      </button>
+    );
+  }
   return (
     <button
       type="button"

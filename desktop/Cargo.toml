@@ -91,8 +91,9 @@ url = "2"
 # GPUI already draws with on Linux, so it isn't built twice there.
 wgpu = "29.0.4"
 # The frames those shaders make, and video as it's decoded, as pictures for
-# GPUI (the version GPUI uses).
-image = { version = "0.25", default-features = false }
+# GPUI (the version GPUI uses); and pasted bitmaps (a Windows screenshot, a
+# TIFF) made PNGs to send (ui/paste.rs), with formats GPUI builds already.
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
 # The system's own window under a GPUI one, for what GPUI can't do: letting
 # clicks through the game overlay (ui/game_overlay.rs).
 raw-window-handle = "0.6"
