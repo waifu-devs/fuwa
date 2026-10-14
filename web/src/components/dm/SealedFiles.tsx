@@ -165,7 +165,7 @@ function SealedFile({ instanceKey, file, delay, animate }: { instanceKey: string
       >
         <span className="relative">
           <FileBadge name={file.name} />
-          <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-emerald-500 shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
+          <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-card text-seal-icon shadow-sm" title={lang.t("dms-calls.dm.sealed.encrypted")}>
             <LockKeyholeIcon className="size-2.5" />
           </span>
         </span>
@@ -305,7 +305,7 @@ export function PendingFiles({ files }: { files: { name: string; size: number; s
             <p className="truncate text-xs text-muted-foreground tabular-nums">{formatBytes(lang, file.size)}</p>
           </div>
           {file.spoiler && <SpoilerBadge className="shrink-0 px-2 py-0.5 text-[0.6rem]" />}
-          <LockKeyholeIcon className="size-4 shrink-0 text-emerald-500" />
+          <LockKeyholeIcon className="size-4 shrink-0 text-seal-icon" />
         </div>
       ))}
     </div>

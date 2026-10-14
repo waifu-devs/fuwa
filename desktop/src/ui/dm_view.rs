@@ -35,38 +35,49 @@ use crate::ui::widgets::{avatar, icon, pal};
 
 // ───────────────────────── Colors ─────────────────────────
 
-/// Tailwind's emerald and amber, which the web draws encryption in (its
-/// marks, the start's note, the lines about devices).
+/// What the encryption marks are drawn in (the web's `--seal-*`, from
+/// `core::accessibility::seal_colors`): each on a solid surface of its own,
+/// so they read over see-through panels and backdrop pictures alike.
 #[derive(Clone, Copy)]
 pub(crate) struct Seal {
-    /// emerald-500: badges, line icons, the composer's lock.
+    /// A mark on its own (line icons, the composer's lock), on the card or background.
     pub green: Hsla,
-    /// emerald-700 (300 in the dark): the pill's words.
+    /// Words and icons on the seal's surface; also the solid badges' fill.
     pub pill: Hsla,
-    /// emerald-600 (400 in the dark): icons on a tinted ground, the promise.
+    /// The same, for icons on the surface.
     pub icon: Hsla,
-    /// emerald-900 (100 in the dark): the start's note.
+    /// The start's note: the theme's own text, on the surface.
     pub note: Hsla,
-    /// amber-500: lines about something wrong.
+    /// The pills', notes' and tiles' solid surface, pointed at, and outline.
+    pub surface: Hsla,
+    pub surface_hover: Hsla,
+    pub edge: Hsla,
+    /// A lone mark about something wrong.
     pub amber: Hsla,
-    /// amber-700 (300 in the dark): the pill's words once the safety number changed.
+    /// Words on the amber surface, once the safety number changed.
     pub amber_text: Hsla,
+    pub amber_surface: Hsla,
+    pub amber_surface_hover: Hsla,
+    pub amber_edge: Hsla,
 }
 
 pub(crate) fn seal(p: &Palette) -> Seal {
-    let dark = p.dark;
+    let c = p.seal;
+    let h = |hex: u32| -> Hsla { rgb(hex).into() };
     Seal {
-        green: rgb(0x00bc7d).into(),
-        pill: rgb(if dark { 0x5ee9b5 } else { 0x007a55 }).into(),
-        icon: rgb(if dark { 0x00d492 } else { 0x009966 }).into(),
-        note: rgb(if dark { 0xd0fae5 } else { 0x004f3b }).into(),
-        amber: rgb(0xfe9a00).into(),
-        amber_text: rgb(if dark { 0xffd230 } else { 0xbb4d00 }).into(),
+        green: h(c.icon),
+        pill: h(c.ink),
+        icon: h(c.ink),
+        note: p.card_foreground.into(),
+        surface: h(c.surface),
+        surface_hover: h(c.surface_hover),
+        edge: h(c.edge),
+        amber: h(c.warn_icon),
+        amber_text: h(c.warn_ink),
+        amber_surface: h(c.warn_surface),
+        amber_surface_hover: h(c.warn_surface_hover),
+        amber_edge: h(c.warn_edge),
     }
-}
-
-fn with_alpha(c: Hsla, a: f32) -> Hsla {
-    Hsla { a: c.a * a, ..c }
 }
 
 /// The web's `.shadow-2xl`.
@@ -543,12 +554,12 @@ pub(crate) fn render_start(start: &DmStart, p: &Palette) -> AnyElement {
                 div()
                     .size(px(32.0))
                     .rounded_full()
-                    .bg(s.green)
+                    .bg(s.pill)
                     .shadow(ring_of(card, 4.0))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(gpui_kit::white())
+                    .text_color(s.surface)
                     .child(icon("lock-keyhole").size(px(16.0))),
             )
         },
@@ -598,7 +609,9 @@ pub(crate) fn render_start(start: &DmStart, p: &Palette) -> AnyElement {
                     .px(px(12.0))
                     .py(px(10.0))
                     .rounded(radius_2xl())
-                    .bg(with_alpha(s.green, 0.1))
+                    .bg(s.surface)
+                    .border_1()
+                    .border_color(s.edge)
                     .text_sm()
                     .line_height(px(20.0))
                     .text_color(s.note)
@@ -640,7 +653,9 @@ pub(crate) fn render_line(line: &SysLine, p: &Palette) -> AnyElement {
                     .size(px(32.0))
                     .flex_none()
                     .rounded_full()
-                    .bg(with_alpha(s.green, 0.15))
+                    .bg(s.surface)
+                    .border_1()
+                    .border_color(s.edge)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -857,9 +872,9 @@ impl Trust {
 /// verified, a warning once the number changed) and what it means. It opens the encryption dialog.
 pub(crate) fn trust_pill(id: &str, trust: Trust, label: String, p: &Palette) -> Stateful<Div> {
     let s = seal(p);
-    let (bg, hover, fg) = match trust {
-        Trust::Changed => (with_alpha(s.amber, 0.15), with_alpha(s.amber, 0.25), s.amber_text),
-        _ => (with_alpha(s.green, 0.12), with_alpha(s.green, 0.2), s.pill),
+    let (bg, hover, fg, edge) = match trust {
+        Trust::Changed => (s.amber_surface, s.amber_surface_hover, s.amber_text, s.amber_edge),
+        _ => (s.surface, s.surface_hover, s.pill, s.edge),
     };
     let glyph = match trust {
         Trust::Verified => "badge-check",
@@ -923,6 +938,15 @@ pub(crate) fn trust_pill(id: &str, trust: Trust, label: String, p: &Palette) -> 
         .py(px(4.0))
         .rounded_full()
         .bg(bg)
+        .border_1()
+        .border_color(edge)
+        .shadow(vec![BoxShadow {
+            color: gpui_kit::hsla(0.0, 0.0, 0.0, 0.12),
+            offset: point(px(0.0), px(1.0)),
+            blur_radius: px(2.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }])
         .text_color(fg)
         .text_xs()
         .line_height(px(16.0))
@@ -1188,7 +1212,9 @@ pub(crate) fn starting(p: &Palette, window: &Window) -> AnyElement {
                     div()
                         .size(px(56.0))
                         .rounded(radius_2xl())
-                        .bg(with_alpha(s.green, 0.15))
+                        .bg(s.surface)
+                        .border_1()
+                        .border_color(s.edge)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1502,8 +1528,13 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
+                    .px(px(6.0))
+                    .rounded_full()
+                    .bg(s.surface)
+                    .border_1()
+                    .border_color(s.edge)
                     .font_weight(FontWeight::BOLD)
-                    .text_color(s.icon)
+                    .text_color(s.pill)
                     .child(icon("lock-keyhole").size(px(12.0)))
                     .child(note),
             )
