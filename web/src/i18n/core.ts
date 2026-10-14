@@ -101,7 +101,8 @@ export function fill(text: string, values: Record<string, string> = {}): string 
 
 /**
  * Picks the shipped locale that best matches what someone asked for, in order:
- * an exact match, then the same language ("es-MX" gets "es"), else English.
+ * an exact match, then the same language ("es-MX" gets "es", "pt" gets "pt-BR"),
+ * else English.
  */
 export function negotiate(requested: readonly string[], available: readonly string[], fallback = "en"): string {
   const lower = new Map(available.map((code) => [code.toLowerCase(), code]));
@@ -110,8 +111,12 @@ export function negotiate(requested: readonly string[], available: readonly stri
     if (!want || want === "*") continue;
     const exact = lower.get(want);
     if (exact) return exact;
-    const base = lower.get(want.split("-")[0]);
+    const language = want.split("-")[0];
+    const base = lower.get(language);
     if (base) return base;
+    // Another country's variant beats English: "pt-PT" gets "pt-BR".
+    const variant = available.find((code) => code.toLowerCase().split("-")[0] === language);
+    if (variant) return variant;
   }
   return fallback;
 }

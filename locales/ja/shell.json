@@ -1,0 +1,23 @@
+{
+  "build.commit": "コミット {commit} からビルド",
+  "update.updated": "fuwa が更新されました",
+  "update.reload": "再読み込み",
+  "update.later": "あとで",
+  "update.laterHint": "あとで：再読み込みするまでこのバージョンを使い続けます",
+  "update.hasFeature": "{instance}で{feature}が使えます。使うには fuwa を更新してください",
+  "update.hasFeatures": {
+    "other": "{instance}で{feature}ほか{count}件の機能が使えます。使うには fuwa を更新してください"
+  },
+  "update.tooOld": "{instance}をすべて使うには、新しい fuwa が必要です",
+  "update.anInstance": "あるインスタンス",
+  "update.somethingNew": "新機能",
+  "announcement.until": "{time}まで",
+  "announcement.close": "お知らせを閉じる",
+  "hosted.label": "Waifu Devs がホスト",
+  "hosted.who": "このインスタンスは fuwa の開発者が運営しています。",
+  "hosted.checked": "{host} · ブラウザーが証明書を確認済み",
+  "hosted.why": "このバッジは私たち自身のアドレスにあるインスタンスにだけ表示されます。どのサーバーも自分について何でも名乗れるため、アプリはアドレスだけで判断します。",
+  "hosted.about": "fuwa について",
+  "signInNotice.added": "{date}に、あなたのアカウントのログイン方法として{name}が追加されました。心当たりがありませんか？",
+  "signInNotice.review": "確認する"
+}

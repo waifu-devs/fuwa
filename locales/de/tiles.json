@@ -1,0 +1,61 @@
+{
+  "strip.label": "Gerade los",
+  "strip.options": "Kachel-Optionen",
+  "strip.hide": "Diese ausblenden",
+  "strip.quiet": "Keine Live-Kacheln auf diesem Server",
+  "strip.off": "Live-Kacheln ausschalten",
+  "strip.remove": "Für alle entfernen",
+  "strip.removeFailed": "Kachel konnte nicht entfernt werden",
+  "menu.show": "Live-Kacheln",
+  "menu.server": "Kacheln für alle hier",
+  "menu.bigServer": {
+    "one": "Sprachräume sind in Servern ab {count} Mitglied standardmäßig aus",
+    "other": "Sprachräume sind in Servern ab {count} Mitgliedern standardmäßig aus"
+  },
+  "menu.everyone": "Alle hier sehen nur diese Arten",
+  "menu.reset": "Zurück zum Standard",
+  "menu.failed": "Die Kacheln des Servers konnten nicht geändert werden",
+  "kind.voice": "Sprachräume",
+  "kind.poll": "Umfragen",
+  "kind.thread": "Gefolgte Threads",
+  "kind.shared": "Geteilte Kanäle",
+  "kind.app": "Von Apps",
+  "voice.title": {
+    "one": "{count} Person in {channel}",
+    "other": "{count} Personen in {channel}"
+  },
+  "voice.since": "Im Gespräch seit {time}",
+  "voice.video": "Kameras an",
+  "voice.screen": "Teilt einen Bildschirm",
+  "voice.join": "Beitreten",
+  "poll.title": "Umfrage in #{channel}",
+  "poll.closesMinutes": {
+    "one": "Endet in {count} Minute",
+    "other": "Endet in {count} Minuten"
+  },
+  "poll.closesHours": {
+    "one": "Endet in {count} Stunde",
+    "other": "Endet in {count} Stunden"
+  },
+  "poll.noEnd": "Offen, bis sie beendet wird",
+  "poll.voters": {
+    "one": "{count} Stimme",
+    "other": "{count} Stimmen"
+  },
+  "poll.vote": "Abstimmen",
+  "thread.title": "Ein Thread, dem du folgst",
+  "thread.unread": {
+    "one": "{count} neue Antwort",
+    "other": "{count} neue Antworten"
+  },
+  "thread.open": "Öffnen",
+  "shared.title": "Viel los in #{channel}",
+  "shared.text": {
+    "one": "{count} neue Nachricht aus {servers} Servern",
+    "other": "{count} neue Nachrichten aus {servers} Servern"
+  },
+  "shared.open": "Aufholen",
+  "app.by": "Von {app}",
+  "app.live": "Live",
+  "app.open": "Öffnen"
+}

@@ -1,0 +1,54 @@
+{
+  "strip.label": "いま起きていること",
+  "strip.options": "タイルのオプション",
+  "strip.hide": "これを非表示",
+  "strip.quiet": "このサーバーではライブタイルを表示しない",
+  "strip.off": "ライブタイルをオフにする",
+  "strip.remove": "全員から削除",
+  "strip.removeFailed": "タイルを削除できませんでした",
+  "menu.show": "ライブタイル",
+  "menu.server": "ここにいる全員向けのタイル",
+  "menu.bigServer": {
+    "other": "メンバーが{count}人以上のサーバーでは、ボイスルームは最初オフになっています"
+  },
+  "menu.everyone": "ここにいる全員に、これらの種類だけが表示されます",
+  "menu.reset": "デフォルトに戻す",
+  "menu.failed": "サーバーのタイルを変更できませんでした",
+  "kind.voice": "ボイスルーム",
+  "kind.poll": "投票",
+  "kind.thread": "フォロー中のスレッド",
+  "kind.shared": "共有チャンネル",
+  "kind.app": "アプリから",
+  "voice.title": {
+    "other": "{channel}に{count}人"
+  },
+  "voice.since": "{time}から通話中",
+  "voice.video": "カメラオン",
+  "voice.screen": "画面共有中",
+  "voice.join": "参加",
+  "poll.title": "#{channel}の投票",
+  "poll.closesMinutes": {
+    "other": "あと{count}分で締め切り"
+  },
+  "poll.closesHours": {
+    "other": "あと{count}時間で締め切り"
+  },
+  "poll.noEnd": "終了するまで受付中",
+  "poll.voters": {
+    "other": "{count}人が投票済み"
+  },
+  "poll.vote": "投票する",
+  "thread.title": "フォロー中のスレッド",
+  "thread.unread": {
+    "other": "{count}件の新しい返信"
+  },
+  "thread.open": "開く",
+  "shared.title": "#{channel}が盛り上がっています",
+  "shared.text": {
+    "other": "{servers}個のサーバーから{count}件の新しいメッセージ"
+  },
+  "shared.open": "追いつく",
+  "app.by": "{app}から",
+  "app.live": "ライブ",
+  "app.open": "開く"
+}

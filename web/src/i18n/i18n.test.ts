@@ -52,6 +52,8 @@ test("negotiates the closest shipped language", () => {
   assert.equal(negotiate(["fr", "de"], shipped), "en");
   assert.equal(negotiate(["*"], shipped), "en");
   assert.equal(negotiate(["es_ES"], shipped), "es");
+  assert.equal(negotiate(["pt-PT", "en"], shipped), "pt-BR");
+  assert.equal(negotiate(["pt"], shipped), "pt-BR");
 });
 
 test("reads Accept-Language by weight, bounded", () => {
@@ -70,7 +72,7 @@ test("only takes tags shaped like ours", () => {
 // The catalogs themselves
 
 const root = join(import.meta.dirname, "..", "..", "..", "locales");
-const RULES = new Set(["other", "one-other", "one-many-other-romance", "one-few-many-other-slavic", "one-few-other-romanian", "zero-one-other-latvian", "one-two-few-many-other-arabic", "one-two-other", "one-few-many-other-polish"]);
+const RULES = new Set(["other", "one-other", "one-many-other-romance", "one-many-other-french", "one-few-many-other-slavic", "one-few-other-romanian", "zero-one-other-latvian", "one-two-few-many-other-arabic", "one-two-other", "one-few-many-other-polish"]);
 const read = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 const codes = readdirSync(root, { withFileTypes: true })
   .filter((d) => d.isDirectory())
