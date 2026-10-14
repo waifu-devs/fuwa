@@ -1,5 +1,5 @@
 import type { ProfileItem } from "@/gen/fuwa/v1/types_pb";
-import { builtinEffect, sanitizeEffect, type ProfileEffectSpec } from "./effects/profile.ts";
+import { builtinEffect, sanitizeEffect, type EffectPicture, type ProfileEffectSpec } from "./effects/profile.ts";
 
 /*
  * Profile items (docs/profile-items.md): the effects and decorations an
@@ -14,7 +14,7 @@ export const ITEM_EFFECT = 1;
 export const ITEM_DECORATION = 2;
 
 /** Just what's read of an item, so plain objects work in tests. */
-export type Item = Pick<ProfileItem, "id" | "kind" | "name" | "description" | "effect" | "pictureUrl" | "animated">;
+export type Item = Pick<ProfileItem, "id" | "kind" | "name" | "description" | "effect" | "pictureUrl" | "animated"> & { pictures?: readonly EffectPicture[] };
 
 /** Parsed specs, by the item's id and its JSON, so one spec keeps one identity (effects restart when it changes). */
 const specs = new Map<string, ProfileEffectSpec | null>();
@@ -28,17 +28,18 @@ const SPECS_KEPT = 256;
  */
 export function itemEffect(item: Item): ProfileEffectSpec | null {
   if (item.kind !== ITEM_EFFECT || !item.effect) return null;
-  const key = `${item.id}\n${item.name}\n${item.description}\n${item.effect}`;
+  const pictures = item.pictures ?? [];
+  const key = `${item.id}\n${item.name}\n${item.description}\n${pictures.map((p) => p.url).join(" ")}\n${item.effect}`;
   const known = specs.get(key);
   if (known !== undefined) return known;
-  const spec = parseEffect(item.effect, item.id.toLowerCase(), item);
+  const spec = parseEffect(item.effect, item.id.toLowerCase(), item, pictures);
   if (specs.size >= SPECS_KEPT) specs.delete(specs.keys().next().value!);
   specs.set(key, spec);
   return spec;
 }
 
-/** A spec from JSON text, or null when it isn't JSON or has nothing to play. `id` and `text` replace its own when given. */
-export function parseEffect(json: string, id?: string, text?: { name: string; description: string }): ProfileEffectSpec | null {
+/** A spec from JSON text, with the pictures its image layers draw, or null when it isn't JSON or has nothing to play. `id` and `text` replace its own when given. */
+export function parseEffect(json: string, id?: string, text?: { name: string; description: string }, pictures: readonly EffectPicture[] = []): ProfileEffectSpec | null {
   let raw: unknown;
   try {
     raw = JSON.parse(json);
@@ -52,7 +53,7 @@ export function parseEffect(json: string, id?: string, text?: { name: string; de
     named.name = text.name;
     named.description = text.description;
   }
-  return sanitizeEffect(named);
+  return sanitizeEffect(named, pictures);
 }
 
 /** Why an effect someone pasted or picked can't be added: not JSON, or nothing in it the format knows. */
@@ -61,17 +62,63 @@ export type EffectProblem = "empty" | "json" | "spec";
 /**
  * Checks an effect someone is about to add, before it goes to the instance
  * (which checks again, more strictly). The spec gets a stand-in id for the
- * preview; the instance gives it the item's.
+ * preview; the instance gives it the item's. `pictures` are the ones it will
+ * have (local files, as object URLs, until they're uploaded).
  */
-export function checkEffectText(text: string, name = ""): { spec: ProfileEffectSpec } | { problem: EffectProblem } {
+export function checkEffectText(text: string, name = "", pictures: readonly EffectPicture[] = []): { spec: ProfileEffectSpec } | { problem: EffectProblem } {
   if (!text.trim()) return { problem: "empty" };
   try {
     JSON.parse(text);
   } catch {
     return { problem: "json" };
   }
-  const spec = parseEffect(text, "preview", { name: name.trim() || "preview", description: "" });
+  const spec = parseEffect(text, "preview", { name: name.trim() || "preview", description: "" }, pictures);
   return spec ? { spec } : { problem: "spec" };
+}
+
+/**
+ * A spec's text split for editing: the JSON without its shader's code, and
+ * the code on its own, so the WGSL is edited as WGSL rather than inside a
+ * JSON string. Text that isn't JSON (or has no shader) comes back as it is.
+ */
+export function splitShader(text: string): { json: string; wgsl: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { json: text, wgsl: "" };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { json: text, wgsl: "" };
+  const spec = raw as Record<string, unknown>;
+  const shader = spec.shader;
+  if (!shader || typeof shader !== "object" || typeof (shader as Record<string, unknown>).code !== "string") return { json: text, wgsl: "" };
+  const { code, ...rest } = shader as Record<string, unknown>;
+  const json = Object.keys(rest).length ? { ...spec, shader: rest } : Object.fromEntries(Object.entries(spec).filter(([k]) => k !== "shader"));
+  return { json: specText(json), wgsl: code as string };
+}
+
+/**
+ * The spec's text again from its two parts: the shader's code put back in
+ * (its other settings, if any, kept), or the shader left out when there's
+ * no code. JSON that doesn't parse comes back as it is, for the checks to
+ * say so. A shader alone needs no JSON at all.
+ */
+export function joinShader(json: string, wgsl: string): string {
+  const code = wgsl.replace(/\s+$/, "");
+  if (!json.trim()) return code.trim() ? JSON.stringify({ layers: [], shader: { code } }) : "";
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return json;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json;
+  const spec = { ...(raw as Record<string, unknown>) };
+  const settings = spec.shader && typeof spec.shader === "object" ? (spec.shader as Record<string, unknown>) : {};
+  if (code.trim()) spec.shader = { ...settings, code };
+  else delete spec.shader;
+  if (!Array.isArray(spec.layers)) spec.layers = [];
+  return JSON.stringify(spec);
 }
 
 /** The items of one kind, as offered. */
@@ -176,7 +223,12 @@ Each layer is one kind of particle. Its fields:
 - glow: true for a soft glow in the particle's color (optional).
 - opacity: peak opacity, 0.05 to 1 (optional, 1 when left out).
 
-fuwa refuses a spec with a shape, motion, place or color not on these lists, a number out of its range, or more than 16 KB, and drops fields it doesn't know. The effect gets its id, name and description from the item it's added as, so leave those out.
+Two more things an effect can have, if what I want calls for them:
+
+- Pictures: an effect can carry up to 8 pictures of its own, uploaded with it in an order. A layer with "image": 0 draws the first picture instead of a shape ("image": 1 the second, and so on). It leaves out shape, and may leave out colors: a picture keeps its own, and its glow is then the theme's primary. Only use pictures I say I have, and tell me which picture goes in which place.
+- A shader: "shader": { "code": "...", "intensity": 0.6, "speed": 1 } draws a WGSL shader across the whole card, under the particles. The code defines fn shade(uv: vec2f) -> vec4f, called for each pixel with uv from 0,0 at the top left to 1,1 at the bottom right, and returns a color and how much it covers the card (straight alpha, 0 to 1). Keep alpha low in the middle (0.15 or less) so the text stays readable. It can read the uniform fuwa: fuwa.primary (the theme's color), fuwa.accent (the card's own color), fuwa.background (the card), fuwa.foreground (its text), all vec4f; fuwa.res (its size in pixels) and fuwa.pointer (0 to 1), both vec2f; fuwa.time (seconds) and fuwa.intensity, both f32; and the helpers hash21(p: vec2f) -> f32, noise(p: vec2f) -> f32 and fbm(p: vec2f) -> f32. It can't declare anything with an attribute (no @group, @binding or entry points), turn on extensions or contain links, and it's at most 16 KB. intensity (0.05 to 1) scales how much it covers, speed (0 to 4) how fast its time runs. A shader alone, with "layers": [], is an effect too. In the JSON the code is one string, so write its line breaks as \\n.
+
+fuwa refuses a spec with a shape, motion, place or color not on these lists, a number out of its range, a shader that breaks those rules, or more than 40 KB, and drops fields it doesn't know. The effect gets its id, name and description from the item it's added as, so leave those out.
 
 An example, fuwa's own Sakura (a gust of petals from the top left, then a gentle fall):
 

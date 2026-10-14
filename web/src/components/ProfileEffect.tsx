@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { EffectShader } from "@/components/EffectShader";
 import {
   builtinEffect,
   IDLE_FADE_MS,
@@ -6,12 +7,14 @@ import {
   introLength,
   planEffect,
   SHAPE_PATHS,
+  type EffectPicture,
   type Particle,
   type ProfileEffectSpec,
   type Shape,
 } from "@/lib/effects/profile";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { reportError, reportTiming } from "@/lib/reports";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -89,8 +92,39 @@ function shapeNode(shape: Shape) {
   return svg.cloneNode(true);
 }
 
-/** A particle's box: an HTML element, so its transform and opacity animations run on the compositor. */
-function particleNode(p: Particle) {
+/**
+ * One of an effect's pictures, filling its particle's box. Only pictures on a
+ * fuwa instance load (`shownPicture`), or a file being added, shown from this
+ * page (`blob:`). A moving one holds its first frame when nothing may move.
+ */
+function pictureNode(picture: EffectPicture, still: boolean) {
+  const src = picture.url.startsWith("blob:") ? picture.url : shownPicture(picture.url);
+  if (!src) return null;
+  const fill = "display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;user-select:none";
+  if (still && picture.animated) {
+    const canvas = document.createElement("canvas");
+    canvas.style.cssText = fill;
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext("2d")?.drawImage(img, 0, 0);
+    };
+    img.src = src;
+    return canvas;
+  }
+  const img = document.createElement("img");
+  img.alt = "";
+  img.draggable = false;
+  img.decoding = "async";
+  img.style.cssText = fill;
+  img.src = src;
+  return img;
+}
+
+/** A particle's box: an HTML element, so its transform and opacity animations run on the compositor. Null for a picture that can't show. */
+function particleNode(p: Particle, pictures: readonly EffectPicture[], still: boolean) {
   const el = document.createElement("span");
   const s = el.style;
   s.position = "absolute";
@@ -102,7 +136,14 @@ function particleNode(p: Particle) {
   s.opacity = "0";
   // A glow, or a soft shadow that keeps pale particles readable on light cards. Both are drawn once, not per frame.
   s.filter = p.glow ? `drop-shadow(0 0 ${Math.max(2, Math.round(p.size / 4))}px currentColor)` : "drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.2))";
-  el.append(shapeNode(p.shape));
+  if (p.shape) {
+    el.append(shapeNode(p.shape));
+    return el;
+  }
+  const picture = p.image === null ? undefined : pictures[p.image];
+  const node = picture && pictureNode(picture, still);
+  if (!node) return null;
+  el.append(node);
   return el;
 }
 
@@ -117,7 +158,9 @@ function particleNode(p: Particle) {
  *
  * `effect` is a built-in effect's id, or a spec already resolved (an
  * instance's or a server's, from `lib/profile-items.ts`), which plays the
- * same way. Keep a spec's identity stable: a new one starts it over.
+ * same way. Keep a spec's identity stable: a new one starts it over. Its
+ * particles may be its own pictures, and a shader may draw under them
+ * (`EffectShader`), still whenever the particles are.
  */
 export function ProfileEffect({
   effect,
@@ -172,7 +215,8 @@ export function ProfileEffect({
     idle.style.cssText = "position:absolute;inset:0;will-change:opacity";
     for (const p of particles) {
       if (!moving && !p.still) continue;
-      const el = particleNode(p);
+      const el = particleNode(p, spec.pictures ?? [], !moving);
+      if (!el) continue;
       if (!moving) {
         nodes.append(el);
         el.style.transform = p.still!.transform;
@@ -243,12 +287,15 @@ export function ProfileEffect({
 
   if (!spec) return null;
   return (
-    <div
-      ref={ref}
-      aria-hidden
-      data-effect={spec.id}
-      style={color ? ({ "--fx-profile": color } as CSSProperties) : undefined}
-      className={cn("pointer-events-none absolute inset-0 z-10 overflow-hidden [contain:strict]", className)}
-    />
+    <>
+      {spec.shader && <EffectShader shader={spec.shader} color={color} still={!play || calm} />}
+      <div
+        ref={ref}
+        aria-hidden
+        data-effect={spec.id}
+        style={color ? ({ "--fx-profile": color } as CSSProperties) : undefined}
+        className={cn("pointer-events-none absolute inset-0 z-10 overflow-hidden [contain:strict]", className)}
+      />
+    </>
   );
 }

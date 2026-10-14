@@ -1,6 +1,8 @@
 //! Profile effects, the same specs and the same planner as the web's
 //! `lib/effects/profile.ts` (docs/profile-effects.md): layers of small
-//! shapes, each with a way of moving, turned into particles with keyframes
+//! shapes, or of the effect's own pictures, each with a way of moving, and
+//! optionally a shader (a custom shader's WGSL, `core/effects/custom.rs`)
+//! drawn under them. The layers are turned into particles with keyframes
 //! for a card of a given size. An intro plays once when the card opens, then
 //! an idle loop keeps going. The same seed gives the same particles, so an
 //! effect looks the same here as on the web. Pure: the window draws it.
@@ -125,7 +127,10 @@ pub enum Paint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    pub shape: Shape,
+    /// A built-in shape; layers that draw one of the effect's pictures (`image`) have none.
+    pub shape: Option<Shape>,
+    /// One of the effect's pictures, by its place in `Spec::pictures`.
+    pub image: Option<usize>,
     pub motion: Motion,
     pub intro: bool,
     pub count: u32,
@@ -133,6 +138,7 @@ pub struct Layer {
     pub size: (f32, f32),
     pub duration: (f32, f32),
     pub delay: (f32, f32),
+    /// A shape's colors; a picture keeps its own, and may have none (its glow is then the primary).
     pub colors: Vec<Paint>,
     pub spin: f32,
     pub sway: f32,
@@ -148,8 +154,36 @@ pub struct Spec {
     /// Its own name and line; empty for built-ins, whose text is the app's.
     pub name: String,
     pub description: String,
+    /// May be empty when there's a shader.
     pub layers: Vec<Layer>,
+    pub shader: Option<EffectShader>,
+    /// The pictures image layers draw. Not in the spec's JSON: they come with
+    /// the profile item (`ProfileItem.pictures`).
+    pub pictures: Vec<Picture>,
 }
+
+/// A shader under the particles: a custom shader's `fn shade`, how strongly
+/// it covers the card (0.05 to 1) and how fast it runs (0 to 4).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectShader {
+    pub code: String,
+    pub intensity: f32,
+    pub speed: f32,
+}
+
+/// One of an effect's own pictures: an upload on the instance offering it,
+/// or (`local`) a file on this computer being added, not yet uploaded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Picture {
+    pub url: String,
+    pub animated: bool,
+    pub local: bool,
+}
+
+/// The most pictures an effect has.
+pub const MAX_PICTURES: usize = 8;
+/// A shader's WGSL, at most (the custom shaders' cap).
+pub const MAX_EFFECT_SHADER_BYTES: usize = 16 * 1024;
 
 /// The card these counts and sizes are for: a profile popout.
 pub const REFERENCE: (f32, f32) = (304.0, 420.0);
@@ -173,7 +207,8 @@ fn layer(
     colors: &[Paint],
 ) -> Layer {
     Layer {
-        shape,
+        shape: Some(shape),
+        image: None,
         motion,
         intro,
         count,
@@ -348,7 +383,14 @@ pub fn spec(id: &str) -> Option<Spec> {
         _ => return None,
     };
     let id = IDS.into_iter().find(|i| *i == id)?;
-    Some(Spec { id: id.to_owned(), name: String::new(), description: String::new(), layers })
+    Some(Spec {
+        id: id.to_owned(),
+        name: String::new(),
+        description: String::new(),
+        layers,
+        shader: None,
+        pictures: Vec::new(),
+    })
 }
 
 /// The most layers a spec keeps.
@@ -455,11 +497,13 @@ impl Paint {
 /// A spec from anywhere (an instance's or a server's profile item, a file
 /// someone made), made safe to play, as the web's `sanitizeEffect`: only
 /// known shapes, motions, regions and colors, and every number held to a
-/// range. None when nothing is left to play.
-pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
+/// range. `pictures` are the item's own, which image layers name by place.
+/// None when nothing is left to play.
+pub fn sanitize(raw: &serde_json::Value, pictures: &[Picture]) -> Option<Spec> {
     use serde_json::Value;
     let r = raw.as_object()?;
     let id = r.get("id")?.as_str().filter(|id| is_effect_id(id))?;
+    let shown = &pictures[..pictures.len().min(MAX_PICTURES)];
     let num = |v: Option<&Value>, min: f64, max: f64| v.and_then(Value::as_f64).map(|n| n.clamp(min, max) as f32);
     let range = |v: Option<&Value>, min: f64, max: f64| {
         let list = v?.as_array().filter(|a| a.len() == 2)?;
@@ -476,7 +520,17 @@ pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
         .filter_map(|l| {
             let x = l.as_object()?;
             let text = |k: &str| x.get(k).and_then(Value::as_str);
-            let shape = text("shape").and_then(Shape::by_name)?;
+            // A whole number in range, as the web's `Number.isInteger` takes it (so 1.0 too).
+            let image = x
+                .get("image")
+                .and_then(Value::as_f64)
+                .filter(|n| n.fract() == 0.0 && *n >= 0.0 && (*n as usize) < shown.len())
+                .map(|n| n as usize);
+            // A layer naming a picture the effect doesn't have draws nothing, rather than a shape it didn't ask for.
+            if image.is_none() && x.get("image").is_some_and(|v| !v.is_null()) {
+                return None;
+            }
+            let shape = if image.is_none() { Some(text("shape").and_then(Shape::by_name)?) } else { None };
             let motion = text("motion").and_then(Motion::by_name)?;
             let intro = match text("phase")? {
                 "intro" => true,
@@ -492,11 +546,12 @@ pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
                 .and_then(Value::as_array)
                 .map(|c| c.iter().take(32).filter_map(|c| c.as_str().and_then(Paint::by_name)).take(8).collect())
                 .unwrap_or_default();
-            if colors.is_empty() {
+            if colors.is_empty() && image.is_none() {
                 return None;
             }
             Some(Layer {
                 shape,
+                image,
                 motion,
                 intro,
                 count: count.round() as u32,
@@ -513,7 +568,8 @@ pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
             })
         })
         .collect();
-    if layers.is_empty() {
+    let shader = r.get("shader").and_then(sanitize_shader);
+    if layers.is_empty() && shader.is_none() {
         return None;
     }
     let text = |k: &str, max: usize| {
@@ -525,7 +581,33 @@ pub fn sanitize(raw: &serde_json::Value) -> Option<Spec> {
         name: if name.trim().is_empty() { id.to_owned() } else { name.trim().to_owned() },
         description: text("description", 120).trim().to_owned(),
         layers,
+        shader,
+        pictures: shown.to_vec(),
     })
+}
+
+/// An effect's shader, as text that can't break anything: line ends made
+/// plain, no control characters but tabs, at most 16 KB, and its numbers in
+/// range (the web's `sanitizeEffectShader`). Whether the code may run,
+/// compiles and is fast enough is the painter's to find out.
+pub fn sanitize_shader(raw: &serde_json::Value) -> Option<EffectShader> {
+    use serde_json::Value;
+    let r = raw.as_object()?;
+    let code: String = r
+        .get("code")?
+        .as_str()?
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter(|&c| !matches!(c, '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{7f}'))
+        .collect();
+    if code.trim().is_empty() || code.len() > MAX_EFFECT_SHADER_BYTES {
+        return None;
+    }
+    let num = |k: &str, min: f64, max: f64, or: f32| {
+        r.get(k).and_then(Value::as_f64).filter(|n| n.is_finite()).map_or(or, |n| n.clamp(min, max) as f32)
+    };
+    Some(EffectShader { code, intensity: num("intensity", 0.05, 1.0, 1.0), speed: num("speed", 0.0, 4.0, 1.0) })
 }
 
 /// One point a particle passes through.
@@ -555,7 +637,10 @@ pub enum Easing {
 
 #[derive(Debug, Clone)]
 pub struct Particle {
-    pub shape: Shape,
+    /// A built-in shape, or None for one of the effect's pictures (`image`).
+    pub shape: Option<Shape>,
+    /// The picture's place in the spec's `pictures`, or None for a shape.
+    pub image: Option<usize>,
     pub size: f32,
     pub paint: Paint,
     pub glow: bool,
@@ -770,11 +855,17 @@ pub fn plan(spec: &Spec, width: f32, height: f32, seed: &str) -> Vec<Particle> {
                 }
             }
             let duration = between(layer.duration, rnd()).round();
-            let pick = layer.colors[((rnd() * layer.colors.len() as f32) as usize).min(layer.colors.len() - 1)];
+            // A picture without colors glows in the primary; like the web's, no number is drawn for it.
+            let pick = if layer.colors.is_empty() {
+                Paint::Primary
+            } else {
+                layer.colors[((rnd() * layer.colors.len() as f32) as usize).min(layer.colors.len() - 1)]
+            };
             let delay = if layer.intro { between(layer.delay, rnd()).round() } else { 0.0 };
             let start = if layer.intro { 0.0 } else { (rnd() * 100.0).round() / 100.0 };
             particles.push(Particle {
                 shape: layer.shape,
+                image: layer.image,
                 size,
                 paint: pick,
                 glow: layer.glow,
@@ -953,14 +1044,53 @@ mod tests {
                   "size": [2, 4], "duration": [400, 500], "colors": ["primary"] }
             ]
         });
-        let s = sanitize(&raw).unwrap();
+        let s = sanitize(&raw, &[]).unwrap();
         assert_eq!((s.id.as_str(), s.name.as_str()), ("mine", "Mine"));
         assert_eq!(s.layers.len(), 1);
         let l = &s.layers[0];
         assert_eq!((l.count, l.size, l.duration, l.spin), (24, (2.0, 96.0), (300.0, 300.0), 1440.0));
         assert_eq!(l.colors, vec![Paint::Hex(0xff00aa), Paint::Profile]);
-        assert!(sanitize(&serde_json::json!({ "id": "Bad Id", "layers": [] })).is_none());
-        assert!(sanitize(&serde_json::json!({ "id": "empty", "layers": [] })).is_none());
+        assert!(sanitize(&serde_json::json!({ "id": "Bad Id", "layers": [] }), &[]).is_none());
+        assert!(sanitize(&serde_json::json!({ "id": "empty", "layers": [] }), &[]).is_none());
+    }
+
+    fn picture(url: &str) -> Picture {
+        Picture { url: url.into(), animated: false, local: false }
+    }
+
+    #[test]
+    fn image_layers_draw_the_effects_own_pictures() {
+        let layer = |image: serde_json::Value| {
+            serde_json::json!({ "image": image, "shape": "star", "motion": "fall", "phase": "idle", "count": 4,
+                "from": "top", "size": [10, 20], "duration": [4000, 6000] })
+        };
+        let raw = serde_json::json!({ "id": "pics", "layers": [layer(1.into()), layer(5.into()), layer("0".into()), layer(serde_json::Value::Null)] });
+        let pictures = [picture("https://k/media/a"), picture("https://k/media/b")];
+        let s = sanitize(&raw, &pictures).unwrap();
+        // The picture out of range and the one named by a string are dropped; a null image is a shape that needs colors.
+        assert_eq!(s.layers.len(), 1);
+        assert_eq!((s.layers[0].shape, s.layers[0].image), (None, Some(1)));
+        assert!(s.layers[0].colors.is_empty());
+        assert_eq!(s.pictures.len(), 2);
+        let planned = plan(&s, 304.0, 420.0, "u");
+        assert!(planned.iter().all(|p| p.image == Some(1) && p.shape.is_none() && p.paint == Paint::Primary));
+        // Without the pictures, nothing is left.
+        assert!(sanitize(&raw, &[]).is_none());
+    }
+
+    #[test]
+    fn a_shader_alone_is_an_effect() {
+        let raw = serde_json::json!({ "id": "glow", "layers": [], "shader": { "code": "fn shade(uv: vec2f) -> vec4f {\r\n\u{1}return vec4f(0.0);\r}", "intensity": 9, "speed": -1 } });
+        let s = sanitize(&raw, &[]).unwrap();
+        let shader = s.shader.unwrap();
+        assert_eq!(shader.code, "fn shade(uv: vec2f) -> vec4f {\nreturn vec4f(0.0);\n}");
+        assert_eq!((shader.intensity, shader.speed), (1.0, 0.0));
+        let blank = serde_json::json!({ "id": "x", "layers": [], "shader": { "code": "  \n" } });
+        assert!(sanitize(&blank, &[]).is_none());
+        let big = serde_json::json!({ "id": "x", "layers": [], "shader": { "code": "a".repeat(MAX_EFFECT_SHADER_BYTES + 1) } });
+        assert!(sanitize(&big, &[]).is_none());
+        let plain = serde_json::json!({ "code": "fn shade(uv: vec2f) -> vec4f { return vec4f(0.0); }" });
+        assert_eq!(sanitize_shader(&plain).map(|s| (s.intensity, s.speed)), Some((1.0, 1.0)));
     }
 
     #[test]

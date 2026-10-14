@@ -327,7 +327,8 @@ message ProfileItem {
   string description = 5;
   // An effect's spec, as JSON in the format of docs/profile-effects.md,
   // checked by the instance, with the item's id (in lowercase), name and
-  // description. Empty for a decoration.
+  // description. It may hold a shader (WGSL) and layers of the item's own
+  // pictures. Empty for a decoration.
   string effect = 6;
   // A decoration's picture: an upload on this instance
   // (MEDIA_PURPOSE_DECORATION), square and see-through in the middle,
@@ -338,9 +339,21 @@ message ProfileItem {
   bool animated = 8;
   // Who added it.
   string creator_id = 9;
-  // The picture's size; a server's count in its attachment usage.
+  // The picture's size (an effect's, all its pictures'); a server's count
+  // in its attachment usage.
   int64 size = 10;
   google.protobuf.Timestamp created_at = 11;
+  // An effect's own pictures, which its layers name by their place in this
+  // list. Uploads on this instance (MEDIA_PURPOSE_DECORATION).
+  repeated ProfileItemPicture pictures = 12;
+}
+
+// One of an effect's pictures.
+message ProfileItemPicture {
+  string url = 1;
+  // A GIF that moves.
+  bool animated = 2;
+  int64 size = 3;
 }
 
 message Member {

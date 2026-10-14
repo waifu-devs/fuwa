@@ -12,10 +12,11 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/profile_item.proto.
  */
 export const file_fuwa_v1_profile_item: GenFile = /*@__PURE__*/
-  fileDesc("ChpmdXdhL3YxL3Byb2ZpbGVfaXRlbS5wcm90bxIHZnV3YS52MSKAAQoOTmV3UHJvZmlsZUl0ZW0SJgoEa2luZBgBIAEoDjIYLmZ1d2EudjEuUHJvZmlsZUl0ZW1LaW5kEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSDgoGZWZmZWN0GAQgASgJEhMKC3BpY3R1cmVfdXJsGAUgASgJInkKEVByb2ZpbGVJdGVtQ2hhbmdlEhEKBG5hbWUYASABKAlIAIgBARIYCgtkZXNjcmlwdGlvbhgCIAEoCUgBiAEBEhMKBmVmZmVjdBgDIAEoCUgCiAEBQgcKBV9uYW1lQg4KDF9kZXNjcmlwdGlvbkIJCgdfZWZmZWN0IiEKH0xpc3RJbnN0YW5jZVByb2ZpbGVJdGVtc1JlcXVlc3QiRwogTGlzdEluc3RhbmNlUHJvZmlsZUl0ZW1zUmVzcG9uc2USIwoFaXRlbXMYASADKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIkkKIENyZWF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0EiUKBGl0ZW0YASABKAsyFy5mdXdhLnYxLk5ld1Byb2ZpbGVJdGVtIkcKIUNyZWF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXNwb25zZRIiCgRpdGVtGAEgASgLMhQuZnV3YS52MS5Qcm9maWxlSXRlbSJfCiBVcGRhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVxdWVzdBIPCgdpdGVtX2lkGAEgASgJEioKBmNoYW5nZRgCIAEoCzIaLmZ1d2EudjEuUHJvZmlsZUl0ZW1DaGFuZ2UiRwohVXBkYXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlEiIKBGl0ZW0YASABKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIjMKIERlbGV0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0Eg8KB2l0ZW1faWQYASABKAkiIwohRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlIjIKHUxpc3RTZXJ2ZXJQcm9maWxlSXRlbXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJFCh5MaXN0U2VydmVyUHJvZmlsZUl0ZW1zUmVzcG9uc2USIwoFaXRlbXMYASADKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIloKHkNyZWF0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSJQoEaXRlbRgCIAEoCzIXLmZ1d2EudjEuTmV3UHJvZmlsZUl0ZW0iRQofQ3JlYXRlU2VydmVyUHJvZmlsZUl0ZW1SZXNwb25zZRIiCgRpdGVtGAEgASgLMhQuZnV3YS52MS5Qcm9maWxlSXRlbSJwCh5VcGRhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB2l0ZW1faWQYAiABKAkSKgoGY2hhbmdlGAMgASgLMhouZnV3YS52MS5Qcm9maWxlSXRlbUNoYW5nZSJFCh9VcGRhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlEiIKBGl0ZW0YASABKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIkQKHkRlbGV0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHaXRlbV9pZBgCIAEoCSIhCh9EZWxldGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlMpYHChJQcm9maWxlSXRlbVNlcnZpY2USbwoYTGlzdEluc3RhbmNlUHJvZmlsZUl0ZW1zEiguZnV3YS52MS5MaXN0SW5zdGFuY2VQcm9maWxlSXRlbXNSZXF1ZXN0GikuZnV3YS52MS5MaXN0SW5zdGFuY2VQcm9maWxlSXRlbXNSZXNwb25zZRJyChlDcmVhdGVJbnN0YW5jZVByb2ZpbGVJdGVtEikuZnV3YS52MS5DcmVhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVxdWVzdBoqLmZ1d2EudjEuQ3JlYXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlEnIKGVVwZGF0ZUluc3RhbmNlUHJvZmlsZUl0ZW0SKS5mdXdhLnYxLlVwZGF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0GiouZnV3YS52MS5VcGRhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVzcG9uc2UScgoZRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbRIpLmZ1d2EudjEuRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlcXVlc3QaKi5mdXdhLnYxLkRlbGV0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXNwb25zZRJpChZMaXN0U2VydmVyUHJvZmlsZUl0ZW1zEiYuZnV3YS52MS5MaXN0U2VydmVyUHJvZmlsZUl0ZW1zUmVxdWVzdBonLmZ1d2EudjEuTGlzdFNlcnZlclByb2ZpbGVJdGVtc1Jlc3BvbnNlEmwKF0NyZWF0ZVNlcnZlclByb2ZpbGVJdGVtEicuZnV3YS52MS5DcmVhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlcXVlc3QaKC5mdXdhLnYxLkNyZWF0ZVNlcnZlclByb2ZpbGVJdGVtUmVzcG9uc2USbAoXVXBkYXRlU2VydmVyUHJvZmlsZUl0ZW0SJy5mdXdhLnYxLlVwZGF0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBooLmZ1d2EudjEuVXBkYXRlU2VydmVyUHJvZmlsZUl0ZW1SZXNwb25zZRJsChdEZWxldGVTZXJ2ZXJQcm9maWxlSXRlbRInLmZ1d2EudjEuRGVsZXRlU2VydmVyUHJvZmlsZUl0ZW1SZXF1ZXN0GiguZnV3YS52MS5EZWxldGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
+  fileDesc("ChpmdXdhL3YxL3Byb2ZpbGVfaXRlbS5wcm90bxIHZnV3YS52MSKWAQoOTmV3UHJvZmlsZUl0ZW0SJgoEa2luZBgBIAEoDjIYLmZ1d2EudjEuUHJvZmlsZUl0ZW1LaW5kEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSDgoGZWZmZWN0GAQgASgJEhMKC3BpY3R1cmVfdXJsGAUgASgJEhQKDHBpY3R1cmVfdXJscxgGIAMoCSImChZQcm9maWxlSXRlbVBpY3R1cmVVcmxzEgwKBHVybHMYASADKAkirAEKEVByb2ZpbGVJdGVtQ2hhbmdlEhEKBG5hbWUYASABKAlIAIgBARIYCgtkZXNjcmlwdGlvbhgCIAEoCUgBiAEBEhMKBmVmZmVjdBgDIAEoCUgCiAEBEjEKCHBpY3R1cmVzGAQgASgLMh8uZnV3YS52MS5Qcm9maWxlSXRlbVBpY3R1cmVVcmxzQgcKBV9uYW1lQg4KDF9kZXNjcmlwdGlvbkIJCgdfZWZmZWN0IiEKH0xpc3RJbnN0YW5jZVByb2ZpbGVJdGVtc1JlcXVlc3QiRwogTGlzdEluc3RhbmNlUHJvZmlsZUl0ZW1zUmVzcG9uc2USIwoFaXRlbXMYASADKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIkkKIENyZWF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0EiUKBGl0ZW0YASABKAsyFy5mdXdhLnYxLk5ld1Byb2ZpbGVJdGVtIkcKIUNyZWF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXNwb25zZRIiCgRpdGVtGAEgASgLMhQuZnV3YS52MS5Qcm9maWxlSXRlbSJfCiBVcGRhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVxdWVzdBIPCgdpdGVtX2lkGAEgASgJEioKBmNoYW5nZRgCIAEoCzIaLmZ1d2EudjEuUHJvZmlsZUl0ZW1DaGFuZ2UiRwohVXBkYXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlEiIKBGl0ZW0YASABKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIjMKIERlbGV0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0Eg8KB2l0ZW1faWQYASABKAkiIwohRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlIjIKHUxpc3RTZXJ2ZXJQcm9maWxlSXRlbXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJFCh5MaXN0U2VydmVyUHJvZmlsZUl0ZW1zUmVzcG9uc2USIwoFaXRlbXMYASADKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIloKHkNyZWF0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSJQoEaXRlbRgCIAEoCzIXLmZ1d2EudjEuTmV3UHJvZmlsZUl0ZW0iRQofQ3JlYXRlU2VydmVyUHJvZmlsZUl0ZW1SZXNwb25zZRIiCgRpdGVtGAEgASgLMhQuZnV3YS52MS5Qcm9maWxlSXRlbSJwCh5VcGRhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB2l0ZW1faWQYAiABKAkSKgoGY2hhbmdlGAMgASgLMhouZnV3YS52MS5Qcm9maWxlSXRlbUNoYW5nZSJFCh9VcGRhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlEiIKBGl0ZW0YASABKAsyFC5mdXdhLnYxLlByb2ZpbGVJdGVtIkQKHkRlbGV0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHaXRlbV9pZBgCIAEoCSIhCh9EZWxldGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlMpYHChJQcm9maWxlSXRlbVNlcnZpY2USbwoYTGlzdEluc3RhbmNlUHJvZmlsZUl0ZW1zEiguZnV3YS52MS5MaXN0SW5zdGFuY2VQcm9maWxlSXRlbXNSZXF1ZXN0GikuZnV3YS52MS5MaXN0SW5zdGFuY2VQcm9maWxlSXRlbXNSZXNwb25zZRJyChlDcmVhdGVJbnN0YW5jZVByb2ZpbGVJdGVtEikuZnV3YS52MS5DcmVhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVxdWVzdBoqLmZ1d2EudjEuQ3JlYXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlc3BvbnNlEnIKGVVwZGF0ZUluc3RhbmNlUHJvZmlsZUl0ZW0SKS5mdXdhLnYxLlVwZGF0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXF1ZXN0GiouZnV3YS52MS5VcGRhdGVJbnN0YW5jZVByb2ZpbGVJdGVtUmVzcG9uc2UScgoZRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbRIpLmZ1d2EudjEuRGVsZXRlSW5zdGFuY2VQcm9maWxlSXRlbVJlcXVlc3QaKi5mdXdhLnYxLkRlbGV0ZUluc3RhbmNlUHJvZmlsZUl0ZW1SZXNwb25zZRJpChZMaXN0U2VydmVyUHJvZmlsZUl0ZW1zEiYuZnV3YS52MS5MaXN0U2VydmVyUHJvZmlsZUl0ZW1zUmVxdWVzdBonLmZ1d2EudjEuTGlzdFNlcnZlclByb2ZpbGVJdGVtc1Jlc3BvbnNlEmwKF0NyZWF0ZVNlcnZlclByb2ZpbGVJdGVtEicuZnV3YS52MS5DcmVhdGVTZXJ2ZXJQcm9maWxlSXRlbVJlcXVlc3QaKC5mdXdhLnYxLkNyZWF0ZVNlcnZlclByb2ZpbGVJdGVtUmVzcG9uc2USbAoXVXBkYXRlU2VydmVyUHJvZmlsZUl0ZW0SJy5mdXdhLnYxLlVwZGF0ZVNlcnZlclByb2ZpbGVJdGVtUmVxdWVzdBooLmZ1d2EudjEuVXBkYXRlU2VydmVyUHJvZmlsZUl0ZW1SZXNwb25zZRJsChdEZWxldGVTZXJ2ZXJQcm9maWxlSXRlbRInLmZ1d2EudjEuRGVsZXRlU2VydmVyUHJvZmlsZUl0ZW1SZXF1ZXN0GiguZnV3YS52MS5EZWxldGVTZXJ2ZXJQcm9maWxlSXRlbVJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
 
 /**
- * What a new item is. Exactly one of effect and picture_url, for its kind.
+ * What a new item is: an effect's spec (and any pictures it draws), or a
+ * decoration's picture_url.
  *
  * @generated from message fuwa.v1.NewProfileItem
  */
@@ -53,6 +54,15 @@ export type NewProfileItem = Message<"fuwa.v1.NewProfileItem"> & {
    * @generated from field: string picture_url = 5;
    */
   pictureUrl: string;
+
+  /**
+   * An effect's own pictures, which its layers draw by their place here
+   * ("image": 0 for the first): up to 8 `media.url`s of uploads of yours
+   * (MEDIA_PURPOSE_DECORATION, for the server when it's a server's).
+   *
+   * @generated from field: repeated string picture_urls = 6;
+   */
+  pictureUrls: string[];
 };
 
 /**
@@ -61,6 +71,25 @@ export type NewProfileItem = Message<"fuwa.v1.NewProfileItem"> & {
  */
 export const NewProfileItemSchema: GenMessage<NewProfileItem> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_profile_item, 0);
+
+/**
+ * An effect's pictures, all of them in order.
+ *
+ * @generated from message fuwa.v1.ProfileItemPictureUrls
+ */
+export type ProfileItemPictureUrls = Message<"fuwa.v1.ProfileItemPictureUrls"> & {
+  /**
+   * @generated from field: repeated string urls = 1;
+   */
+  urls: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.ProfileItemPictureUrls.
+ * Use `create(ProfileItemPictureUrlsSchema)` to create a new message.
+ */
+export const ProfileItemPictureUrlsSchema: GenMessage<ProfileItemPictureUrls> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_profile_item, 1);
 
 /**
  * What changes; unset fields stay. A decoration's picture can't change:
@@ -85,6 +114,14 @@ export type ProfileItemChange = Message<"fuwa.v1.ProfileItemChange"> & {
    * @generated from field: optional string effect = 3;
    */
   effect?: string | undefined;
+
+  /**
+   * Effects only: their pictures, as NewProfileItem.picture_urls. Ones
+   * left out are deleted; the spec is checked again against the new list.
+   *
+   * @generated from field: fuwa.v1.ProfileItemPictureUrls pictures = 4;
+   */
+  pictures?: ProfileItemPictureUrls | undefined;
 };
 
 /**
@@ -92,7 +129,7 @@ export type ProfileItemChange = Message<"fuwa.v1.ProfileItemChange"> & {
  * Use `create(ProfileItemChangeSchema)` to create a new message.
  */
 export const ProfileItemChangeSchema: GenMessage<ProfileItemChange> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 1);
+  messageDesc(file_fuwa_v1_profile_item, 2);
 
 /**
  * @generated from message fuwa.v1.ListInstanceProfileItemsRequest
@@ -105,7 +142,7 @@ export type ListInstanceProfileItemsRequest = Message<"fuwa.v1.ListInstanceProfi
  * Use `create(ListInstanceProfileItemsRequestSchema)` to create a new message.
  */
 export const ListInstanceProfileItemsRequestSchema: GenMessage<ListInstanceProfileItemsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 2);
+  messageDesc(file_fuwa_v1_profile_item, 3);
 
 /**
  * @generated from message fuwa.v1.ListInstanceProfileItemsResponse
@@ -122,7 +159,7 @@ export type ListInstanceProfileItemsResponse = Message<"fuwa.v1.ListInstanceProf
  * Use `create(ListInstanceProfileItemsResponseSchema)` to create a new message.
  */
 export const ListInstanceProfileItemsResponseSchema: GenMessage<ListInstanceProfileItemsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 3);
+  messageDesc(file_fuwa_v1_profile_item, 4);
 
 /**
  * @generated from message fuwa.v1.CreateInstanceProfileItemRequest
@@ -139,7 +176,7 @@ export type CreateInstanceProfileItemRequest = Message<"fuwa.v1.CreateInstancePr
  * Use `create(CreateInstanceProfileItemRequestSchema)` to create a new message.
  */
 export const CreateInstanceProfileItemRequestSchema: GenMessage<CreateInstanceProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 4);
+  messageDesc(file_fuwa_v1_profile_item, 5);
 
 /**
  * @generated from message fuwa.v1.CreateInstanceProfileItemResponse
@@ -156,7 +193,7 @@ export type CreateInstanceProfileItemResponse = Message<"fuwa.v1.CreateInstanceP
  * Use `create(CreateInstanceProfileItemResponseSchema)` to create a new message.
  */
 export const CreateInstanceProfileItemResponseSchema: GenMessage<CreateInstanceProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 5);
+  messageDesc(file_fuwa_v1_profile_item, 6);
 
 /**
  * @generated from message fuwa.v1.UpdateInstanceProfileItemRequest
@@ -178,7 +215,7 @@ export type UpdateInstanceProfileItemRequest = Message<"fuwa.v1.UpdateInstancePr
  * Use `create(UpdateInstanceProfileItemRequestSchema)` to create a new message.
  */
 export const UpdateInstanceProfileItemRequestSchema: GenMessage<UpdateInstanceProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 6);
+  messageDesc(file_fuwa_v1_profile_item, 7);
 
 /**
  * @generated from message fuwa.v1.UpdateInstanceProfileItemResponse
@@ -195,7 +232,7 @@ export type UpdateInstanceProfileItemResponse = Message<"fuwa.v1.UpdateInstanceP
  * Use `create(UpdateInstanceProfileItemResponseSchema)` to create a new message.
  */
 export const UpdateInstanceProfileItemResponseSchema: GenMessage<UpdateInstanceProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 7);
+  messageDesc(file_fuwa_v1_profile_item, 8);
 
 /**
  * @generated from message fuwa.v1.DeleteInstanceProfileItemRequest
@@ -212,7 +249,7 @@ export type DeleteInstanceProfileItemRequest = Message<"fuwa.v1.DeleteInstancePr
  * Use `create(DeleteInstanceProfileItemRequestSchema)` to create a new message.
  */
 export const DeleteInstanceProfileItemRequestSchema: GenMessage<DeleteInstanceProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 8);
+  messageDesc(file_fuwa_v1_profile_item, 9);
 
 /**
  * @generated from message fuwa.v1.DeleteInstanceProfileItemResponse
@@ -225,7 +262,7 @@ export type DeleteInstanceProfileItemResponse = Message<"fuwa.v1.DeleteInstanceP
  * Use `create(DeleteInstanceProfileItemResponseSchema)` to create a new message.
  */
 export const DeleteInstanceProfileItemResponseSchema: GenMessage<DeleteInstanceProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 9);
+  messageDesc(file_fuwa_v1_profile_item, 10);
 
 /**
  * @generated from message fuwa.v1.ListServerProfileItemsRequest
@@ -242,7 +279,7 @@ export type ListServerProfileItemsRequest = Message<"fuwa.v1.ListServerProfileIt
  * Use `create(ListServerProfileItemsRequestSchema)` to create a new message.
  */
 export const ListServerProfileItemsRequestSchema: GenMessage<ListServerProfileItemsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 10);
+  messageDesc(file_fuwa_v1_profile_item, 11);
 
 /**
  * @generated from message fuwa.v1.ListServerProfileItemsResponse
@@ -259,7 +296,7 @@ export type ListServerProfileItemsResponse = Message<"fuwa.v1.ListServerProfileI
  * Use `create(ListServerProfileItemsResponseSchema)` to create a new message.
  */
 export const ListServerProfileItemsResponseSchema: GenMessage<ListServerProfileItemsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 11);
+  messageDesc(file_fuwa_v1_profile_item, 12);
 
 /**
  * @generated from message fuwa.v1.CreateServerProfileItemRequest
@@ -281,7 +318,7 @@ export type CreateServerProfileItemRequest = Message<"fuwa.v1.CreateServerProfil
  * Use `create(CreateServerProfileItemRequestSchema)` to create a new message.
  */
 export const CreateServerProfileItemRequestSchema: GenMessage<CreateServerProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 12);
+  messageDesc(file_fuwa_v1_profile_item, 13);
 
 /**
  * @generated from message fuwa.v1.CreateServerProfileItemResponse
@@ -298,7 +335,7 @@ export type CreateServerProfileItemResponse = Message<"fuwa.v1.CreateServerProfi
  * Use `create(CreateServerProfileItemResponseSchema)` to create a new message.
  */
 export const CreateServerProfileItemResponseSchema: GenMessage<CreateServerProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 13);
+  messageDesc(file_fuwa_v1_profile_item, 14);
 
 /**
  * @generated from message fuwa.v1.UpdateServerProfileItemRequest
@@ -325,7 +362,7 @@ export type UpdateServerProfileItemRequest = Message<"fuwa.v1.UpdateServerProfil
  * Use `create(UpdateServerProfileItemRequestSchema)` to create a new message.
  */
 export const UpdateServerProfileItemRequestSchema: GenMessage<UpdateServerProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 14);
+  messageDesc(file_fuwa_v1_profile_item, 15);
 
 /**
  * @generated from message fuwa.v1.UpdateServerProfileItemResponse
@@ -342,7 +379,7 @@ export type UpdateServerProfileItemResponse = Message<"fuwa.v1.UpdateServerProfi
  * Use `create(UpdateServerProfileItemResponseSchema)` to create a new message.
  */
 export const UpdateServerProfileItemResponseSchema: GenMessage<UpdateServerProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 15);
+  messageDesc(file_fuwa_v1_profile_item, 16);
 
 /**
  * @generated from message fuwa.v1.DeleteServerProfileItemRequest
@@ -364,7 +401,7 @@ export type DeleteServerProfileItemRequest = Message<"fuwa.v1.DeleteServerProfil
  * Use `create(DeleteServerProfileItemRequestSchema)` to create a new message.
  */
 export const DeleteServerProfileItemRequestSchema: GenMessage<DeleteServerProfileItemRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 16);
+  messageDesc(file_fuwa_v1_profile_item, 17);
 
 /**
  * @generated from message fuwa.v1.DeleteServerProfileItemResponse
@@ -377,7 +414,7 @@ export type DeleteServerProfileItemResponse = Message<"fuwa.v1.DeleteServerProfi
  * Use `create(DeleteServerProfileItemResponseSchema)` to create a new message.
  */
 export const DeleteServerProfileItemResponseSchema: GenMessage<DeleteServerProfileItemResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_profile_item, 17);
+  messageDesc(file_fuwa_v1_profile_item, 18);
 
 /**
  * Profile effects and avatar decorations an instance or a server offers,

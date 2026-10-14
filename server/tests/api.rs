@@ -7630,6 +7630,122 @@ async fn server_profile_items_are_worn_in_that_server() {
 }
 
 #[tokio::test]
+async fn effects_carry_their_own_pictures_and_shaders() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let lounge = create_server(&mut c, &owner, "Lounge", true).await;
+    let usage = |c: &mut Clients| {
+        let mut servers = c.servers.clone();
+        let server_id = lounge.id.clone();
+        let owner = owner.clone();
+        async move {
+            servers
+                .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id }))
+                .await
+                .unwrap()
+                .into_inner()
+                .usage
+                .unwrap()
+        }
+    };
+    let leaf = upload(&mut c, &instance, &owner, pb::MediaPurpose::Decoration, png(64, 4)).await;
+    let moon = upload(&mut c, &instance, &owner, pb::MediaPurpose::Decoration, png(64, 5)).await;
+    let spec = serde_json::json!({
+        "shader": { "code": "fn shade(uv: vec2f) -> vec4f { return vec4f(fuwa.primary.rgb, uv.y * 0.4); }", "speed": 0.5 },
+        "layers": [
+            { "image": 1, "motion": "fall", "phase": "idle", "count": 4, "from": "top", "size": [20, 28], "duration": [4000, 6000] },
+        ],
+    })
+    .to_string();
+    let new = pb::NewProfileItem {
+        effect: spec.clone(),
+        picture_urls: vec![leaf.clone(), moon.clone()],
+        ..new_effect("Night")
+    };
+    let create = |item| pb::CreateServerProfileItemRequest { server_id: lounge.id.clone(), item: Some(item) };
+    // A layer naming a picture the effect doesn't have is refused.
+    let short = pb::NewProfileItem { picture_urls: vec![leaf.clone()], ..new.clone() };
+    let refused = c.profile_items.create_server_profile_item(authed(&owner, create(short))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    let night = c
+        .profile_items
+        .create_server_profile_item(authed(&owner, create(new)))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    assert_eq!(night.pictures.iter().map(|p| p.url.as_str()).collect::<Vec<_>>(), [leaf.as_str(), moon.as_str()]);
+    let stored: serde_json::Value = serde_json::from_str(&night.effect).unwrap();
+    assert_eq!(stored["shader"]["speed"], 0.5);
+    assert_eq!(stored["layers"][0]["image"], 1);
+    let counted = usage(&mut c).await;
+    assert_eq!(counted.attachment_bytes, night.size);
+    assert_eq!(night.size, night.pictures.iter().map(|p| p.size).sum::<i64>());
+
+    // Pictures change as a whole list: the one left out is deleted, a new one checked.
+    let star = upload(&mut c, &instance, &owner, pb::MediaPurpose::Decoration, png(64, 6)).await;
+    let change = pb::ProfileItemChange {
+        pictures: Some(pb::ProfileItemPictureUrls { urls: vec![star.clone(), moon.clone()] }),
+        ..Default::default()
+    };
+    let update = |change| pb::UpdateServerProfileItemRequest {
+        server_id: lounge.id.clone(),
+        item_id: night.id.clone(),
+        change: Some(change),
+    };
+    let changed = c
+        .profile_items
+        .update_server_profile_item(authed(&owner, update(change)))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    assert_eq!(changed.pictures[0].url, star);
+    assert_eq!(fetch(&instance, &leaf).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(fetch(&instance, &moon).await.0, reqwest::StatusCode::OK);
+    assert_eq!(usage(&mut c).await.attachment_bytes, changed.size);
+    // Fewer pictures than the layers name: the spec no longer fits, so nothing changes.
+    let fewer = pb::ProfileItemChange {
+        pictures: Some(pb::ProfileItemPictureUrls { urls: vec![star.clone()] }),
+        ..Default::default()
+    };
+    let refused = c.profile_items.update_server_profile_item(authed(&owner, update(fewer))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    assert_eq!(fetch(&instance, &moon).await.0, reqwest::StatusCode::OK);
+
+    // A shader reaching for more than its inputs is refused.
+    let bound = spec.replace("fn shade", "@group(0) @binding(2) var<uniform> x: f32;\\nfn shade");
+    let refused = c
+        .profile_items
+        .update_server_profile_item(authed(
+            &owner,
+            update(pb::ProfileItemChange { effect: Some(bound), ..Default::default() }),
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+
+    // Deleted: every picture goes, and its room with them.
+    c.profile_items
+        .delete_server_profile_item(authed(
+            &owner,
+            pb::DeleteServerProfileItemRequest { server_id: lounge.id.clone(), item_id: night.id.clone() },
+        ))
+        .await
+        .unwrap();
+    for url in [&star, &moon] {
+        assert_eq!(fetch(&instance, url).await.0, reqwest::StatusCode::NOT_FOUND);
+    }
+    let after = usage(&mut c).await;
+    assert_eq!((after.attachment_bytes, after.attachments), (0, counted.attachments - 2));
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn shared_preview_names_outside_providers() {
     use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
     let dir = tempfile::tempdir().unwrap();

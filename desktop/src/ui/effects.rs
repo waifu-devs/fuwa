@@ -40,9 +40,7 @@ const FRAME: Duration = Duration::from_millis(33);
 pub fn source(effect: Effect, shader: Option<&CustomShader>) -> Option<Source> {
     match (effect, shader) {
         (Effect::Custom, Some(s)) => {
-            let runs = gpu::gpu() != Gpu::Missing
-                && status::status(&shader_id(&s.code)).is_none_or(|st| matches!(st, ShaderStatus::Running { .. }));
-            if runs {
+            if shader_runs(&s.code) {
                 Some(Source::Custom(s.code.clone()))
             } else {
                 s.fallback.shader().then_some(Source::Effect(s.fallback))
@@ -142,6 +140,37 @@ static PICTURES: Mutex<Option<Pictures>> = Mutex::new(None);
 fn shaded(source: Source, intensity: u8, still: bool, time: f32, held: bool, p: &Palette) -> AnyElement {
     let rgba = |c: Rgba| [c.r, c.g, c.b, 1.0];
     let colors = [rgba(p.primary), rgba(p.glow), rgba(p.background), rgba(p.foreground)];
+    painted(source, colors, f32::from(intensity) / 100.0, still, time, held, Wake::Later)
+}
+
+/// How a layer whose frame is still being made asks to be drawn again.
+#[derive(Clone, Copy)]
+pub enum Wake {
+    /// One frame time from now (the backdrop, which runs its own clock).
+    Later,
+    /// On the next frame, for the view it's in (a profile effect's own view).
+    NextFrame,
+}
+
+/// Whether a custom shader may draw here: there's a GPU, and it hasn't been
+/// found broken, too slow or to stop the GPU.
+pub fn shader_runs(code: &str) -> bool {
+    gpu::gpu() != Gpu::Missing
+        && status::status(&shader_id(code)).is_none_or(|st| matches!(st, ShaderStatus::Running { .. }))
+}
+
+/// A shader's latest frame from `core::effects::gpu`, stretched over its
+/// parent: `colors` are the uniform's four (sRGB, 0 to 1), `intensity` 0 to
+/// 1, `time` in seconds. Shared by the backdrop and profile effects.
+pub fn painted(
+    source: Source,
+    colors: [[f32; 4]; 4],
+    intensity: f32,
+    still: bool,
+    time: f32,
+    held: bool,
+    wake: Wake,
+) -> AnyElement {
     // Only shaders that read the pointer are drawn again when it moves.
     let follows = matches!(&source, Source::Custom(code) if code.contains("pointer"));
     canvas(
@@ -155,13 +184,7 @@ fn shaded(source: Source, intensity: u8, still: bool, time: f32, held: bool, p: 
             let pixels = ((w * scale).round() as u32, (h * scale).round() as u32);
             let mouse = window.mouse_position();
             let pointer = [f32::from(mouse.x - bounds.origin.x) / w, f32::from(mouse.y - bounds.origin.y) / h];
-            let inputs = Inputs {
-                colors,
-                time,
-                intensity: f32::from(intensity) / 100.0,
-                pointer: follows.then_some(pointer),
-                still,
-            };
+            let inputs = Inputs { colors, time, intensity, pointer: follows.then_some(pointer), still };
             // Covered by a full-screen page: nothing new is drawn, the last frame stays.
             let key = if held { gpu::layer_key(&source, pixels) } else { gpu::request(&source, pixels, inputs) };
             let now = Instant::now();
@@ -209,7 +232,10 @@ fn shaded(source: Source, intensity: u8, still: bool, time: f32, held: bool, p: 
                 let _ = window.drop_image(image);
             }
             if gpu::waiting(key) {
-                again(window, cx);
+                match wake {
+                    Wake::Later => again(window, cx),
+                    Wake::NextFrame => window.request_animation_frame(),
+                }
             }
         },
     )
