@@ -13,7 +13,7 @@
 //! starts with a private-use mark, so every later step (spoilers, mentions,
 //! timestamps, search hits) treats it as code and leaves its insides alone,
 //! and the Markdown plugins in `ui/math.rs` draw the marked spans. A `$$` pair
-//! alone in its paragraph is a display formula, centered on its own line; one
+//! alone in its paragraph is a display formula, on a line of its own; one
 //! amid text is drawn inline in display style. Unpaired `$$` are escaped, so
 //! the parser never reads them as a block that runs to the end of the message.
 
