@@ -100,7 +100,7 @@ fn shown_to(account_id: &str, access: &Access, payload: &Payload) -> bool {
         Payload::ModCaseUpdated(_) | Payload::ModNoteAdded(_) | Payload::ModNoteDeleted(_) => {
             super::moderation::event_shown(access, payload)
         }
-        Payload::BalanceUpdated(_) | Payload::PurchaseMade(_) => {
+        Payload::BalanceUpdated(_) | Payload::PurchaseMade(_) | Payload::GachaPulled(_) => {
             super::economy::event_shown(account_id, access, payload)
         }
         payload => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),

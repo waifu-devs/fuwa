@@ -1,9 +1,10 @@
-import { CheckIcon, FlameIcon, GiftIcon, HistoryIcon, LoaderCircleIcon, SearchIcon, SendIcon, ShoppingBagIcon, StoreIcon, XIcon } from "lucide-react";
+import { CheckIcon, DicesIcon, FlameIcon, GiftIcon, HistoryIcon, LoaderCircleIcon, SearchIcon, SendIcon, ShoppingBagIcon, StoreIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useId, useMemo, useState, type FormEvent } from "react";
-import type { Balance, Currency, Member, ProfileItem, Role, ShopListing, User } from "@/gen/fuwa/v1/types_pb";
+import type { Balance, Currency, GachaBanner, Member, ProfileItem, Role, ShopListing, User } from "@/gen/fuwa/v1/types_pb";
 import { buy, claimDaily, closeShop, economyMessage, transfer, useEconomy, useShopView, type ShopTab } from "@/fuwa/economy";
 import { useAccess, useInstance, useMyMember } from "@/fuwa/hooks";
+import { Banners } from "@/components/economy/Gacha";
 import { Amount, CurrencyIcon, LedgerList, ListingVisual, listingName } from "@/components/economy/shared";
 import { UserAvatar } from "@/components/Icons";
 import { Count } from "@/components/motion";
@@ -16,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { T, useI18n } from "@/i18n/react";
 import { dailyOf, dailyRule, forSale, LISTING_CUSTOM, LISTING_ROLE, NOTE_MAX, num, owns, parseAmount, stockLeft } from "@/lib/economy";
+import { bannersWith, shownBanners } from "@/lib/gacha";
 import { displayName, formatLeft, isAgent, memberName, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
@@ -42,10 +44,16 @@ function ShopBody({ instanceKey, serverId, tab: initial }: { instanceKey: string
   const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const server = inst?.servers.find((s) => s.id === serverId);
-  const { currencies, shop, wallet } = useEconomy(instanceKey, serverId, true);
+  const { currencies, shop, wallet, banners, progress } = useEconomy(instanceKey, serverId, true);
   const [tab, setTab] = useState<ShopTab>(initial);
+  const now = useNow(60_000);
   const sendable = (currencies ?? []).filter((c) => c.transferable);
-  const shown = tab === "send" && !sendable.length ? "shop" : tab;
+  const pullable = shownBanners(
+    banners ?? [],
+    (currencies ?? []).map((c) => c.id),
+    now,
+  );
+  const shown = (tab === "send" && !sendable.length) || (tab === "gacha" && !pullable.length && banners !== null) ? "shop" : tab;
   const balanceOf = (id: string) => wallet?.balances.find((b) => b.currencyId === id);
   // A new entry in your wallet reads your history again.
   const version = wallet?.balances.map((b) => `${b.currencyId}:${b.amount}`).join(",") ?? "";
@@ -90,6 +98,7 @@ function ShopBody({ instanceKey, serverId, tab: initial }: { instanceKey: string
         className="self-start"
         options={[
           { value: "shop", label: t("chattools.economy.tab.shop"), icon: <ShoppingBagIcon className="size-4" /> },
+          ...(pullable.length ? [{ value: "gacha" as const, label: t("chattools.economy.tab.gacha"), icon: <DicesIcon className="size-4" /> }] : []),
           { value: "history", label: t("chattools.economy.tab.history"), icon: <HistoryIcon className="size-4" /> },
           ...(sendable.length ? [{ value: "send" as const, label: t("chattools.economy.tab.send"), icon: <SendIcon className="size-4" /> }] : []),
         ]}
@@ -97,7 +106,19 @@ function ShopBody({ instanceKey, serverId, tab: initial }: { instanceKey: string
 
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={shown} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-          {shown === "shop" && <Listings instanceKey={instanceKey} serverId={serverId} currencies={currencies ?? []} shop={shop} balanceOf={balanceOf} ownedItemIds={wallet?.ownedItemIds ?? []} />}
+          {shown === "shop" && (
+            <Listings
+              instanceKey={instanceKey}
+              serverId={serverId}
+              currencies={currencies ?? []}
+              shop={shop}
+              balanceOf={balanceOf}
+              ownedItemIds={wallet?.ownedItemIds ?? []}
+              banners={pullable}
+              onGacha={() => setTab("gacha")}
+            />
+          )}
+          {shown === "gacha" && <Banners instanceKey={instanceKey} serverId={serverId} currencies={currencies ?? []} banners={banners} progress={progress} shop={shop} balanceOf={balanceOf} />}
           {shown === "history" && (
             <LedgerList
               instanceKey={instanceKey}
@@ -194,6 +215,8 @@ function Listings({
   shop,
   balanceOf,
   ownedItemIds,
+  banners,
+  onGacha,
 }: {
   instanceKey: string;
   serverId: string;
@@ -201,6 +224,8 @@ function Listings({
   shop: ShopListing[] | null;
   balanceOf: (currencyId: string) => Balance | undefined;
   ownedItemIds: string[];
+  banners: GachaBanner[];
+  onGacha: () => void;
 }) {
   const { t } = useI18n();
   const inst = useInstance(instanceKey);
@@ -219,7 +244,8 @@ function Listings({
         ))}
       </div>
     );
-  const listed = forSale(shop, currencies);
+  // A gacha-only listing shows only while a banner it drops from does.
+  const listed = forSale(shop, currencies).filter((l) => !l.gachaOnly || bannersWith(banners, l.id).length);
   if (!listed.length)
     return (
       <div className="flex flex-col items-center gap-1 py-10 text-center">
@@ -247,6 +273,8 @@ function Listings({
             roles={roles}
             items={items}
             me={inst?.me}
+            banners={l.gachaOnly ? bannersWith(banners, l.id) : []}
+            onGacha={onGacha}
           />
         ))}
       </AnimatePresence>
@@ -266,6 +294,8 @@ function ListingCard({
   roles,
   items,
   me,
+  banners,
+  onGacha,
 }: {
   instanceKey: string;
   serverId: string;
@@ -278,6 +308,8 @@ function ListingCard({
   roles: Role[];
   items: ProfileItem[] | undefined;
   me: User | null | undefined;
+  banners: GachaBanner[];
+  onGacha: () => void;
 }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
@@ -290,7 +322,8 @@ function ListingCard({
   const short = balance < price;
   const name = listingName(listing, roles, items, t("chattools.economy.somethingFromShop"));
   const role = listing.kind === LISTING_ROLE ? roles.find((r) => r.id === listing.targetId) : undefined;
-  const why = owned ? null : soldOut ? t("chattools.economy.soldOut") : held ?? (short ? t("chattools.economy.notEnough", { currency: currency?.name ?? "" }) : null);
+  const gacha = listing.gachaOnly;
+  const why = owned || gacha ? null : soldOut ? t("chattools.economy.soldOut") : held ?? (short ? t("chattools.economy.notEnough", { currency: currency?.name ?? "" }) : null);
 
   async function go() {
     setBusy(true);
@@ -330,7 +363,13 @@ function ListingCard({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Amount instanceKey={instanceKey} currency={currency} value={price} className="rounded-full bg-muted px-2.5 py-0.5 text-sm" />
+        {gacha ? (
+          <span className="flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs font-extrabold text-violet-600 dark:text-violet-400">
+            <DicesIcon className="size-3.5" /> {t("chattools.economy.gacha.only")}
+          </span>
+        ) : (
+          <Amount instanceKey={instanceKey} currency={currency} value={price} className="rounded-full bg-muted px-2.5 py-0.5 text-sm" />
+        )}
         {left !== null && (
           <span className={cn("text-xs font-bold", soldOut ? "text-destructive" : "text-muted-foreground")}>
             {soldOut ? t("chattools.economy.soldOut") : <T k="chattools.economy.left" values={{ count: <Count value={left} /> }} count={left} />}
@@ -341,6 +380,10 @@ function ListingCard({
             <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
               <CheckIcon className="size-3.5" strokeWidth={3} /> {t("chattools.economy.owned")}
             </span>
+          ) : gacha ? (
+            <Button type="button" size="sm" variant="outline" className="rounded-xl font-bold" title={banners.map((b) => b.name).join(", ")} onClick={onGacha}>
+              <DicesIcon /> {t("chattools.economy.gacha.tryLuck")}
+            </Button>
           ) : !asking ? (
             <Button type="button" size="sm" className="rounded-xl font-bold" disabled={!!why} title={why ?? undefined} onClick={() => setAsking(true)}>
               <AnimatePresence mode="popLayout" initial={false}>
@@ -354,6 +397,7 @@ function ListingCard({
         </span>
       </div>
       {why && !owned && <p className="text-xs text-muted-foreground">{why}</p>}
+      {gacha && !!banners.length && <p className="text-xs text-muted-foreground">{t("chattools.economy.gacha.dropsFrom", { banners: banners.map((b) => b.name).join(", ") })}</p>}
       <AnimatePresence mode="popLayout" initial={false}>
         {asking && (
           <motion.div key="ask" {...SLIDE_IN} transition={SPRING} className="flex flex-wrap items-center gap-2 rounded-xl bg-primary/10 p-2 text-sm">

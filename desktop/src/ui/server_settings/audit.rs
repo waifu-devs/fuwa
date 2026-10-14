@@ -92,6 +92,9 @@ pub(crate) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'stati
         A::ShopListingUpdate => ("store", sky, "listingUpdate"),
         A::ShopListingDelete => ("store", red, "listingDelete"),
         A::CurrencyGrant => ("hand-coins", amber, "currencyGrant"),
+        A::GachaBannerCreate => ("dices", green, "bannerCreate"),
+        A::GachaBannerUpdate => ("dices", violet, "bannerUpdate"),
+        A::GachaBannerDelete => ("trash", red, "bannerDelete"),
     };
     (glyph, bg, fg, key)
 }

@@ -56,7 +56,8 @@ pub const MOST_GAMES: usize = 50;
 pub const GAME_NAME_MAX: usize = 128;
 
 /// Ledger kinds, as the finance page filters them.
-pub const KINDS: [LedgerKind; 4] = [LedgerKind::Earn, LedgerKind::Grant, LedgerKind::Transfer, LedgerKind::Purchase];
+pub const KINDS: [LedgerKind; 5] =
+    [LedgerKind::Earn, LedgerKind::Grant, LedgerKind::Transfer, LedgerKind::Purchase, LedgerKind::Gacha];
 
 /// What one server's economy holds for you.
 #[derive(Debug, Clone, Default)]
@@ -69,6 +70,10 @@ pub struct Economy {
     pub balances: HashMap<String, pb::Balance>,
     /// The server's profile items you bought.
     pub owned_items: HashSet<String>,
+    /// Its gacha banners, in order: managers get unavailable ones too.
+    pub banners: Vec<pb::GachaBanner>,
+    /// Your pulls on each banner, by its id.
+    pub progress: HashMap<String, pb::GachaProgress>,
 }
 
 impl Economy {
@@ -85,10 +90,111 @@ impl Economy {
         self.balances.get(currency_id).map_or(0, |b| b.amount)
     }
 
-    /// The listings members see: the available ones in a currency still here.
-    pub fn for_sale(&self) -> Vec<&pb::ShopListing> {
-        self.listings.iter().filter(|l| l.available && self.currency(&l.currency_id).is_some()).collect()
+    /// The listings members see: the available ones in a currency still here,
+    /// gacha-only ones while a banner members see can drop them.
+    pub fn for_sale(&self, now: i64) -> Vec<&pb::ShopListing> {
+        let banners = self.shown_banners(now);
+        self.listings
+            .iter()
+            .filter(|l| l.available && self.currency(&l.currency_id).is_some())
+            .filter(|l| !l.gacha_only || banners.iter().any(|b| b.prizes.iter().any(|p| p.listing_id == l.id)))
+            .collect()
     }
+
+    pub fn banner(&self, id: &str) -> Option<&pb::GachaBanner> {
+        self.banners.iter().find(|b| b.id == id)
+    }
+
+    /// The banners members see: available ones in a currency still here, not closed.
+    pub fn shown_banners(&self, now: i64) -> Vec<&pb::GachaBanner> {
+        self.banners
+            .iter()
+            .filter(|b| b.available && self.currency(&b.currency_id).is_some() && openness(b, now) != Openness::Closed)
+            .collect()
+    }
+
+    /// The banners a listing drops from.
+    pub fn banners_with(&self, listing_id: &str, now: i64) -> Vec<&pb::GachaBanner> {
+        self.shown_banners(now).into_iter().filter(|b| b.prizes.iter().any(|p| p.listing_id == listing_id)).collect()
+    }
+}
+
+/// Whether a banner can be pulled on now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Openness {
+    /// Open; until when (0 for no end).
+    Open(i64),
+    /// Opens at this moment.
+    Soon(i64),
+    Closed,
+}
+
+pub fn openness(b: &pb::GachaBanner, now: i64) -> Openness {
+    let (starts, ends) = (ms(b.starts_at.as_ref()), ms(b.ends_at.as_ref()));
+    if starts > now {
+        Openness::Soon(starts)
+    } else if ends != 0 && ends <= now {
+        Openness::Closed
+    } else {
+        Openness::Open(ends)
+    }
+}
+
+/// What `count` pulls cost (1, or the multi-pull), or None for a count the banner doesn't offer.
+pub fn pull_cost(b: &pb::GachaBanner, count: i32) -> Option<i64> {
+    if count == 1 {
+        Some(b.pull_price)
+    } else if b.multi_pull >= 2 && count == b.multi_pull {
+        Some(if b.multi_pull_price > 0 { b.multi_pull_price } else { b.pull_price.saturating_mul(i64::from(count)) })
+    } else {
+        None
+    }
+}
+
+/// How many pulls until pity's guarantee (1 is the next), or None without pity.
+pub fn pity_in(b: &pb::GachaBanner, progress: Option<&pb::GachaProgress>) -> Option<i32> {
+    (b.pity_pulls > 0).then(|| (b.pity_pulls - progress.map_or(0, |p| p.since_pity)).max(1))
+}
+
+/// How many more pulls you may make, or None for no limit.
+pub fn pulls_left(b: &pb::GachaBanner, progress: Option<&pb::GachaProgress>) -> Option<i32> {
+    (b.max_pulls > 0).then(|| (b.max_pulls - progress.map_or(0, |p| p.pulls)).max(0))
+}
+
+/// A rate or chance in millionths as a percentage, with up to four decimals: "3%", "0.6%".
+pub fn percent(rate: i32) -> String {
+    let text = format!("{:.4}", f64::from(rate) / 10_000.0);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text}%")
+}
+
+/// The colors tiers without their own take, by rarity (0 rarest), as the web picks them.
+pub const TIER_COLORS: [u32; 5] = [0xf59e0b, 0xa855f7, 0x3b82f6, 0x10b981, 0x64748b];
+
+pub fn tier_color(tier: &pb::GachaTier, index: usize) -> u32 {
+    tier.color.map_or(TIER_COLORS[index.min(TIER_COLORS.len() - 1)], |c| c as u32)
+}
+
+/// What a line of history is about: the listing bought, or the banner pulled on.
+pub fn entry_subject(
+    e: &Economy,
+    entry: &pb::LedgerEntry,
+    roles: &[pb::Role],
+    items: &[pb::ProfileItem],
+) -> Option<String> {
+    if entry.kind == LedgerKind::Gacha as i32 {
+        return e.banner(&entry.banner_id).map(|b| b.name.clone());
+    }
+    e.listing(&entry.listing_id).map(|l| listing_name(l, roles, items))
+}
+
+/// What a prize is called: its listing's name or its currency amount.
+pub fn prize_name(e: &Economy, prize: &pb::GachaPrize, roles: &[pb::Role], items: &[pb::ProfileItem]) -> String {
+    if !prize.listing_id.is_empty() {
+        return e.listing(&prize.listing_id).map(|l| listing_name(l, roles, items)).unwrap_or_default();
+    }
+    let currency = e.currency(&prize.currency_id).map(|c| c.name.as_str()).unwrap_or_default();
+    format!("{} {currency}", amount_text(prize.amount))
 }
 
 /// An action's name in the translations.
@@ -201,6 +307,7 @@ pub fn kind_key(kind: LedgerKind) -> &'static str {
         LedgerKind::Grant => "desktop.economy.kind.grant",
         LedgerKind::Transfer => "desktop.economy.kind.transfer",
         LedgerKind::Purchase => "desktop.economy.kind.purchase",
+        LedgerKind::Gacha => "desktop.economy.kind.gacha",
     }
 }
 
@@ -223,6 +330,7 @@ pub fn currencies_updated(e: &mut Economy, list: &[pb::Currency]) {
     let ids: HashSet<&str> = list.iter().map(|c| c.id.as_str()).collect();
     e.balances.retain(|id, _| ids.contains(id.as_str()));
     e.listings.retain(|l| ids.contains(l.currency_id.as_str()));
+    e.banners.retain(|b| ids.contains(b.currency_id.as_str()));
     e.currencies = list;
 }
 
@@ -239,6 +347,24 @@ pub fn listing_updated(e: &mut Economy, listing: &pb::ShopListing) {
         None => e.listings.push(listing.clone()),
     }
     sort_listings(&mut e.listings);
+}
+
+fn sort_banners(list: &mut [pb::GachaBanner]) {
+    list.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+}
+
+pub fn banners_updated(e: &mut Economy, list: &[pb::GachaBanner]) {
+    let mut list = list.to_vec();
+    sort_banners(&mut list);
+    e.banners = list;
+}
+
+/// Your progress on a banner, unless what's kept is further along.
+pub fn progress_updated(e: &mut Economy, progress: &pb::GachaProgress) {
+    if e.progress.get(&progress.banner_id).is_some_and(|had| had.pulls > progress.pulls) {
+        return;
+    }
+    e.progress.insert(progress.banner_id.clone(), progress.clone());
 }
 
 /// One of your balances as it is now. Only yours are ever kept here.
@@ -391,6 +517,8 @@ pub fn owned(e: &Economy, l: &pb::ShopListing, role_ids: &[String]) -> bool {
 pub fn cannot_buy(e: &Economy, l: &pb::ShopListing, role_ids: &[String]) -> Option<&'static str> {
     if owned(e, l, role_ids) {
         Some("desktop.economy.shop.owned")
+    } else if l.gacha_only {
+        Some("desktop.economy.shop.gachaOnly")
     } else if l.stock == Some(0) {
         Some("desktop.economy.shop.soldOut")
     } else if e.amount(&l.currency_id) < l.price {
@@ -586,6 +714,8 @@ pub struct ListingDraft {
     pub stock: Option<i64>,
     pub position: i32,
     pub available: bool,
+    /// Won only from gacha banners, never bought.
+    pub gacha_only: bool,
 }
 
 impl ListingDraft {
@@ -600,6 +730,7 @@ impl ListingDraft {
             stock: None,
             position,
             available: true,
+            gacha_only: false,
         }
     }
 
@@ -614,6 +745,7 @@ impl ListingDraft {
             stock: l.stock,
             position: l.position,
             available: l.available,
+            gacha_only: l.gacha_only,
         }
     }
 
@@ -654,6 +786,7 @@ impl ListingDraft {
             stock: self.stock,
             position: self.position,
             available: self.available,
+            gacha_only: self.gacha_only,
         }
     }
 
@@ -666,6 +799,7 @@ impl ListingDraft {
             unlimited: self.stock.is_none() && before.stock.is_some(),
             position: (self.position != before.position).then_some(self.position),
             available: (self.available != before.available).then_some(self.available),
+            gacha_only: (self.gacha_only != before.gacha_only).then_some(self.gacha_only),
         }
     }
 
@@ -676,6 +810,7 @@ impl ListingDraft {
             + usize::from(self.stock != before.stock)
             + usize::from(self.position != before.position)
             + usize::from(self.available != before.available)
+            + usize::from(self.gacha_only != before.gacha_only)
     }
 }
 
@@ -746,6 +881,58 @@ impl Core {
             Err(e) if e.code == Code::Unimplemented => {}
             Err(_) => {}
         }
+        self.load_banners(key, server_id).await;
+    }
+
+    /// A server's gacha banners and your pulls on them, on instances with the `gacha` feature.
+    pub async fn load_banners(&self, key: &str, server_id: &str) {
+        if !self.shared.read(|s| s.instance(key).is_some_and(|i| i.has("gacha"))) {
+            return;
+        }
+        let Some(api) = self.api(key) else { return };
+        let req = pb::ListGachaBannersRequest { server_id: server_id.into() };
+        let Ok(res) = rpc!(api.economy(), list_gacha_banners(req)).await else { return };
+        self.shared.instance(key, |i| {
+            if !i.servers.iter().any(|s| s.id == server_id) {
+                return;
+            }
+            let e = economy_of(i, server_id);
+            banners_updated(e, &res.banners);
+            e.progress = res.progress.iter().map(|p| (p.banner_id.clone(), p.clone())).collect();
+        });
+    }
+
+    /// Pulls on a banner once or its multi-pull, at the price shown.
+    pub async fn pull(
+        &self,
+        key: &str,
+        server_id: &str,
+        banner_id: &str,
+        count: i32,
+        price: i64,
+    ) -> Result<pb::PullResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.economy(),
+            pull(pb::PullRequest {
+                server_id: server_id.into(),
+                banner_id: banner_id.into(),
+                count,
+                expected_price: price,
+            })
+        )
+        .await?;
+        self.shared.instance(key, |i| {
+            let me = me_of(i);
+            let e = economy_of(i, server_id);
+            for b in &res.balances {
+                balance_updated(e, b, &me);
+            }
+            if let Some(p) = &res.progress {
+                progress_updated(e, p);
+            }
+        });
+        Ok(res)
     }
 
     /// Reads your wallet in a server again (a grant to a role, a purchase).
@@ -1071,6 +1258,83 @@ mod tests {
             available: true,
             ..Default::default()
         }
+    }
+
+    fn banner() -> pb::GachaBanner {
+        pb::GachaBanner {
+            id: "b".into(),
+            currency_id: "a".into(),
+            pull_price: 100,
+            multi_pull: 10,
+            multi_pull_price: 900,
+            tiers: vec![
+                pb::GachaTier { id: "t1".into(), name: "Gold".into(), color: None, rate: 30_000 },
+                pb::GachaTier { id: "t2".into(), name: "Plain".into(), color: Some(0x123456), rate: 970_000 },
+            ],
+            prizes: vec![pb::GachaPrize {
+                id: "p".into(),
+                tier_id: "t1".into(),
+                listing_id: "l1".into(),
+                ..Default::default()
+            }],
+            pity_pulls: 50,
+            pity_tier_id: "t1".into(),
+            available: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn banners_price_pity_limits_and_rates() {
+        let b = banner();
+        assert_eq!(pull_cost(&b, 1), Some(100));
+        assert_eq!(pull_cost(&b, 10), Some(900));
+        assert_eq!(pull_cost(&pb::GachaBanner { multi_pull_price: 0, ..b.clone() }, 10), Some(1000));
+        assert_eq!(pull_cost(&b, 5), None);
+        let progress = pb::GachaProgress { banner_id: "b".into(), pulls: 70, since_pity: 20 };
+        assert_eq!(pity_in(&b, None), Some(50));
+        assert_eq!(pity_in(&b, Some(&progress)), Some(30));
+        assert_eq!(pity_in(&pb::GachaBanner { pity_pulls: 0, ..b.clone() }, Some(&progress)), None);
+        assert_eq!(pulls_left(&b, Some(&progress)), None);
+        assert_eq!(pulls_left(&pb::GachaBanner { max_pulls: 60, ..b.clone() }, Some(&progress)), Some(0));
+        assert_eq!(pulls_left(&pb::GachaBanner { max_pulls: 100, ..b.clone() }, Some(&progress)), Some(30));
+        assert_eq!(percent(1_000_000), "100%");
+        assert_eq!(percent(30_000), "3%");
+        assert_eq!(percent(6_000), "0.6%");
+        assert_eq!(percent(1), "0.0001%");
+        assert_eq!(tier_color(&b.tiers[0], 0), TIER_COLORS[0]);
+        assert_eq!(tier_color(&b.tiers[1], 1), 0x123456);
+        assert_eq!(tier_color(&b.tiers[0], 99), TIER_COLORS[4]);
+    }
+
+    #[test]
+    fn banners_show_while_open_and_gacha_only_listings_with_them() {
+        let now = 1_000_000_000_000;
+        let at = |ms: i64| Some(prost_types::Timestamp { seconds: ms / 1000, nanos: 0 });
+        assert_eq!(openness(&banner(), now), Openness::Open(0));
+        assert_eq!(
+            openness(&pb::GachaBanner { starts_at: at(now + 5000), ..banner() }, now),
+            Openness::Soon(now + 5000)
+        );
+        assert_eq!(openness(&pb::GachaBanner { ends_at: at(now), ..banner() }, now), Openness::Closed);
+        let mut e = Economy::default();
+        currencies_updated(&mut e, &[currency("a", 0)]);
+        let mut only = listing("l1", "a", Kind::Custom, "", 5);
+        only.gacha_only = true;
+        shop_updated(&mut e, &[only.clone(), listing("l2", "a", Kind::Custom, "", 5)]);
+        assert_eq!(e.for_sale(now).len(), 1);
+        assert_eq!(cannot_buy(&e, &only, &[]), Some("desktop.economy.shop.gachaOnly"));
+        banners_updated(&mut e, &[banner(), pb::GachaBanner { id: "c".into(), available: false, ..banner() }]);
+        assert_eq!(e.shown_banners(now).len(), 1);
+        assert_eq!(e.for_sale(now).len(), 2);
+        assert_eq!(e.banners_with("l1", now).len(), 1);
+        // A banner in a currency that goes, goes with it.
+        currencies_updated(&mut e, &[]);
+        assert!(e.banners.is_empty());
+        // Progress never goes back.
+        progress_updated(&mut e, &pb::GachaProgress { banner_id: "b".into(), pulls: 5, since_pity: 5 });
+        progress_updated(&mut e, &pb::GachaProgress { banner_id: "b".into(), pulls: 3, since_pity: 3 });
+        assert_eq!(e.progress["b"].pulls, 5);
     }
 
     #[test]

@@ -568,6 +568,7 @@ async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::m
             | pb::MediaPurpose::Avatar
             | pb::MediaPurpose::Attachment
             | pb::MediaPurpose::Decoration
+            | pb::MediaPurpose::ShopArt
     );
     if !row.stored || !row.used || !purpose || row.server_id.as_deref() != Some(server_id) {
         return Err(Error::FailedPrecondition("that picture isn't the server's".into()));

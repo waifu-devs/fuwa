@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Balance, Currency, CurrencyAction, EarnRule, LedgerEntry, LedgerKind, ShopListing, ShopListingKind, User } from "./types_pb";
+import type { Balance, Currency, CurrencyAction, EarnRule, GachaBanner, GachaProgress, GachaPull, LedgerEntry, LedgerKind, ShopListing, ShopListingKind, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/economy.proto.
  */
 export const file_fuwa_v1_economy: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL2Vjb25vbXkucHJvdG8SB2Z1d2EudjEiKgoVTGlzdEN1cnJlbmNpZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI/ChZMaXN0Q3VycmVuY2llc1Jlc3BvbnNlEiUKCmN1cnJlbmNpZXMYASADKAsyES5mdXdhLnYxLkN1cnJlbmN5IiQKD0xpc3RTaG9wUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoQTGlzdFNob3BSZXNwb25zZRImCghsaXN0aW5ncxgBIAMoCzIULmZ1d2EudjEuU2hvcExpc3RpbmciNgoQR2V0V2FsbGV0UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCSJPChFHZXRXYWxsZXRSZXNwb25zZRIiCghiYWxhbmNlcxgBIAMoCzIQLmZ1d2EudjEuQmFsYW5jZRIWCg5vd25lZF9pdGVtX2lkcxgCIAMoCSKSAQoRTGlzdExlZGdlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2N1cnJlbmN5X2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSIgoFa2luZHMYBCADKA4yEy5mdXdhLnYxLkxlZGdlcktpbmQSEQoJYmVmb3JlX2lkGAUgASgJEg0KBWxpbWl0GAYgASgFImsKEkxpc3RMZWRnZXJSZXNwb25zZRIlCgdlbnRyaWVzGAEgAygLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIQCghoYXNfbW9yZRgCIAEoCBIcCgV1c2VycxgDIAMoCzINLmZ1d2EudjEuVXNlciI7ChFDbGFpbURhaWx5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkiXAoSQ2xhaW1EYWlseVJlc3BvbnNlEiMKBWVudHJ5GAEgASgLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIhCgdiYWxhbmNlGAIgASgLMhAuZnV3YS52MS5CYWxhbmNlImgKD1RyYW5zZmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkSDwoHdXNlcl9pZBgDIAEoCRIOCgZhbW91bnQYBCABKAMSDAoEbm90ZRgFIAEoCSJaChBUcmFuc2ZlclJlc3BvbnNlEiMKBWVudHJ5GAEgASgLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIhCgdiYWxhbmNlGAIgASgLMhAuZnV3YS52MS5CYWxhbmNlIksKCkJ1eVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmxpc3RpbmdfaWQYAiABKAkSFgoOZXhwZWN0ZWRfcHJpY2UYAyABKAMifAoLQnV5UmVzcG9uc2USIwoFZW50cnkYASABKAsyFC5mdXdhLnYxLkxlZGdlckVudHJ5EiEKB2JhbGFuY2UYAiABKAsyEC5mdXdhLnYxLkJhbGFuY2USJQoHbGlzdGluZxgDIAEoCzIULmZ1d2EudjEuU2hvcExpc3RpbmciswIKDkN1cnJlbmN5Q2hhbmdlEhEKBG5hbWUYASABKAlIAIgBARIXCgppY29uX2Vtb2ppGAIgASgJSAGIAQESGgoNaWNvbl9lbW9qaV9pZBgDIAEoCUgCiAEBEhgKC2Rlc2NyaXB0aW9uGAQgASgJSAOIAQESGQoMdHJhbnNmZXJhYmxlGAUgASgISASIAQESFQoIcG9zaXRpb24YBiABKAVIBYgBARIUCgxyZXBsYWNlX2Vhcm4YByABKAgSHwoEZWFybhgIIAMoCzIRLmZ1d2EudjEuRWFyblJ1bGVCBwoFX25hbWVCDQoLX2ljb25fZW1vamlCEAoOX2ljb25fZW1vamlfaWRCDgoMX2Rlc2NyaXB0aW9uQg8KDV90cmFuc2ZlcmFibGVCCwoJX3Bvc2l0aW9uIlUKFUNyZWF0ZUN1cnJlbmN5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKQoIY3VycmVuY3kYAiABKAsyFy5mdXdhLnYxLkN1cnJlbmN5Q2hhbmdlIj0KFkNyZWF0ZUN1cnJlbmN5UmVzcG9uc2USIwoIY3VycmVuY3kYASABKAsyES5mdXdhLnYxLkN1cnJlbmN5ImgKFVVwZGF0ZUN1cnJlbmN5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkSJwoGY2hhbmdlGAMgASgLMhcuZnV3YS52MS5DdXJyZW5jeUNoYW5nZSI9ChZVcGRhdGVDdXJyZW5jeVJlc3BvbnNlEiMKCGN1cnJlbmN5GAEgASgLMhEuZnV3YS52MS5DdXJyZW5jeSI/ChVEZWxldGVDdXJyZW5jeVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2N1cnJlbmN5X2lkGAIgASgJIhgKFkRlbGV0ZUN1cnJlbmN5UmVzcG9uc2Ui1QEKDk5ld1Nob3BMaXN0aW5nEhMKC2N1cnJlbmN5X2lkGAEgASgJEiYKBGtpbmQYAiABKA4yGC5mdXdhLnYxLlNob3BMaXN0aW5nS2luZBIRCgl0YXJnZXRfaWQYAyABKAkSDAoEbmFtZRgEIAEoCRITCgtkZXNjcmlwdGlvbhgFIAEoCRINCgVwcmljZRgGIAEoAxISCgVzdG9jaxgHIAEoA0gAiAEBEhAKCHBvc2l0aW9uGAggASgFEhEKCWF2YWlsYWJsZRgJIAEoCEIICgZfc3RvY2si8gEKEVNob3BMaXN0aW5nQ2hhbmdlEhEKBG5hbWUYASABKAlIAIgBARIYCgtkZXNjcmlwdGlvbhgCIAEoCUgBiAEBEhIKBXByaWNlGAMgASgDSAKIAQESEgoFc3RvY2sYBCABKANIA4gBARIRCgl1bmxpbWl0ZWQYBSABKAgSFQoIcG9zaXRpb24YBiABKAVIBIgBARIWCglhdmFpbGFibGUYByABKAhIBYgBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCAoGX3ByaWNlQggKBl9zdG9ja0ILCglfcG9zaXRpb25CDAoKX2F2YWlsYWJsZSJXChhDcmVhdGVTaG9wTGlzdGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEigKB2xpc3RpbmcYAiABKAsyFy5mdXdhLnYxLk5ld1Nob3BMaXN0aW5nIkIKGUNyZWF0ZVNob3BMaXN0aW5nUmVzcG9uc2USJQoHbGlzdGluZxgBIAEoCzIULmZ1d2EudjEuU2hvcExpc3RpbmcibQoYVXBkYXRlU2hvcExpc3RpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpsaXN0aW5nX2lkGAIgASgJEioKBmNoYW5nZRgDIAEoCzIaLmZ1d2EudjEuU2hvcExpc3RpbmdDaGFuZ2UiQgoZVXBkYXRlU2hvcExpc3RpbmdSZXNwb25zZRIlCgdsaXN0aW5nGAEgASgLMhQuZnV3YS52MS5TaG9wTGlzdGluZyJBChhEZWxldGVTaG9wTGlzdGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmxpc3RpbmdfaWQYAiABKAkiGwoZRGVsZXRlU2hvcExpc3RpbmdSZXNwb25zZSJRChlHZXRFY29ub215T3ZlcnZpZXdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtjdXJyZW5jeV9pZBgCIAEoCRIMCgRkYXlzGAMgASgFIkgKGkdldEVjb25vbXlPdmVydmlld1Jlc3BvbnNlEioKCG92ZXJ2aWV3GAEgASgLMhguZnV3YS52MS5FY29ub215T3ZlcnZpZXciswMKD0Vjb25vbXlPdmVydmlldxITCgtjdXJyZW5jeV9pZBgBIAEoCRITCgtjaXJjdWxhdGluZxgCIAEoAxIPCgdob2xkZXJzGAMgASgFEg4KBmVhcm5lZBgEIAEoAxIPCgdncmFudGVkGAUgASgDEg0KBXRha2VuGAYgASgDEg0KBXNwZW50GAcgASgDEhMKC3RyYW5zZmVycmVkGAggASgDEhEKCXB1cmNoYXNlcxgJIAEoAxIuChBlYXJuZWRfYnlfYWN0aW9uGAogAygLMhQuZnV3YS52MS5BY3Rpb25Ub3RhbBIpCgt0b3BfaG9sZGVycxgLIAMoCzIULmZ1d2EudjEuUGVyc29uVG90YWwSKgoMdG9wX3NwZW5kZXJzGAwgAygLMhQuZnV3YS52MS5QZXJzb25Ub3RhbBIpCgt0b3BfZWFybmVycxgNIAMoCzIULmZ1d2EudjEuUGVyc29uVG90YWwSKwoMdG9wX2xpc3RpbmdzGA4gAygLMhUuZnV3YS52MS5MaXN0aW5nVG90YWwSHwoEZGF5cxgPIAMoCzIRLmZ1d2EudjEuRGF5VG90YWwiRgoLQWN0aW9uVG90YWwSJwoGYWN0aW9uGAEgASgOMhcuZnV3YS52MS5DdXJyZW5jeUFjdGlvbhIOCgZhbW91bnQYAiABKAMiLgoLUGVyc29uVG90YWwSDwoHdXNlcl9pZBgBIAEoCRIOCgZhbW91bnQYAiABKAMiQQoMTGlzdGluZ1RvdGFsEhIKCmxpc3RpbmdfaWQYASABKAkSDQoFY291bnQYAiABKAMSDgoGYW1vdW50GAMgASgDImMKCERheVRvdGFsEicKA2RheRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGZWFybmVkGAIgASgDEg8KB2dyYW50ZWQYAyABKAMSDQoFc3BlbnQYBCABKAMieAoMR3JhbnRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtjdXJyZW5jeV9pZBgCIAEoCRIPCgd1c2VyX2lkGAMgASgJEg8KB3JvbGVfaWQYBCABKAkSDgoGYW1vdW50GAUgASgDEg4KBnJlYXNvbhgGIAEoCSIuCg1HcmFudFJlc3BvbnNlEg4KBnBlb3BsZRgBIAEoBRINCgV0b3RhbBgCIAEoAzKNCQoORWNvbm9teVNlcnZpY2USUQoOTGlzdEN1cnJlbmNpZXMSHi5mdXdhLnYxLkxpc3RDdXJyZW5jaWVzUmVxdWVzdBofLmZ1d2EudjEuTGlzdEN1cnJlbmNpZXNSZXNwb25zZRI/CghMaXN0U2hvcBIYLmZ1d2EudjEuTGlzdFNob3BSZXF1ZXN0GhkuZnV3YS52MS5MaXN0U2hvcFJlc3BvbnNlEkIKCUdldFdhbGxldBIZLmZ1d2EudjEuR2V0V2FsbGV0UmVxdWVzdBoaLmZ1d2EudjEuR2V0V2FsbGV0UmVzcG9uc2USRQoKTGlzdExlZGdlchIaLmZ1d2EudjEuTGlzdExlZGdlclJlcXVlc3QaGy5mdXdhLnYxLkxpc3RMZWRnZXJSZXNwb25zZRJFCgpDbGFpbURhaWx5EhouZnV3YS52MS5DbGFpbURhaWx5UmVxdWVzdBobLmZ1d2EudjEuQ2xhaW1EYWlseVJlc3BvbnNlEj8KCFRyYW5zZmVyEhguZnV3YS52MS5UcmFuc2ZlclJlcXVlc3QaGS5mdXdhLnYxLlRyYW5zZmVyUmVzcG9uc2USMAoDQnV5EhMuZnV3YS52MS5CdXlSZXF1ZXN0GhQuZnV3YS52MS5CdXlSZXNwb25zZRJRCg5DcmVhdGVDdXJyZW5jeRIeLmZ1d2EudjEuQ3JlYXRlQ3VycmVuY3lSZXF1ZXN0Gh8uZnV3YS52MS5DcmVhdGVDdXJyZW5jeVJlc3BvbnNlElEKDlVwZGF0ZUN1cnJlbmN5Eh4uZnV3YS52MS5VcGRhdGVDdXJyZW5jeVJlcXVlc3QaHy5mdXdhLnYxLlVwZGF0ZUN1cnJlbmN5UmVzcG9uc2USUQoORGVsZXRlQ3VycmVuY3kSHi5mdXdhLnYxLkRlbGV0ZUN1cnJlbmN5UmVxdWVzdBofLmZ1d2EudjEuRGVsZXRlQ3VycmVuY3lSZXNwb25zZRJaChFDcmVhdGVTaG9wTGlzdGluZxIhLmZ1d2EudjEuQ3JlYXRlU2hvcExpc3RpbmdSZXF1ZXN0GiIuZnV3YS52MS5DcmVhdGVTaG9wTGlzdGluZ1Jlc3BvbnNlEloKEVVwZGF0ZVNob3BMaXN0aW5nEiEuZnV3YS52MS5VcGRhdGVTaG9wTGlzdGluZ1JlcXVlc3QaIi5mdXdhLnYxLlVwZGF0ZVNob3BMaXN0aW5nUmVzcG9uc2USWgoRRGVsZXRlU2hvcExpc3RpbmcSIS5mdXdhLnYxLkRlbGV0ZVNob3BMaXN0aW5nUmVxdWVzdBoiLmZ1d2EudjEuRGVsZXRlU2hvcExpc3RpbmdSZXNwb25zZRJdChJHZXRFY29ub215T3ZlcnZpZXcSIi5mdXdhLnYxLkdldEVjb25vbXlPdmVydmlld1JlcXVlc3QaIy5mdXdhLnYxLkdldEVjb25vbXlPdmVydmlld1Jlc3BvbnNlEjYKBUdyYW50EhUuZnV3YS52MS5HcmFudFJlcXVlc3QaFi5mdXdhLnYxLkdyYW50UmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChVmdXdhL3YxL2Vjb25vbXkucHJvdG8SB2Z1d2EudjEiKgoVTGlzdEN1cnJlbmNpZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI/ChZMaXN0Q3VycmVuY2llc1Jlc3BvbnNlEiUKCmN1cnJlbmNpZXMYASADKAsyES5mdXdhLnYxLkN1cnJlbmN5IiQKD0xpc3RTaG9wUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoQTGlzdFNob3BSZXNwb25zZRImCghsaXN0aW5ncxgBIAMoCzIULmZ1d2EudjEuU2hvcExpc3RpbmciNgoQR2V0V2FsbGV0UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCSJPChFHZXRXYWxsZXRSZXNwb25zZRIiCghiYWxhbmNlcxgBIAMoCzIQLmZ1d2EudjEuQmFsYW5jZRIWCg5vd25lZF9pdGVtX2lkcxgCIAMoCSKSAQoRTGlzdExlZGdlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2N1cnJlbmN5X2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSIgoFa2luZHMYBCADKA4yEy5mdXdhLnYxLkxlZGdlcktpbmQSEQoJYmVmb3JlX2lkGAUgASgJEg0KBWxpbWl0GAYgASgFImsKEkxpc3RMZWRnZXJSZXNwb25zZRIlCgdlbnRyaWVzGAEgAygLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIQCghoYXNfbW9yZRgCIAEoCBIcCgV1c2VycxgDIAMoCzINLmZ1d2EudjEuVXNlciI7ChFDbGFpbURhaWx5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkiXAoSQ2xhaW1EYWlseVJlc3BvbnNlEiMKBWVudHJ5GAEgASgLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIhCgdiYWxhbmNlGAIgASgLMhAuZnV3YS52MS5CYWxhbmNlImgKD1RyYW5zZmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkSDwoHdXNlcl9pZBgDIAEoCRIOCgZhbW91bnQYBCABKAMSDAoEbm90ZRgFIAEoCSJaChBUcmFuc2ZlclJlc3BvbnNlEiMKBWVudHJ5GAEgASgLMhQuZnV3YS52MS5MZWRnZXJFbnRyeRIhCgdiYWxhbmNlGAIgASgLMhAuZnV3YS52MS5CYWxhbmNlIksKCkJ1eVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmxpc3RpbmdfaWQYAiABKAkSFgoOZXhwZWN0ZWRfcHJpY2UYAyABKAMifAoLQnV5UmVzcG9uc2USIwoFZW50cnkYASABKAsyFC5mdXdhLnYxLkxlZGdlckVudHJ5EiEKB2JhbGFuY2UYAiABKAsyEC5mdXdhLnYxLkJhbGFuY2USJQoHbGlzdGluZxgDIAEoCzIULmZ1d2EudjEuU2hvcExpc3RpbmciswIKDkN1cnJlbmN5Q2hhbmdlEhEKBG5hbWUYASABKAlIAIgBARIXCgppY29uX2Vtb2ppGAIgASgJSAGIAQESGgoNaWNvbl9lbW9qaV9pZBgDIAEoCUgCiAEBEhgKC2Rlc2NyaXB0aW9uGAQgASgJSAOIAQESGQoMdHJhbnNmZXJhYmxlGAUgASgISASIAQESFQoIcG9zaXRpb24YBiABKAVIBYgBARIUCgxyZXBsYWNlX2Vhcm4YByABKAgSHwoEZWFybhgIIAMoCzIRLmZ1d2EudjEuRWFyblJ1bGVCBwoFX25hbWVCDQoLX2ljb25fZW1vamlCEAoOX2ljb25fZW1vamlfaWRCDgoMX2Rlc2NyaXB0aW9uQg8KDV90cmFuc2ZlcmFibGVCCwoJX3Bvc2l0aW9uIlUKFUNyZWF0ZUN1cnJlbmN5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKQoIY3VycmVuY3kYAiABKAsyFy5mdXdhLnYxLkN1cnJlbmN5Q2hhbmdlIj0KFkNyZWF0ZUN1cnJlbmN5UmVzcG9uc2USIwoIY3VycmVuY3kYASABKAsyES5mdXdhLnYxLkN1cnJlbmN5ImgKFVVwZGF0ZUN1cnJlbmN5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLY3VycmVuY3lfaWQYAiABKAkSJwoGY2hhbmdlGAMgASgLMhcuZnV3YS52MS5DdXJyZW5jeUNoYW5nZSI9ChZVcGRhdGVDdXJyZW5jeVJlc3BvbnNlEiMKCGN1cnJlbmN5GAEgASgLMhEuZnV3YS52MS5DdXJyZW5jeSI/ChVEZWxldGVDdXJyZW5jeVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2N1cnJlbmN5X2lkGAIgASgJIhgKFkRlbGV0ZUN1cnJlbmN5UmVzcG9uc2Ui6QEKDk5ld1Nob3BMaXN0aW5nEhMKC2N1cnJlbmN5X2lkGAEgASgJEiYKBGtpbmQYAiABKA4yGC5mdXdhLnYxLlNob3BMaXN0aW5nS2luZBIRCgl0YXJnZXRfaWQYAyABKAkSDAoEbmFtZRgEIAEoCRITCgtkZXNjcmlwdGlvbhgFIAEoCRINCgVwcmljZRgGIAEoAxISCgVzdG9jaxgHIAEoA0gAiAEBEhAKCHBvc2l0aW9uGAggASgFEhEKCWF2YWlsYWJsZRgJIAEoCBISCgpnYWNoYV9vbmx5GAogASgIQggKBl9zdG9jayKaAgoRU2hvcExpc3RpbmdDaGFuZ2USEQoEbmFtZRgBIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAIgASgJSAGIAQESEgoFcHJpY2UYAyABKANIAogBARISCgVzdG9jaxgEIAEoA0gDiAEBEhEKCXVubGltaXRlZBgFIAEoCBIVCghwb3NpdGlvbhgGIAEoBUgEiAEBEhYKCWF2YWlsYWJsZRgHIAEoCEgFiAEBEhcKCmdhY2hhX29ubHkYCCABKAhIBogBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCAoGX3ByaWNlQggKBl9zdG9ja0ILCglfcG9zaXRpb25CDAoKX2F2YWlsYWJsZUINCgtfZ2FjaGFfb25seSJXChhDcmVhdGVTaG9wTGlzdGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEigKB2xpc3RpbmcYAiABKAsyFy5mdXdhLnYxLk5ld1Nob3BMaXN0aW5nIkIKGUNyZWF0ZVNob3BMaXN0aW5nUmVzcG9uc2USJQoHbGlzdGluZxgBIAEoCzIULmZ1d2EudjEuU2hvcExpc3RpbmcibQoYVXBkYXRlU2hvcExpc3RpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpsaXN0aW5nX2lkGAIgASgJEioKBmNoYW5nZRgDIAEoCzIaLmZ1d2EudjEuU2hvcExpc3RpbmdDaGFuZ2UiQgoZVXBkYXRlU2hvcExpc3RpbmdSZXNwb25zZRIlCgdsaXN0aW5nGAEgASgLMhQuZnV3YS52MS5TaG9wTGlzdGluZyJBChhEZWxldGVTaG9wTGlzdGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmxpc3RpbmdfaWQYAiABKAkiGwoZRGVsZXRlU2hvcExpc3RpbmdSZXNwb25zZSJRChlHZXRFY29ub215T3ZlcnZpZXdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtjdXJyZW5jeV9pZBgCIAEoCRIMCgRkYXlzGAMgASgFIkgKGkdldEVjb25vbXlPdmVydmlld1Jlc3BvbnNlEioKCG92ZXJ2aWV3GAEgASgLMhguZnV3YS52MS5FY29ub215T3ZlcnZpZXci8QMKD0Vjb25vbXlPdmVydmlldxITCgtjdXJyZW5jeV9pZBgBIAEoCRITCgtjaXJjdWxhdGluZxgCIAEoAxIPCgdob2xkZXJzGAMgASgFEg4KBmVhcm5lZBgEIAEoAxIPCgdncmFudGVkGAUgASgDEg0KBXRha2VuGAYgASgDEg0KBXNwZW50GAcgASgDEhMKC3RyYW5zZmVycmVkGAggASgDEhEKCXB1cmNoYXNlcxgJIAEoAxIuChBlYXJuZWRfYnlfYWN0aW9uGAogAygLMhQuZnV3YS52MS5BY3Rpb25Ub3RhbBIpCgt0b3BfaG9sZGVycxgLIAMoCzIULmZ1d2EudjEuUGVyc29uVG90YWwSKgoMdG9wX3NwZW5kZXJzGAwgAygLMhQuZnV3YS52MS5QZXJzb25Ub3RhbBIpCgt0b3BfZWFybmVycxgNIAMoCzIULmZ1d2EudjEuUGVyc29uVG90YWwSKwoMdG9wX2xpc3RpbmdzGA4gAygLMhUuZnV3YS52MS5MaXN0aW5nVG90YWwSHwoEZGF5cxgPIAMoCzIRLmZ1d2EudjEuRGF5VG90YWwSEwoLZ2FjaGFfc3BlbnQYECABKAMSEwoLZ2FjaGFfZHJhd3MYESABKAMSEgoKZ2FjaGFfcGFpZBgSIAEoAyJGCgtBY3Rpb25Ub3RhbBInCgZhY3Rpb24YASABKA4yFy5mdXdhLnYxLkN1cnJlbmN5QWN0aW9uEg4KBmFtb3VudBgCIAEoAyIuCgtQZXJzb25Ub3RhbBIPCgd1c2VyX2lkGAEgASgJEg4KBmFtb3VudBgCIAEoAyJBCgxMaXN0aW5nVG90YWwSEgoKbGlzdGluZ19pZBgBIAEoCRINCgVjb3VudBgCIAEoAxIOCgZhbW91bnQYAyABKAMiYwoIRGF5VG90YWwSJwoDZGF5GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIOCgZlYXJuZWQYAiABKAMSDwoHZ3JhbnRlZBgDIAEoAxINCgVzcGVudBgEIAEoAyJ4CgxHcmFudFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2N1cnJlbmN5X2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSDwoHcm9sZV9pZBgEIAEoCRIOCgZhbW91bnQYBSABKAMSDgoGcmVhc29uGAYgASgJIi4KDUdyYW50UmVzcG9uc2USDgoGcGVvcGxlGAEgASgFEg0KBXRvdGFsGAIgASgDIiwKF0xpc3RHYWNoYUJhbm5lcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJrChhMaXN0R2FjaGFCYW5uZXJzUmVzcG9uc2USJQoHYmFubmVycxgBIAMoCzIULmZ1d2EudjEuR2FjaGFCYW5uZXISKAoIcHJvZ3Jlc3MYAiADKAsyFi5mdXdhLnYxLkdhY2hhUHJvZ3Jlc3MiWgoLUHVsbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhEKCWJhbm5lcl9pZBgCIAEoCRINCgVjb3VudBgDIAEoBRIWCg5leHBlY3RlZF9wcmljZRgEIAEoAyJ+CgxQdWxsUmVzcG9uc2USIAoEcHVsbBgBIAEoCzISLmZ1d2EudjEuR2FjaGFQdWxsEigKCHByb2dyZXNzGAIgASgLMhYuZnV3YS52MS5HYWNoYVByb2dyZXNzEiIKCGJhbGFuY2VzGAMgAygLMhAuZnV3YS52MS5CYWxhbmNlInAKFUxpc3RHYWNoYVB1bGxzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoJYmFubmVyX2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEQoJYmVmb3JlX2lkGAQgASgJEg0KBWxpbWl0GAUgASgFImsKFkxpc3RHYWNoYVB1bGxzUmVzcG9uc2USIQoFcHVsbHMYASADKAsyEi5mdXdhLnYxLkdhY2hhUHVsbBIQCghoYXNfbW9yZRgCIAEoCBIcCgV1c2VycxgDIAMoCzINLmZ1d2EudjEuVXNlciJTChhDcmVhdGVHYWNoYUJhbm5lclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEiQKBmJhbm5lchgCIAEoCzIULmZ1d2EudjEuR2FjaGFCYW5uZXIiQQoZQ3JlYXRlR2FjaGFCYW5uZXJSZXNwb25zZRIkCgZiYW5uZXIYASABKAsyFC5mdXdhLnYxLkdhY2hhQmFubmVyIlMKGFVwZGF0ZUdhY2hhQmFubmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSJAoGYmFubmVyGAIgASgLMhQuZnV3YS52MS5HYWNoYUJhbm5lciJBChlVcGRhdGVHYWNoYUJhbm5lclJlc3BvbnNlEiQKBmJhbm5lchgBIAEoCzIULmZ1d2EudjEuR2FjaGFCYW5uZXIiQAoYRGVsZXRlR2FjaGFCYW5uZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIRCgliYW5uZXJfaWQYAiABKAkiGwoZRGVsZXRlR2FjaGFCYW5uZXJSZXNwb25zZTKCDQoORWNvbm9teVNlcnZpY2USUQoOTGlzdEN1cnJlbmNpZXMSHi5mdXdhLnYxLkxpc3RDdXJyZW5jaWVzUmVxdWVzdBofLmZ1d2EudjEuTGlzdEN1cnJlbmNpZXNSZXNwb25zZRI/CghMaXN0U2hvcBIYLmZ1d2EudjEuTGlzdFNob3BSZXF1ZXN0GhkuZnV3YS52MS5MaXN0U2hvcFJlc3BvbnNlEkIKCUdldFdhbGxldBIZLmZ1d2EudjEuR2V0V2FsbGV0UmVxdWVzdBoaLmZ1d2EudjEuR2V0V2FsbGV0UmVzcG9uc2USRQoKTGlzdExlZGdlchIaLmZ1d2EudjEuTGlzdExlZGdlclJlcXVlc3QaGy5mdXdhLnYxLkxpc3RMZWRnZXJSZXNwb25zZRJFCgpDbGFpbURhaWx5EhouZnV3YS52MS5DbGFpbURhaWx5UmVxdWVzdBobLmZ1d2EudjEuQ2xhaW1EYWlseVJlc3BvbnNlEj8KCFRyYW5zZmVyEhguZnV3YS52MS5UcmFuc2ZlclJlcXVlc3QaGS5mdXdhLnYxLlRyYW5zZmVyUmVzcG9uc2USMAoDQnV5EhMuZnV3YS52MS5CdXlSZXF1ZXN0GhQuZnV3YS52MS5CdXlSZXNwb25zZRJXChBMaXN0R2FjaGFCYW5uZXJzEiAuZnV3YS52MS5MaXN0R2FjaGFCYW5uZXJzUmVxdWVzdBohLmZ1d2EudjEuTGlzdEdhY2hhQmFubmVyc1Jlc3BvbnNlEjMKBFB1bGwSFC5mdXdhLnYxLlB1bGxSZXF1ZXN0GhUuZnV3YS52MS5QdWxsUmVzcG9uc2USUQoOTGlzdEdhY2hhUHVsbHMSHi5mdXdhLnYxLkxpc3RHYWNoYVB1bGxzUmVxdWVzdBofLmZ1d2EudjEuTGlzdEdhY2hhUHVsbHNSZXNwb25zZRJRCg5DcmVhdGVDdXJyZW5jeRIeLmZ1d2EudjEuQ3JlYXRlQ3VycmVuY3lSZXF1ZXN0Gh8uZnV3YS52MS5DcmVhdGVDdXJyZW5jeVJlc3BvbnNlElEKDlVwZGF0ZUN1cnJlbmN5Eh4uZnV3YS52MS5VcGRhdGVDdXJyZW5jeVJlcXVlc3QaHy5mdXdhLnYxLlVwZGF0ZUN1cnJlbmN5UmVzcG9uc2USUQoORGVsZXRlQ3VycmVuY3kSHi5mdXdhLnYxLkRlbGV0ZUN1cnJlbmN5UmVxdWVzdBofLmZ1d2EudjEuRGVsZXRlQ3VycmVuY3lSZXNwb25zZRJaChFDcmVhdGVTaG9wTGlzdGluZxIhLmZ1d2EudjEuQ3JlYXRlU2hvcExpc3RpbmdSZXF1ZXN0GiIuZnV3YS52MS5DcmVhdGVTaG9wTGlzdGluZ1Jlc3BvbnNlEloKEVVwZGF0ZVNob3BMaXN0aW5nEiEuZnV3YS52MS5VcGRhdGVTaG9wTGlzdGluZ1JlcXVlc3QaIi5mdXdhLnYxLlVwZGF0ZVNob3BMaXN0aW5nUmVzcG9uc2USWgoRRGVsZXRlU2hvcExpc3RpbmcSIS5mdXdhLnYxLkRlbGV0ZVNob3BMaXN0aW5nUmVxdWVzdBoiLmZ1d2EudjEuRGVsZXRlU2hvcExpc3RpbmdSZXNwb25zZRJdChJHZXRFY29ub215T3ZlcnZpZXcSIi5mdXdhLnYxLkdldEVjb25vbXlPdmVydmlld1JlcXVlc3QaIy5mdXdhLnYxLkdldEVjb25vbXlPdmVydmlld1Jlc3BvbnNlEloKEUNyZWF0ZUdhY2hhQmFubmVyEiEuZnV3YS52MS5DcmVhdGVHYWNoYUJhbm5lclJlcXVlc3QaIi5mdXdhLnYxLkNyZWF0ZUdhY2hhQmFubmVyUmVzcG9uc2USWgoRVXBkYXRlR2FjaGFCYW5uZXISIS5mdXdhLnYxLlVwZGF0ZUdhY2hhQmFubmVyUmVxdWVzdBoiLmZ1d2EudjEuVXBkYXRlR2FjaGFCYW5uZXJSZXNwb25zZRJaChFEZWxldGVHYWNoYUJhbm5lchIhLmZ1d2EudjEuRGVsZXRlR2FjaGFCYW5uZXJSZXF1ZXN0GiIuZnV3YS52MS5EZWxldGVHYWNoYUJhbm5lclJlc3BvbnNlEjYKBUdyYW50EhUuZnV3YS52MS5HcmFudFJlcXVlc3QaFi5mdXdhLnYxLkdyYW50UmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.ListCurrenciesRequest
@@ -604,6 +604,11 @@ export type NewShopListing = Message<"fuwa.v1.NewShopListing"> & {
    * @generated from field: bool available = 9;
    */
   available: boolean;
+
+  /**
+   * @generated from field: bool gacha_only = 10;
+   */
+  gachaOnly: boolean;
 };
 
 /**
@@ -656,6 +661,11 @@ export type ShopListingChange = Message<"fuwa.v1.ShopListingChange"> & {
    * @generated from field: optional bool available = 7;
    */
   available?: boolean | undefined;
+
+  /**
+   * @generated from field: optional bool gacha_only = 8;
+   */
+  gachaOnly?: boolean | undefined;
 };
 
 /**
@@ -917,11 +927,30 @@ export type EconomyOverview = Message<"fuwa.v1.EconomyOverview"> & {
   topListings: ListingTotal[];
 
   /**
-   * Every day of the period, oldest first, by UTC day.
+   * Every day of the period, oldest first, by UTC day (spent includes
+   * gacha pulls).
    *
    * @generated from field: repeated fuwa.v1.DayTotal days = 15;
    */
   days: DayTotal[];
+
+  /**
+   * Gacha over the period: spent on pulls, how many draws, and what came
+   * back as currency prizes and refunds.
+   *
+   * @generated from field: int64 gacha_spent = 16;
+   */
+  gachaSpent: bigint;
+
+  /**
+   * @generated from field: int64 gacha_draws = 17;
+   */
+  gachaDraws: bigint;
+
+  /**
+   * @generated from field: int64 gacha_paid = 18;
+   */
+  gachaPaid: bigint;
 };
 
 /**
@@ -1110,6 +1139,301 @@ export const GrantResponseSchema: GenMessage<GrantResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_economy, 37);
 
 /**
+ * @generated from message fuwa.v1.ListGachaBannersRequest
+ */
+export type ListGachaBannersRequest = Message<"fuwa.v1.ListGachaBannersRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListGachaBannersRequest.
+ * Use `create(ListGachaBannersRequestSchema)` to create a new message.
+ */
+export const ListGachaBannersRequestSchema: GenMessage<ListGachaBannersRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 38);
+
+/**
+ * @generated from message fuwa.v1.ListGachaBannersResponse
+ */
+export type ListGachaBannersResponse = Message<"fuwa.v1.ListGachaBannersResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.GachaBanner banners = 1;
+   */
+  banners: GachaBanner[];
+
+  /**
+   * Yours, on the banners you've pulled on.
+   *
+   * @generated from field: repeated fuwa.v1.GachaProgress progress = 2;
+   */
+  progress: GachaProgress[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListGachaBannersResponse.
+ * Use `create(ListGachaBannersResponseSchema)` to create a new message.
+ */
+export const ListGachaBannersResponseSchema: GenMessage<ListGachaBannersResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 39);
+
+/**
+ * @generated from message fuwa.v1.PullRequest
+ */
+export type PullRequest = Message<"fuwa.v1.PullRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string banner_id = 2;
+   */
+  bannerId: string;
+
+  /**
+   * 1, or the banner's multi_pull.
+   *
+   * @generated from field: int32 count = 3;
+   */
+  count: number;
+
+  /**
+   * The price the app showed for that many: refused if it changed since.
+   *
+   * @generated from field: int64 expected_price = 4;
+   */
+  expectedPrice: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.PullRequest.
+ * Use `create(PullRequestSchema)` to create a new message.
+ */
+export const PullRequestSchema: GenMessage<PullRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 40);
+
+/**
+ * @generated from message fuwa.v1.PullResponse
+ */
+export type PullResponse = Message<"fuwa.v1.PullResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.GachaPull pull = 1;
+   */
+  pull?: GachaPull | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.GachaProgress progress = 2;
+   */
+  progress?: GachaProgress | undefined;
+
+  /**
+   * Your balances that moved: what paid, and any currency won or given back.
+   *
+   * @generated from field: repeated fuwa.v1.Balance balances = 3;
+   */
+  balances: Balance[];
+};
+
+/**
+ * Describes the message fuwa.v1.PullResponse.
+ * Use `create(PullResponseSchema)` to create a new message.
+ */
+export const PullResponseSchema: GenMessage<PullResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 41);
+
+/**
+ * @generated from message fuwa.v1.ListGachaPullsRequest
+ */
+export type ListGachaPullsRequest = Message<"fuwa.v1.ListGachaPullsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * Empty for every banner.
+   *
+   * @generated from field: string banner_id = 2;
+   */
+  bannerId: string;
+
+  /**
+   * Empty for yours; "*" for everyone's (MANAGE_ECONOMY).
+   *
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+
+  /**
+   * Pulls older than this one, for the next page.
+   *
+   * @generated from field: string before_id = 4;
+   */
+  beforeId: string;
+
+  /**
+   * 1 to 100; 50 when unset.
+   *
+   * @generated from field: int32 limit = 5;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message fuwa.v1.ListGachaPullsRequest.
+ * Use `create(ListGachaPullsRequestSchema)` to create a new message.
+ */
+export const ListGachaPullsRequestSchema: GenMessage<ListGachaPullsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 42);
+
+/**
+ * @generated from message fuwa.v1.ListGachaPullsResponse
+ */
+export type ListGachaPullsResponse = Message<"fuwa.v1.ListGachaPullsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.GachaPull pulls = 1;
+   */
+  pulls: GachaPull[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
+
+  /**
+   * Everyone who pulled, as the server last saw them.
+   *
+   * @generated from field: repeated fuwa.v1.User users = 3;
+   */
+  users: User[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListGachaPullsResponse.
+ * Use `create(ListGachaPullsResponseSchema)` to create a new message.
+ */
+export const ListGachaPullsResponseSchema: GenMessage<ListGachaPullsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 43);
+
+/**
+ * @generated from message fuwa.v1.CreateGachaBannerRequest
+ */
+export type CreateGachaBannerRequest = Message<"fuwa.v1.CreateGachaBannerRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * Its id, server_id and created_at are ignored.
+   *
+   * @generated from field: fuwa.v1.GachaBanner banner = 2;
+   */
+  banner?: GachaBanner | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.CreateGachaBannerRequest.
+ * Use `create(CreateGachaBannerRequestSchema)` to create a new message.
+ */
+export const CreateGachaBannerRequestSchema: GenMessage<CreateGachaBannerRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 44);
+
+/**
+ * @generated from message fuwa.v1.CreateGachaBannerResponse
+ */
+export type CreateGachaBannerResponse = Message<"fuwa.v1.CreateGachaBannerResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.GachaBanner banner = 1;
+   */
+  banner?: GachaBanner | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.CreateGachaBannerResponse.
+ * Use `create(CreateGachaBannerResponseSchema)` to create a new message.
+ */
+export const CreateGachaBannerResponseSchema: GenMessage<CreateGachaBannerResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 45);
+
+/**
+ * @generated from message fuwa.v1.UpdateGachaBannerRequest
+ */
+export type UpdateGachaBannerRequest = Message<"fuwa.v1.UpdateGachaBannerRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: fuwa.v1.GachaBanner banner = 2;
+   */
+  banner?: GachaBanner | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateGachaBannerRequest.
+ * Use `create(UpdateGachaBannerRequestSchema)` to create a new message.
+ */
+export const UpdateGachaBannerRequestSchema: GenMessage<UpdateGachaBannerRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 46);
+
+/**
+ * @generated from message fuwa.v1.UpdateGachaBannerResponse
+ */
+export type UpdateGachaBannerResponse = Message<"fuwa.v1.UpdateGachaBannerResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.GachaBanner banner = 1;
+   */
+  banner?: GachaBanner | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateGachaBannerResponse.
+ * Use `create(UpdateGachaBannerResponseSchema)` to create a new message.
+ */
+export const UpdateGachaBannerResponseSchema: GenMessage<UpdateGachaBannerResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 47);
+
+/**
+ * @generated from message fuwa.v1.DeleteGachaBannerRequest
+ */
+export type DeleteGachaBannerRequest = Message<"fuwa.v1.DeleteGachaBannerRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string banner_id = 2;
+   */
+  bannerId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteGachaBannerRequest.
+ * Use `create(DeleteGachaBannerRequestSchema)` to create a new message.
+ */
+export const DeleteGachaBannerRequestSchema: GenMessage<DeleteGachaBannerRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 48);
+
+/**
+ * @generated from message fuwa.v1.DeleteGachaBannerResponse
+ */
+export type DeleteGachaBannerResponse = Message<"fuwa.v1.DeleteGachaBannerResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteGachaBannerResponse.
+ * Use `create(DeleteGachaBannerResponseSchema)` to create a new message.
+ */
+export const DeleteGachaBannerResponseSchema: GenMessage<DeleteGachaBannerResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_economy, 49);
+
+/**
  * A server's economy (docs/economy.md): its own currencies, which members
  * earn by what they do (EarnRule), send to each other where a currency
  * allows it, and spend in the server's shop on roles, profile items and
@@ -1194,7 +1518,7 @@ export const EconomyService: GenService<{
   },
   /**
    * Buys an available listing: a role or profile item once, a custom
-   * listing as often as there's stock.
+   * listing as often as there's stock. Not one that's gacha_only.
    *
    * @generated from rpc fuwa.v1.EconomyService.Buy
    */
@@ -1202,6 +1526,39 @@ export const EconomyService: GenService<{
     methodKind: "unary";
     input: typeof BuyRequestSchema;
     output: typeof BuyResponseSchema;
+  },
+  /**
+   * The server's gacha banners, in order, as GachaBannersUpdated has them,
+   * and your progress on each. Apps show members the available ones.
+   *
+   * @generated from rpc fuwa.v1.EconomyService.ListGachaBanners
+   */
+  listGachaBanners: {
+    methodKind: "unary";
+    input: typeof ListGachaBannersRequestSchema;
+    output: typeof ListGachaBannersResponseSchema;
+  },
+  /**
+   * Pulls once, or a multi-pull, on an available banner while it's open:
+   * pays first, then draws each prize with the server's own randomness.
+   *
+   * @generated from rpc fuwa.v1.EconomyService.Pull
+   */
+  pull: {
+    methodKind: "unary";
+    input: typeof PullRequestSchema;
+    output: typeof PullResponseSchema;
+  },
+  /**
+   * Pulls, newest first, with every roll: yours; anyone's, or everyone's,
+   * with MANAGE_ECONOMY.
+   *
+   * @generated from rpc fuwa.v1.EconomyService.ListGachaPulls
+   */
+  listGachaPulls: {
+    methodKind: "unary";
+    input: typeof ListGachaPullsRequestSchema;
+    output: typeof ListGachaPullsResponseSchema;
   },
   /**
    * @generated from rpc fuwa.v1.EconomyService.CreateCurrency
@@ -1267,6 +1624,36 @@ export const EconomyService: GenService<{
     methodKind: "unary";
     input: typeof GetEconomyOverviewRequestSchema;
     output: typeof GetEconomyOverviewResponseSchema;
+  },
+  /**
+   * Gacha banners. A ROLE prize, like a listing, also takes MANAGE_ROLES.
+   *
+   * @generated from rpc fuwa.v1.EconomyService.CreateGachaBanner
+   */
+  createGachaBanner: {
+    methodKind: "unary";
+    input: typeof CreateGachaBannerRequestSchema;
+    output: typeof CreateGachaBannerResponseSchema;
+  },
+  /**
+   * Replaces the whole banner with the one given (its id says which).
+   *
+   * @generated from rpc fuwa.v1.EconomyService.UpdateGachaBanner
+   */
+  updateGachaBanner: {
+    methodKind: "unary";
+    input: typeof UpdateGachaBannerRequestSchema;
+    output: typeof UpdateGachaBannerResponseSchema;
+  },
+  /**
+   * Its pulls stay in the log, and what was won with its winners.
+   *
+   * @generated from rpc fuwa.v1.EconomyService.DeleteGachaBanner
+   */
+  deleteGachaBanner: {
+    methodKind: "unary";
+    input: typeof DeleteGachaBannerRequestSchema;
+    output: typeof DeleteGachaBannerResponseSchema;
   },
   /**
    * Gives an amount to a member, or to everyone with a role (the server's
