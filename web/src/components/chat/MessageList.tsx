@@ -47,7 +47,7 @@ import {
   type SharedServer,
   type User,
 } from "@/gen/fuwa/v1/types_pb";
-import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage, trimToLatest } from "@/fuwa/actions";
+import { blockFromChannel, deleteMessage, dismissPending, editMessage, hideLinkPreviews, loadMessages, run, sendMessage, trimToLatest } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
 import { instanceHas } from "@/lib/compat";
@@ -168,6 +168,8 @@ type RowActions = {
   reactors: (message: Message, reaction: ReactionLike, afterId: string) => Promise<{ users: User[]; hasMore: boolean }>;
   /** Takes one emoji's reactions off a message, or every one: moderators. */
   clearReactions: (message: Message, reaction?: ReactionLike) => Promise<void>;
+  /** Takes the link previews off one of your own messages. */
+  hidePreviews: (message: Message) => void;
 };
 
 /** The custom emoji reactions may use here, for the menu's row. */
@@ -340,6 +342,7 @@ function useRowActions(
         await clearReactions(instanceKey, serverId, message, reaction);
         toast(t("chattools.reactions.cleared"));
       },
+      hidePreviews: (message) => void run(hideLinkPreviews(instanceKey, serverId, channel.id, message.id)).catch((err: FuwaError) => toast(err.message)),
     }),
     [instanceKey, serverId, channel, catalog, at, threadId, openThread, t, setEditing],
   );
@@ -1188,7 +1191,7 @@ function MessageContent({
       )}
       {message.pinnedAt && <PinMark />}
       <Attachments files={message.attachments} animate={animate} />
-      <Embeds embeds={message.embeds} animate={animate} />
+      <Embeds embeds={message.embeds} animate={animate} onHide={mine && !message.shared ? () => actions.hidePreviews(message) : undefined} />
       <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
       {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
       {message.poll && <PollCard message={message} mine={mine} animate={animate} />}

@@ -81,6 +81,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "profile_effects", get: (s) => s.profileEffects },
   { path: "profile_decorations", get: (s) => s.profileDecorations },
   { path: "rich_presence", get: (s) => s.richPresence },
+  { path: "link_previews", get: (s) => s.linkPreviews },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -240,6 +241,7 @@ export function InstanceSettingsDialog({
   const name = inst?.node?.name ?? instanceKey;
   // Profile items (and their switch) only on instances that have them.
   const itemsHere = instanceHas(inst?.node?.versions, "profile-items");
+  const previewsHere = instanceHas(inst?.node?.versions, "link-previews");
   const endpointsHere = instanceHas(inst?.node?.versions, "agent-endpoints");
 
   return (
@@ -250,7 +252,7 @@ export function InstanceSettingsDialog({
       subtitle={t("instancesettings.nav.subtitle")}
       section={tab}
       onSectionChange={setTab}
-      groups={settingsGroups(t, name, itemsHere, endpointsHere)}
+      groups={settingsGroups(t, name, itemsHere, endpointsHere, previewsHere)}
       footer={<SaveBar scope="screen" count={changed.length} saving={save.pending} error={save.error} onSave={() => commit(changed, [])} onDiscard={discard} />}
     >
       <SettingsBody
@@ -307,7 +309,7 @@ function SettingsBody({
 }
 
 /** The menu: the instance's settings, then what an admin manages. */
-function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpointsHere: boolean): SettingsGroup[] {
+function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpointsHere: boolean, previewsHere: boolean): SettingsGroup[] {
   return [
     {
       label: t("instancesettings.nav.instance"),
@@ -342,6 +344,7 @@ function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpoint
             { id: "profile-effects", label: t("instancesettings.nav.profileEffects"), keywords: "sparkles petals animation card decoration" },
             ...(itemsHere ? [{ id: "profile-decorations", label: t("instancesettings.nav.profileDecorations"), keywords: "avatar frame decoration" }] : []),
             { id: "rich-presence", label: t("instancesettings.nav.richPresence"), keywords: "activity playing game status discord presence" },
+            ...(previewsHere ? [{ id: "link-previews", label: t("instancesettings.nav.linkPreviews"), keywords: "embeds unfurl links opengraph cards" }] : []),
           ],
         },
         {
@@ -455,7 +458,7 @@ function SettingsTab({
     case "general":
       return <GeneralSettings node={inst?.node} config={config} {...props} />;
     case "sign-ups":
-      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} itemsHere={instanceHas(inst?.node?.versions, "profile-items")} endpointsHere={instanceHas(inst?.node?.versions, "agent-endpoints")} {...props} />;
+      return <SignUpSettings saved={saved} hasPasswordHere={inst?.me?.kind === AccountKind.LOCAL} itemsHere={instanceHas(inst?.node?.versions, "profile-items")} endpointsHere={instanceHas(inst?.node?.versions, "agent-endpoints")} previewsHere={instanceHas(inst?.node?.versions, "link-previews")} {...props} />;
     case "sso":
       return <SsoSettings instanceKey={instanceKey} url={inst!.url} config={config} saved={saved} changed={changed} test={test} {...props} />;
     case "limits":
@@ -535,7 +538,8 @@ function SignUpSettings({
   hasPasswordHere,
   itemsHere,
   endpointsHere,
-}: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean; itemsHere: boolean; endpointsHere: boolean }) {
+  previewsHere,
+}: TabProps & { saved: InstanceSettings | undefined; hasPasswordHere: boolean; itemsHere: boolean; endpointsHere: boolean; previewsHere: boolean }) {
   const lang = useI18n();
   const { t } = lang;
   return (
@@ -758,6 +762,22 @@ function SignUpSettings({
           hint={t("instancesettings.signUps.presenceHint")}
         />
       </Setting>
+      {previewsHere && (
+        <Setting
+          id="link-previews"
+          title={t("instancesettings.nav.linkPreviews")}
+          defaultLabel={onOff(t, defaults.linkPreviews)}
+          delay={0.36}
+          {...resetter("link_previews")}
+        >
+          <Toggle
+            checked={draft.linkPreviews}
+            onChange={(on) => patch((d) => (d.linkPreviews = on))}
+            label={t("instancesettings.signUps.previewsLabel")}
+            hint={t("instancesettings.signUps.previewsHint")}
+          />
+        </Setting>
+      )}
     </>
   );
 }
@@ -1195,6 +1215,7 @@ const COPIED = [
   { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
   { path: "profile_decorations", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileDecorations = from.profileDecorations) },
   { path: "rich_presence", copy: (into: InstanceSettings, from: InstanceSettings) => (into.richPresence = from.richPresence) },
+  { path: "link_previews", copy: (into: InstanceSettings, from: InstanceSettings) => (into.linkPreviews = from.linkPreviews) },
 ];
 
 /** Copies the named settings from one draft into another. */

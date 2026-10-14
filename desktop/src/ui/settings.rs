@@ -167,6 +167,7 @@ fn app_sections() -> Vec<Section> {
         .with(vec![
             ("clock", t("appsettings.chat.clock"), "12 24 hour clock"),
             ("send-with", t("appsettings.chat.sendWith"), "enter newline"),
+            ("trusted-sites", t("appsettings.chat.trusted"), "links masked domains sites leaving"),
         ]),
         Section::new(
             Page::Language,
@@ -433,6 +434,8 @@ pub struct SettingsView {
     pub(crate) sliders: Sliders,
     /// The menu's search.
     query: Entity<InputState>,
+    /// A site typed on the Chat page, to trust (`core::links`).
+    pub(crate) trusted_input: Entity<InputState>,
     /// The setting search picked, glowing where it landed (and a count, so it glows again).
     pub(crate) glow: Option<(&'static str, u32)>,
     /// A setting to scroll to once its section is on screen.
@@ -492,7 +495,20 @@ impl SettingsView {
                 InputEvent::PressEnter { .. } => this.pick_first(window, cx),
                 _ => {}
             })];
+        let trusted_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t("appsettings.chat.trustedPlaceholder")));
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.subscribe_in(
+            &trusted_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter { .. } => this.trust_typed_site(window, cx),
+                _ => {}
+            },
+        ));
         Self {
+            trusted_input,
             core,
             page: Page::Appearance,
             keys: Default::default(),

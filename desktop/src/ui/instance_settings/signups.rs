@@ -417,6 +417,29 @@ impl InstanceSettingsView {
                 cx,
             ));
         }
+        if self.instance_has("link-previews") {
+            page = page.child(self.setting(
+                "link-previews",
+                &t("instancesettings.nav.linkPreviews"),
+                None,
+                &["link_previews"],
+                &t(if defaults.link_previews { "instancesettings.shared.on" } else { "instancesettings.shared.off" }),
+                10,
+                self.toggle(
+                    "link-previews",
+                    draft.link_previews,
+                    false,
+                    &t("instancesettings.signUps.previewsLabel"),
+                    &t("instancesettings.signUps.previewsHint"),
+                    p,
+                    window,
+                    cx,
+                    |d, on| d.link_previews = on,
+                ),
+                p,
+                cx,
+            ));
+        }
         page.into_any_element()
     }
 }

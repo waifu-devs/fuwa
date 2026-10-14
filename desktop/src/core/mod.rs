@@ -40,6 +40,7 @@ pub mod invites;
 pub mod join;
 pub mod keybinds;
 pub mod linked;
+pub mod links;
 mod live;
 pub mod live_tiles;
 pub mod mod_view;
@@ -66,6 +67,7 @@ pub mod server_admin;
 pub mod server_pages;
 pub mod shared;
 pub mod sounds;
+pub mod spoilers;
 pub mod sso;
 pub mod store;
 mod sync;
@@ -1246,21 +1248,34 @@ impl Core {
         .await?;
         reports::used("message.edit");
         if let Some(message) = res.message {
-            self.shared.instance(key, |i| {
-                let thread = (!message.thread_id.is_empty()).then(|| threads::thread_key(&message.thread_id));
-                for at in [Some(message.channel_id.clone()), thread].into_iter().flatten() {
-                    if let Some(loaded) = i.messages.get_mut(&at)
-                        && loaded.items.iter().any(|m| m.id == message.id)
-                    {
-                        upsert_message(&mut loaded.items, message.clone());
-                    }
-                }
-                if let Some(parent) = i.thread_parents.get_mut(&message.id) {
-                    let summary = message.thread.clone().or_else(|| parent.thread.take());
-                    let reactions = std::mem::take(&mut parent.reactions);
-                    *parent = pb::Message { thread: summary, reactions, ..message };
-                }
-            });
+            let channel = message.channel_id.clone();
+            self.shared.instance(key, |i| put_changed(i, &channel, message));
+        }
+        Ok(())
+    }
+
+    /// Takes the link previews off one of your own messages for good
+    /// (docs/link-previews.md); the message comes back without them, as its
+    /// MessageUpdated will put it.
+    pub async fn hide_link_previews(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        message_id: &str,
+    ) -> Result<(), Problem> {
+        let Some(api) = self.api(key) else { return Ok(()) };
+        reports::used("message.hide_previews");
+        let res = rpc!(
+            api.messages(),
+            hide_link_previews(pb::HideLinkPreviewsRequest {
+                server_id: server_id.into(),
+                message_id: message_id.into(),
+            })
+        )
+        .await?;
+        if let Some(message) = res.message {
+            self.shared.instance(key, |i| put_changed(i, channel_id, message));
         }
         Ok(())
     }
@@ -1497,6 +1512,25 @@ pub enum SignIn {
 impl DmStatus {
     pub fn is_ready(self) -> bool {
         self == DmStatus::Ready
+    }
+}
+
+/// A changed message where it's loaded (its channel's list, its thread's,
+/// a thread's parent), keeping its reactions and thread, as its
+/// MessageUpdated will put it.
+fn put_changed(i: &mut InstanceState, channel_id: &str, message: pb::Message) {
+    let thread = (!message.thread_id.is_empty()).then(|| threads::thread_key(&message.thread_id));
+    for at in [Some(channel_id.to_owned()), thread].into_iter().flatten() {
+        if let Some(loaded) = i.messages.get_mut(&at)
+            && loaded.items.iter().any(|m| m.id == message.id)
+        {
+            upsert_message(&mut loaded.items, message.clone());
+        }
+    }
+    if let Some(parent) = i.thread_parents.get_mut(&message.id) {
+        let summary = message.thread.clone().or_else(|| parent.thread.take());
+        let reactions = std::mem::take(&mut parent.reactions);
+        *parent = pb::Message { thread: summary, reactions, ..message };
     }
 }
 

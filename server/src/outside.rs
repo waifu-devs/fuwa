@@ -377,7 +377,7 @@ async fn fetch_with(client: &reqwest::Client, url: &str, max: usize) -> Result<P
 /// Whether a link may be fetched: http(s), on the usual ports, and not at
 /// an address that's plainly internal. Names are checked as they're looked
 /// up ([`PublicOnly`]).
-fn fetchable(url: &Url) -> Result<(), &'static str> {
+pub(crate) fn fetchable(url: &Url) -> Result<(), &'static str> {
     if !matches!(url.scheme(), "https" | "http") {
         return Err("not http(s)");
     }

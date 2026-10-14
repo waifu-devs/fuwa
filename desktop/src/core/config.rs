@@ -455,6 +455,8 @@ pub struct Prefs {
     pub live_tiles_off: bool,
     /// Live tiles someone hid, by id, newest last.
     pub live_tiles_hidden: Vec<String>,
+    /// Sites whose masked links open without asking (`core::links`), as hosts.
+    pub trusted_domains: Vec<String>,
     /// Servers whose live tiles are off, by id.
     pub live_tiles_quiet: std::collections::BTreeSet<String>,
     /// Rail folders open on this computer, as `instance/folder` (the web's `lib/rail-open.ts`).
@@ -590,6 +592,7 @@ impl Default for Prefs {
             send_with: SendWith::Enter,
             live_tiles_off: false,
             live_tiles_hidden: Vec::new(),
+            trusted_domains: Vec::new(),
             live_tiles_quiet: Default::default(),
             rail_open: Default::default(),
             sign_in_notice_closed: Default::default(),
@@ -691,6 +694,7 @@ impl Prefs {
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        self.trusted_domains = crate::core::links::tidy_domains(std::mem::take(&mut self.trusted_domains));
         self.sound_picks.retain(|_, pick| !pick.tune.is_empty() || !pick.file.is_empty());
         let share = crate::core::voice::vp8::Share::new(self.share_height, self.share_fps);
         (self.share_height, self.share_fps) = (share.height, share.fps);

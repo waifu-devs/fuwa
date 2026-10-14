@@ -408,7 +408,8 @@ pub fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
         .plugin(Plugin)
         .plugin(crate::ui::timestamps::Plugin)
         .plugin(crate::ui::mentions::Plugin)
-        .parser_revision(3)
+        .plugin(crate::ui::spoilers::Plugin)
+        .parser_revision(4)
 }
 
 #[cfg(test)]

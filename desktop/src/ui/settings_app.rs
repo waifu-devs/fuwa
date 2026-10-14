@@ -424,10 +424,89 @@ impl SettingsView {
                     pref!(prefs, send_with),
                     send,
                 ),
+                (
+                    "trusted-sites",
+                    t("appsettings.chat.trusted"),
+                    Some(t("appsettings.chat.trustedHint")),
+                    pref!(prefs, trusted_domains),
+                    self.trusted_sites(prefs, p, cx),
+                ),
             ],
             p,
             cx,
         )
+    }
+
+    /// The sites whose masked links open without asking: added here or from
+    /// the dialog that asks (`ui/leaving.rs`), removed here.
+    fn trusted_sites(&self, prefs: &Prefs, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let site = crate::core::links::clean_domain(&self.trusted_input.read(cx).value());
+        let ready = !site.is_empty() && !prefs.trusted_domains.contains(&site);
+        let form = div()
+            .flex()
+            .gap(px(8.0))
+            .child(div().flex_1().min_w_0().child(crate::ui::settings_controls::field(
+                gpui_kit::component::input::Input::new(&self.trusted_input).appearance(false),
+                p,
+            )))
+            .child(
+                button_with(
+                    "trusted-add",
+                    t("appsettings.chat.trustedAdd"),
+                    Some("plus"),
+                    IconHover::Usual,
+                    Look::Outline,
+                    false,
+                    p,
+                )
+                .when(!ready, |el| el.opacity(0.5))
+                .when(ready, |el| el.on_click(cx.listener(|this, _, window, cx| this.trust_typed_site(window, cx)))),
+            );
+        let mut list = div().flex().flex_col().gap(px(4.0));
+        if prefs.trusted_domains.is_empty() {
+            list = list.child(div().text_sm().text_color(p.muted_foreground).child(t("appsettings.chat.trustedNone")));
+        }
+        for domain in &prefs.trusted_domains {
+            let remove = t_with("appsettings.chat.trustedRemove", &[("site", Arg::Str(domain))]);
+            let gone = domain.clone();
+            let row = div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .py(px(6.0))
+                .rounded(radius_xl())
+                .border_1()
+                .border_color(p.border)
+                .text_sm()
+                .child(div().text_color(p.muted_foreground).child(icon("globe").size(px(16.0))))
+                .child(div().flex_1().min_w_0().truncate().font_family(crate::ui::theme::mono()).child(domain.clone()))
+                .child(
+                    crate::ui::widgets::icon_button(SharedString::from(format!("trusted-remove|{domain}")), "x", p)
+                        .size(px(24.0))
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(remove.clone()).build(window, cx))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let gone = gone.clone();
+                            this.set(cx, move |pr| pr.trusted_domains.retain(|d| *d != gone));
+                        })),
+                );
+            list =
+                list.child(motion::rise(row, SharedString::from(format!("trusted-in|{domain}")), Duration::ZERO, 4.0));
+        }
+        div().flex().flex_col().gap(px(8.0)).child(form).child(list).into_any_element()
+    }
+
+    /// Trusts the site typed on the Chat page.
+    pub(crate) fn trust_typed_site(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let site = crate::core::links::clean_domain(&self.trusted_input.read(cx).value());
+        if site.is_empty() {
+            return;
+        }
+        self.set(cx, |pr| {
+            pr.trusted_domains.push(site);
+            pr.trusted_domains = crate::core::links::tidy_domains(std::mem::take(&mut pr.trusted_domains));
+        });
+        self.trusted_input.update(cx, |s, cx| s.set_value("", window, cx));
     }
 
     pub(crate) fn notifications_page(

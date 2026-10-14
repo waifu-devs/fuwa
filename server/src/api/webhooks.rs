@@ -374,22 +374,25 @@ pub async fn execute_webhook(
     {
         return Err(Error::ResourceExhausted("this server is out of storage".into()));
     }
-    sdb.write(&webhook.id, async |conn, events| {
-        // Checked again inside the write: it may have been reset, moved or deleted since.
-        let current = load_webhook(conn, &sdb.id, &webhook.id).await?;
-        if !same_token(&current.token, token) {
-            return Err(Error::NotFound("webhook"));
-        }
-        postable(conn, &sdb.id, &current.channel_id).await?;
-        let now = now_ms();
-        conn.execute(
-            "UPDATE webhooks SET last_used_at = ?2, messages = messages + 1 WHERE id = ?1",
-            (current.id.as_str(), now),
-        )
+    let posted = sdb
+        .write(&webhook.id, async |conn, events| {
+            // Checked again inside the write: it may have been reset, moved or deleted since.
+            let current = load_webhook(conn, &sdb.id, &webhook.id).await?;
+            if !same_token(&current.token, token) {
+                return Err(Error::NotFound("webhook"));
+            }
+            postable(conn, &sdb.id, &current.channel_id).await?;
+            let now = now_ms();
+            conn.execute(
+                "UPDATE webhooks SET last_used_at = ?2, messages = messages + 1 WHERE id = ?1",
+                (current.id.as_str(), now),
+            )
+            .await?;
+            insert_webhook_message(conn, &sdb.id, &current.channel_id, message.clone(), now, events).await
+        })
         .await?;
-        insert_webhook_message(conn, &sdb.id, &current.channel_id, message.clone(), now, events).await
-    })
-    .await
+    super::messages::preview_links(app, &sdb.id, &posted, true);
+    Ok(posted)
 }
 
 /// A webhook, if `token` is its token; "not found" otherwise, so neither

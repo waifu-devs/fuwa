@@ -284,6 +284,13 @@ message InstanceSettings {
   // How many reactions one account may add or take off in a minute; unset
   // for no cap. FUWA_LIMIT_REACTIONS_PER_MINUTE.
   optional int64 reactions_per_minute = 65;
+  // Link previews: when a message in a server links to a page, this
+  // instance reads the page (public addresses only) and adds a card with its
+  // title, description and picture to the message (docs/link-previews.md).
+  // The site sees the instance, never the people reading. Turning it off
+  // stops new previews; ones already made stay. FUWA_LINK_PREVIEWS, on
+  // unless set.
+  bool link_previews = 66;
 }
 
 // One sign-in provider, as an instance's admins set it up. Its redirect URI,

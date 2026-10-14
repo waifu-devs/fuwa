@@ -199,6 +199,7 @@ impl From<Embed> for pb::Embed {
                 .collect(),
             thumbnail_url: e.thumbnail.map(|p| p.url).unwrap_or_default(),
             image_url: e.image.map(|p| p.url).unwrap_or_default(),
+            ..Default::default()
         }
     }
 }

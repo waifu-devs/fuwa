@@ -569,6 +569,8 @@ fn their_embed(embed: &pb::Embed, pictures: &Pictures) -> pb::Embed {
             .collect(),
         thumbnail_url: pictures.of(&embed.thumbnail_url),
         image_url: pictures.of(&embed.image_url),
+        preview: embed.preview,
+        site_name: one_line(&embed.site_name, 100),
     }
 }
 
@@ -2353,7 +2355,7 @@ async fn home_send(
                 }
                 super::threads::refresh(conn, &channel.id, &parent.id, events).await?;
             }
-            Ok(Ok(message))
+            Ok(Ok((message, access.has_in(&channel.id, Permission::EmbedLinks))))
         })
         .await
         .and_then(|written| written.map_err(Error::denied));
@@ -2361,7 +2363,8 @@ async fn home_send(
         // Taken for a message that wasn't written: nothing has them.
         crate::attachments::drop_soon(app, &sdb.id, files);
     }
-    let mut message = message?;
+    let (mut message, previews) = message?;
+    messages::preview_links(app, &sdb.id, &message, previews);
     home_emojis(&*sdb.read()?, &sdb.id, std::slice::from_mut(&mut message)).await?;
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
@@ -2687,7 +2690,8 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, mut edit: cpb::GuestEdit) -> 
             )?;
             let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.ok_or(Error::NotFound(GONE))?;
             remember(conn, &user, &server).await?;
-            if message.content != edit.content {
+            let changed = message.content != edit.content;
+            if changed {
                 let access = Access::guest(&channel.id, row.allowed);
                 let verdict = review_guest(
                     conn,
@@ -2719,11 +2723,17 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, mut edit: cpb::GuestEdit) -> 
             messages::save_edit(conn, &message, old_size).await?;
             message.shared = Some(pb::SharedAuthor { user: Some(user), server: Some(server) });
             events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
-            Ok(Ok(message))
+            Ok(Ok((
+                message,
+                changed.then(|| Access::guest(&channel.id, row.allowed).has_in(&channel.id, Permission::EmbedLinks)),
+            )))
         })
         .await?
         .map_err(Error::denied)?;
-    let mut message = message;
+    let (mut message, previews) = message;
+    if let Some(allowed) = previews {
+        messages::preview_links(app, &sdb.id, &message, allowed);
+    }
     home_emojis(&*sdb.read()?, &sdb.id, std::slice::from_mut(&mut message)).await?;
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }

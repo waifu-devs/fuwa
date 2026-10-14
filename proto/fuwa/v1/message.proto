@@ -60,6 +60,10 @@ service MessageService {
   // Needs MANAGE_MESSAGES in the channel; in a shared channel, only at its
   // home server.
   rpc ClearReactions(ClearReactionsRequest) returns (ClearReactionsResponse);
+  // Takes the link previews off one of the caller's own messages, and keeps
+  // them off when it's edited (docs/link-previews.md). Not in channels
+  // shown from another server.
+  rpc HideLinkPreviews(HideLinkPreviewsRequest) returns (HideLinkPreviewsResponse);
 }
 
 message SendMessageRequest {
@@ -366,3 +370,12 @@ message ClearReactionsRequest {
 }
 
 message ClearReactionsResponse {}
+
+message HideLinkPreviewsRequest {
+  string server_id = 1;
+  string message_id = 2;
+}
+
+message HideLinkPreviewsResponse {
+  Message message = 1;
+}

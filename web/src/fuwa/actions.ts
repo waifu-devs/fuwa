@@ -6,7 +6,7 @@ import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSetti
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
-import type { CommandArgument, ProfileItem, ProfileItemKind } from "@/gen/fuwa/v1/types_pb";
+import type { CommandArgument, Message, ProfileItem, ProfileItemKind } from "@/gen/fuwa/v1/types_pb";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -1530,20 +1530,32 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
     const { message } = yield* call((signal) =>
       api(key).messages.updateMessage({ serverId, messageId, content, channelId, emojis: outsideEmojis(store.get().instances[key]?.emojis, serverId, content) }, { signal }),
     );
-    if (!message) return;
-    updateInstance(key, (i) => {
-      let messages = i.messages;
-      for (const at of [channelId, message.threadId && threadKey(message.threadId)]) {
-        const loaded = at ? messages[at] : undefined;
-        if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertKeepingReactions(loaded.items, message) } };
-      }
-      const parent = i.threadParents[message.id];
-      const threadParents = parent
-        ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread, reactions: message.reactions.length ? message.reactions : parent.reactions } }
-        : i.threadParents;
-      return { ...i, messages, threadParents };
-    });
+    if (message) putChanged(key, channelId, message);
   });
+
+/** Takes the link previews off one of your own messages, for good; the server's MessageUpdated follows. */
+export const hideLinkPreviews = (key: string, serverId: string, channelId: string, messageId: string) =>
+  Effect.gen(function* () {
+    reportUsage("message.hide_previews");
+    const { message } = yield* call((signal) => api(key).messages.hideLinkPreviews({ serverId, messageId }, { signal }));
+    if (message) putChanged(key, channelId, message);
+  });
+
+/** A changed message where it's loaded, as its MessageUpdated will put it. */
+function putChanged(key: string, channelId: string, message: Message) {
+  updateInstance(key, (i) => {
+    let messages = i.messages;
+    for (const at of [channelId, message.threadId && threadKey(message.threadId)]) {
+      const loaded = at ? messages[at] : undefined;
+      if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertKeepingReactions(loaded.items, message) } };
+    }
+    const parent = i.threadParents[message.id];
+    const threadParents = parent
+      ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread, reactions: message.reactions.length ? message.reactions : parent.reactions } }
+      : i.threadParents;
+    return { ...i, messages, threadParents };
+  });
+}
 
 /** Takes an app's live tile down for everyone (Manage Messages in its channel); the server's LiveTileEnded follows. */
 export const endLiveTile = (key: string, serverId: string, channelId: string, sourceId: string, tileId: string) =>

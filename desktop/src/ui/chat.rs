@@ -238,8 +238,10 @@ pub struct Msg {
     pub unreadable: bool,
     /// Not a person: "APP" for what a webhook posted, "BOT" for AutoMod.
     pub badge: Option<&'static str>,
-    /// Cards an app posted with it.
+    /// Cards an app posted with it, and the instance's link previews.
     pub embeds: Vec<pb::Embed>,
+    /// Its link previews have the × that takes them off: yours, and not in a shared channel.
+    pub can_hide_previews: bool,
     /// In a shared channel: the server the author is from, when it isn't this one.
     pub from: Option<pb::SharedServer>,
     /// At a shared channel's home, with Kick Members: this author can be kept out of it.
@@ -361,7 +363,10 @@ impl Draft {
         *built = kept;
         for Job { at, key, mut msg, emojis } in jobs {
             msg.shown = mention_links(
-                &timestamp_nodes(&crate::ui::text::hard_breaks(&images_as_links(&msg.content))),
+                &timestamp_nodes(&crate::ui::text::hard_breaks(&crate::ui::spoilers::spoiler_nodes(
+                    &images_as_links(&msg.content),
+                    &msg.id,
+                ))),
                 &look.with(&emojis),
             );
             let msg = Rc::new(msg);
@@ -664,7 +669,11 @@ impl FuwaApp {
             if let Some(card) = &card {
                 card.digest(&mut h);
             }
-            (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
+            (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.shared.is_some()).hash(&mut h);
+            m.embeds
+                .iter()
+                .map(|e| (&e.url, &e.title, &e.description, &e.image_url, e.preview))
+                .for_each(|e| e.hash(&mut h));
             m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
             m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
             m.gif.as_ref().map(|g| (&g.url, g.width, g.height, g.provider)).hash(&mut h);
@@ -675,6 +684,7 @@ impl FuwaApp {
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
             (pinned, can_pin).hash(&mut h);
+            crate::ui::spoilers::revealed_in(&m.id).hash(&mut h);
             if let Some(r) = &reactions {
                 r.digest(&mut h);
             }
@@ -726,6 +736,7 @@ impl FuwaApp {
                         unreadable: false,
                         badge: *badge,
                         embeds: m.embeds.clone(),
+                        can_hide_previews: m.author_id == me && m.shared.is_none(),
                         from: from.clone(),
                         keep_out,
                         keeping_out,
@@ -778,6 +789,7 @@ impl FuwaApp {
                 unreadable: false,
                 badge: None,
                 embeds: Vec::new(),
+                can_hide_previews: false,
                 from: None,
                 keep_out: false,
                 keeping_out: false,
@@ -2067,7 +2079,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         ));
     }
     if !m.embeds.is_empty() {
-        text = text.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p, ctx.fresh.contains_key(&m.id)));
+        let hide = m.can_hide_previews.then_some(&ctx.this);
+        text = text.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p, ctx.fresh.contains_key(&m.id), hide));
     }
     if let Some(gif) = m.gif.as_ref().filter(|g| !g.url.is_empty()) {
         let starred = ctx.saved_gifs.contains(&gif.url);

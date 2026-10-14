@@ -84,6 +84,13 @@ pub struct Config {
     /// People may show what they're doing (docs/presence.md). On unless
     /// FUWA_RICH_PRESENCE turns it off.
     pub rich_presence: bool,
+    /// Link previews: the instance reads the pages links in messages point
+    /// to (docs/link-previews.md). On unless FUWA_LINK_PREVIEWS turns it off.
+    pub link_previews: bool,
+    /// FUWA_LINK_PREVIEWS_ALLOW_PRIVATE: link previews may read pages on
+    /// private, loopback or internal addresses. Off by default; for tests
+    /// and private deployments. Env only.
+    pub link_previews_allow_private: bool,
     /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
     /// other fuwa instances (docs/federation.md).
     pub federation: bool,
@@ -587,6 +594,16 @@ impl Config {
             Some("on" | "true" | "1") => true,
             Some(other) => return Err(format!("FUWA_FEDERATION must be on or off, got {other:?}")),
         };
+        let link_previews = match get("FUWA_LINK_PREVIEWS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_LINK_PREVIEWS must be on or off, got {other:?}")),
+        };
+        let link_previews_allow_private = match get("FUWA_LINK_PREVIEWS_ALLOW_PRIVATE").as_deref().map(str::trim) {
+            None | Some("off" | "false" | "0" | "") => false,
+            Some("on" | "true" | "1" | "yes") => true,
+            Some(other) => return Err(format!("FUWA_LINK_PREVIEWS_ALLOW_PRIVATE must be on or off, got {other:?}")),
+        };
         let federation_allow_private = match get("FUWA_FEDERATION_ALLOW_PRIVATE").as_deref().map(str::trim) {
             None | Some("off" | "false" | "0" | "") => false,
             Some("on" | "true" | "1" | "yes") => true,
@@ -730,6 +747,8 @@ impl Config {
             profile_effects,
             profile_decorations,
             rich_presence,
+            link_previews,
+            link_previews_allow_private,
             federation,
             federation_allow_private,
             call_recordings_keep_days,

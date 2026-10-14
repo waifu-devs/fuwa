@@ -29,6 +29,7 @@ pub mod node;
 pub mod outside;
 pub mod permissions;
 pub mod presence;
+pub mod previews;
 pub mod probes;
 pub mod profile_items;
 pub mod recordings;

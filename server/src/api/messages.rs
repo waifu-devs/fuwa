@@ -2,6 +2,8 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::{Api, Seat, automod, boards, commands, economy, polls, reactions, respond, shared, threads, url, users};
+use std::sync::Arc;
+
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -11,6 +13,7 @@ use crate::media;
 use crate::node::Account;
 use crate::pb::{self, Permission, message_service_server::MessageService};
 use crate::permissions::{self, Access};
+use crate::previews;
 use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
 
 /// The longest a message can be, in characters.
@@ -50,10 +53,18 @@ struct Extras {
     components: Vec<pb::ComponentRow>,
     #[prost(message, optional, tag = "12")]
     interaction: Option<pb::MessageInteraction>,
+    /// Its author took its link previews off (HideLinkPreviews): none are
+    /// made for it again.
+    #[prost(bool, tag = "13")]
+    previews_hidden: bool,
 }
 
 impl Extras {
     fn of(message: &pb::Message) -> Option<Vec<u8>> {
+        Self::with_previews_hidden(message, false)
+    }
+
+    fn with_previews_hidden(message: &pb::Message, previews_hidden: bool) -> Option<Vec<u8>> {
         let extras = Extras {
             attachments: message.attachments.clone(),
             embeds: message.embeds.clone(),
@@ -67,6 +78,7 @@ impl Extras {
             mention_user_ids: message.mention_user_ids.clone(),
             components: message.components.clone(),
             interaction: message.interaction.clone(),
+            previews_hidden,
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -675,6 +687,9 @@ pub(super) fn check_webhook_message(app: &App, post: &mut WebhookMessage) -> Res
 /// instance, so nobody who reads the message is seen by the site they're on.
 pub(super) fn check_embed_links(app: &App, embeds: &mut [pb::Embed]) -> Result<()> {
     for embed in embeds {
+        // Only the instance makes link previews.
+        embed.preview = false;
+        embed.site_name.clear();
         embed.url = url("embed url", &embed.url)?;
         embed.thumbnail_url = app.picture_link(&url("embed thumbnail", &embed.thumbnail_url)?);
         embed.image_url = app.picture_link(&url("embed image", &embed.image_url)?);
@@ -822,10 +837,108 @@ pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, o
     let now = message.edited_at.as_ref().map_or_else(now_ms, crate::id::millis);
     conn.execute(
         "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4, extras = ?5 WHERE id = ?1",
-        (message.id.as_str(), message.content.as_str(), stored_size(message), now, Extras::of(message)),
+        (
+            message.id.as_str(),
+            message.content.as_str(),
+            stored_size(message),
+            now,
+            Extras::with_previews_hidden(message, previews_hidden(conn, &message.id).await?),
+        ),
     )
     .await?;
     store::add_usage(conn, UsageChange { message_bytes: stored_size(message) - old_size, ..Default::default() }).await
+}
+
+/// Whether a message's author took its link previews off.
+async fn previews_hidden(conn: &turso::Connection, message_id: &str) -> Result<bool> {
+    let extras =
+        query_one(conn, "SELECT extras FROM messages WHERE id = ?1", [message_id], |r| r.get::<Option<Vec<u8>>>(0))
+            .await?
+            .flatten();
+    Ok(match extras {
+        Some(bytes) => Extras::decode(bytes.as_slice())?.previews_hidden,
+        None => false,
+    })
+}
+
+/// Saves a message's embeds (its link previews changed), inside a write,
+/// leaving its text and when it was edited as they are.
+async fn save_embeds(conn: &turso::Connection, message: &pb::Message, hidden: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE messages SET extras = ?2 WHERE id = ?1",
+        (message.id.as_str(), Extras::with_previews_hidden(message, hidden)),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Makes the link previews of a message just sent or edited, in the
+/// background (docs/link-previews.md): the pages its links point to are
+/// read, then the message gets a card for each in place of the ones it had
+/// (a `MessageUpdated`). `allowed` is whether its author may embed links
+/// where it is; without it, or with the instance's `link_previews` off, a
+/// message only loses previews its text no longer links to.
+pub(super) fn preview_links(app: &Arc<App>, server_id: &str, message: &pb::Message, allowed: bool) {
+    let wanted = allowed && app.settings().link_previews;
+    let links = if wanted { previews::links(&message.content) } else { vec![] };
+    let had = message.embeds.iter().any(|e| e.preview);
+    if links.is_empty() && !had {
+        return;
+    }
+    let (app, server_id, message_id) = (app.clone(), server_id.to_string(), message.id.clone());
+    tokio::spawn(async move {
+        let allow_private = app.config.link_previews_allow_private;
+        let pages = futures::future::join_all(links.iter().map(|link| previews::page(link, allow_private))).await;
+        let made: Vec<pb::Embed> =
+            links.iter().zip(pages).filter_map(|(link, page)| Some(preview_embed(&app, link, page?))).collect();
+        let Ok(sdb) = app.servers.get(&server_id).await else { return };
+        let written = sdb
+            .write("", async |conn, events| {
+                let Some(mut message) = load_message(conn, &sdb.id, &message_id).await? else { return Ok(()) };
+                // Edited since: the edit's own previews are on their way.
+                if (if wanted { previews::links(&message.content) } else { vec![] }) != links {
+                    return Ok(());
+                }
+                let hidden = previews_hidden(conn, &message.id).await?;
+                let mut embeds: Vec<pb::Embed> = message.embeds.iter().filter(|e| !e.preview).cloned().collect();
+                if !hidden {
+                    let room = MAX_EMBEDS.saturating_sub(embeds.len());
+                    embeds.extend(made.iter().take(room).cloned());
+                }
+                if embeds == message.embeds {
+                    return Ok(());
+                }
+                message.embeds = embeds;
+                save_embeds(conn, &message, hidden).await?;
+                threads::attach(conn, std::slice::from_mut(&mut message)).await?;
+                shared::mark_guests(conn, std::slice::from_mut(&mut message)).await?;
+                events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }));
+                Ok(())
+            })
+            .await;
+        if written.is_err() {
+            crate::reports::server_error("link_previews_failed", None);
+        }
+    });
+}
+
+/// A link preview's card: the page's words, the link as written, and its
+/// picture through this instance.
+fn preview_embed(app: &App, link: &str, page: previews::Page) -> pb::Embed {
+    let host = reqwest::Url::parse(link).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    let picture = app.picture_link(&page.image);
+    let (thumbnail_url, image_url) = if page.large { (String::new(), picture) } else { (picture, String::new()) };
+    pb::Embed {
+        title: page.title,
+        description: page.description,
+        url: link.to_string(),
+        color: page.color.unwrap_or_default(),
+        fields: vec![],
+        thumbnail_url,
+        image_url,
+        preview: true,
+        site_name: if page.site_name.is_empty() { host.trim_start_matches("www.").to_string() } else { page.site_name },
+    }
 }
 
 /// Deletes a message, inside a write, and takes it off the totals. The
@@ -1174,6 +1287,7 @@ impl Api {
         for file in &message.attachments {
             self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
         }
+        preview_links(&self.app, &sdb.id, &message, access.has_in(&message.channel_id, Permission::EmbedLinks));
         if let Some(checking) = later {
             checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
         }
@@ -1306,6 +1420,8 @@ impl MessageService for Api {
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
                 let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
+                // New text may link elsewhere: its previews are made again after.
+                let changed = before.as_ref().is_none_or(|m| m.content != req.content);
                 // With the poll, embeds and file names, which an edit leaves as they are.
                 let reviewed = before.as_ref().map(|m| {
                     reviewed_text(&pb::Message {
@@ -1404,6 +1520,10 @@ impl MessageService for Api {
                     })
                     .await?
                     .map_err(Error::denied)?;
+                if changed {
+                    let allowed = access.has_in(&message.channel_id, Permission::EmbedLinks);
+                    preview_links(&self.app, &sdb.id, &message, allowed);
+                }
                 if let Some(checking) = later {
                     checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
                 }
@@ -1574,6 +1694,40 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 self.clear_reactions_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn hide_link_previews(
+        &self,
+        request: Request<pb::HideLinkPreviewsRequest>,
+    ) -> Result<Response<pb::HideLinkPreviewsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                let message = sdb
+                    .write(&account.id, async |conn, events| {
+                        let mut message = load_message(conn, &sdb.id, &req.message_id)
+                            .await?
+                            .filter(|m| access.can_see(&m.channel_id))
+                            .ok_or(Error::NotFound("message"))?;
+                        if message.author_id != account.id {
+                            return Err(Error::denied("you can only hide the link previews of your own messages"));
+                        }
+                        if previews_hidden(conn, &message.id).await? {
+                            return Ok(message);
+                        }
+                        message.embeds.retain(|e| !e.preview);
+                        save_embeds(conn, &message, true).await?;
+                        threads::attach(conn, std::slice::from_mut(&mut message)).await?;
+                        events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
+                        Ok(message)
+                    })
+                    .await?;
+                Ok(pb::HideLinkPreviewsResponse { message: Some(message) })
             }
             .await,
         )

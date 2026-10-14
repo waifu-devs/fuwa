@@ -238,9 +238,10 @@ fn line_kind(kind: ItemKind) -> LineKind {
 }
 
 pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool, enc: EncBits) -> Msg {
+    let shown = timestamp_nodes(&hard_breaks(&crate::ui::spoilers::spoiler_nodes(&images_as_links(&content), &id)));
     Msg {
+        shown,
         id,
-        shown: timestamp_nodes(&hard_breaks(&images_as_links(&content))),
         user: who.user,
         name: who.name,
         color: who.color,
@@ -258,6 +259,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         unreadable: false,
         badge: None,
         embeds: Vec::new(),
+        can_hide_previews: false,
         from: None,
         keep_out: false,
         keeping_out: false,

@@ -56,6 +56,7 @@ pub const FIELDS: &[&str] = &[
     "profile_effects",
     "profile_decorations",
     "rich_presence",
+    "link_previews",
     "federation",
     "federation_blocked_hosts",
     "call_recordings_keep_days",
@@ -109,6 +110,8 @@ pub struct Settings {
     pub profile_decorations: bool,
     /// People may show what they're doing (docs/presence.md).
     pub rich_presence: bool,
+    /// The instance reads linked pages for previews (docs/link-previews.md).
+    pub link_previews: bool,
     /// Sharing channels with other fuwa instances (docs/federation.md).
     pub federation: bool,
     /// Instances this one won't talk to, by host name.
@@ -178,6 +181,7 @@ impl Settings {
             profile_effects: config.profile_effects,
             profile_decorations: config.profile_decorations,
             rich_presence: config.rich_presence,
+            link_previews: config.link_previews,
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
@@ -351,6 +355,7 @@ impl Settings {
             profile_effects: self.profile_effects,
             profile_decorations: self.profile_decorations,
             rich_presence: self.rich_presence,
+            link_previews: self.link_previews,
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
@@ -492,6 +497,7 @@ impl Settings {
             "profile_effects" => Value::from(from.profile_effects),
             "profile_decorations" => Value::from(from.profile_decorations),
             "rich_presence" => Value::from(from.rich_presence),
+            "link_previews" => Value::from(from.link_previews),
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
@@ -602,6 +608,7 @@ impl Settings {
             "profile_effects" => Value::from(self.profile_effects),
             "profile_decorations" => Value::from(self.profile_decorations),
             "rich_presence" => Value::from(self.rich_presence),
+            "link_previews" => Value::from(self.link_previews),
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
@@ -718,6 +725,7 @@ impl Settings {
             "profile_effects" => self.profile_effects = flag(field, value)?,
             "profile_decorations" => self.profile_decorations = flag(field, value)?,
             "rich_presence" => self.rich_presence = flag(field, value)?,
+            "link_previews" => self.link_previews = flag(field, value)?,
             "federation" => self.federation = flag(field, value)?,
             "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,
             "call_recordings_keep_days" => {

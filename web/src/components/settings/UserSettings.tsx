@@ -115,6 +115,7 @@ function appSections(t: I18n["t"]): SettingsSection[] {
       settings: [
         { id: "clock", label: t("appsettings.chat.clock"), keywords: "12 24 hour clock" },
         { id: "send-with", label: t("appsettings.chat.sendWith"), keywords: "enter newline" },
+        { id: "trusted-sites", label: t("appsettings.chat.trusted"), keywords: "links masked domains whitelist allow leaving" },
       ],
     },
     {

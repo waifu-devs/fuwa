@@ -268,6 +268,9 @@ impl FuwaApp {
         if let Dialog::Report { key, server, of } = &dialog {
             return Some(self.render_report(key, server, of, window, cx));
         }
+        if let Dialog::Leaving { url, trust } = &dialog {
+            return Some(self.render_leaving_link(url, *trust, window, cx));
+        }
         if let Dialog::GiveCurrency { key, server, to } = &dialog {
             return Some(self.render_give(key, server, to, window, cx));
         }
@@ -354,6 +357,7 @@ impl FuwaApp {
             | Dialog::PollVoters { .. }
             | Dialog::Picture { .. }
             | Dialog::ShareScreen
+            | Dialog::Leaving { .. }
             | Dialog::Report { .. }
             | Dialog::GiveCurrency { .. } => unreachable!("drawn on its own"),
         };
@@ -432,6 +436,7 @@ impl FuwaApp {
             Dialog::Apply { .. } => "apply",
             Dialog::Application { .. } => "application",
             Dialog::ShareScreen => "share",
+            Dialog::Leaving { .. } => "leaving",
             Dialog::Report { .. } => "report",
             Dialog::GiveCurrency { .. } => "give",
         };

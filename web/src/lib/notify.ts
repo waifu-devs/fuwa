@@ -8,6 +8,7 @@ import { effectiveNotifications, isMuted, muteEnds, pingsMe, shouldAlert } from 
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { requestThread } from "@/lib/threads";
 import { play } from "@/lib/sounds";
+import { hideSpoilers } from "@/lib/spoilers";
 import { toast } from "@/lib/ui";
 
 /**
@@ -116,7 +117,7 @@ export function onDirectMessage(key: string, conversationId: string, author: Use
   const p = getPrefs();
   if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
+  const body = hideSpoilers(content).replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
     const n = show(key, displayName(author), {
       body: body.length > 160 ? `${body.slice(0, 159)}…` : body,
@@ -213,7 +214,7 @@ function notify(
   const channel = inst.channels[serverId]?.find((c) => c.id === channelId);
   const member = inst.members[serverId]?.find((m) => m.user?.id === authorId);
   const author = app ?? (member ? memberName(member) : displayName(inst.users[authorId]));
-  const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
+  const body = hideSpoilers(content).replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
     const { t } = i18n();
     const title = thread
