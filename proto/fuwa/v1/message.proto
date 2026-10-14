@@ -64,7 +64,26 @@ service MessageService {
   // them off when it's edited (docs/link-previews.md). Not in channels
   // shown from another server.
   rpc HideLinkPreviews(HideLinkPreviewsRequest) returns (HideLinkPreviewsResponse);
+  // Says the caller is typing in a channel, or in a thread's reply box
+  // (docs/typing.md). Members with the channel on screen get TypingStarted
+  // and show the caller as typing for 10 seconds, or until their message
+  // arrives. Apps send it at most every 6 seconds while someone types; the
+  // instance passes on one per person and place every 3 seconds and quietly
+  // drops the rest. Needs SEND_MESSAGES in the channel. It carries nothing of
+  // what's typed, so secure channels have it too. In a channel shared
+  // between servers it reaches the caller's own server's members.
+  rpc SendTyping(SendTypingRequest) returns (SendTypingResponse);
 }
+
+message SendTypingRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The thread whose reply box they're typing in (its parent message's id);
+  // empty for the channel.
+  string thread_id = 3;
+}
+
+message SendTypingResponse {}
 
 message SendMessageRequest {
   string server_id = 1;
