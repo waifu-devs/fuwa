@@ -1,0 +1,26 @@
+{
+  "build.commit": "Собрано из коммита {commit}",
+  "update.updated": "fuwa обновилась",
+  "update.reload": "Перезагрузить",
+  "update.later": "Позже",
+  "update.laterHint": "Позже: пользоваться этой версией до перезагрузки",
+  "update.hasFeature": "На {instance} есть {feature}. Обновите fuwa, чтобы этим пользоваться",
+  "update.hasFeatures": {
+    "one": "На {instance} есть {feature} и ещё {count} функция. Обновите fuwa, чтобы ими пользоваться",
+    "few": "На {instance} есть {feature} и ещё {count} функции. Обновите fuwa, чтобы ими пользоваться",
+    "many": "На {instance} есть {feature} и ещё {count} функций. Обновите fuwa, чтобы ими пользоваться",
+    "other": "На {instance} есть {feature} и ещё {count} функции. Обновите fuwa, чтобы ими пользоваться"
+  },
+  "update.tooOld": "Чтобы на {instance} всё работало, нужна более новая fuwa",
+  "update.anInstance": "инстансе",
+  "update.somethingNew": "кое-что новое",
+  "announcement.until": "До {time}",
+  "announcement.close": "Закрыть объявление",
+  "hosted.label": "Размещено Waifu Devs",
+  "hosted.who": "Этот инстанс держат те же люди, что делают fuwa.",
+  "hosted.checked": "{host} · ваш браузер проверил его сертификат",
+  "hosted.why": "Этот значок получают только инстансы на наших собственных адресах. Приложение смотрит только на адрес: любой сервер может сказать о себе что угодно.",
+  "hosted.about": "О fuwa",
+  "signInNotice.added": "{date} в ваш аккаунт добавлен способ входа: {name}. Это были не вы?",
+  "signInNotice.review": "Проверить"
+}

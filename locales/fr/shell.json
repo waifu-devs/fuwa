@@ -1,0 +1,24 @@
+{
+  "build.commit": "Compilé depuis le commit {commit}",
+  "update.updated": "fuwa a été mis à jour",
+  "update.reload": "Recharger",
+  "update.later": "Plus tard",
+  "update.laterHint": "Plus tard : continuer avec cette version jusqu’au prochain rechargement",
+  "update.hasFeature": "{instance} propose {feature}. Mets fuwa à jour pour l’utiliser",
+  "update.hasFeatures": {
+    "one": "{instance} propose {feature} et {count} autre nouveauté. Mets fuwa à jour pour les utiliser",
+    "other": "{instance} propose {feature} et {count} autres nouveautés. Mets fuwa à jour pour les utiliser"
+  },
+  "update.tooOld": "{instance} a besoin d’une version plus récente de fuwa pour que tout fonctionne",
+  "update.anInstance": "Une instance",
+  "update.somethingNew": "une nouveauté",
+  "announcement.until": "Jusqu’à {time}",
+  "announcement.close": "Fermer l’annonce",
+  "hosted.label": "Hébergée par Waifu Devs",
+  "hosted.who": "Les gens qui font fuwa gèrent cette instance.",
+  "hosted.checked": "{host} · ton navigateur a vérifié son certificat",
+  "hosted.why": "Seules les instances à nos propres adresses ont ce badge. L’app se fie uniquement à l’adresse, car n’importe quel serveur peut dire n’importe quoi sur lui-même.",
+  "hosted.about": "À propos de fuwa",
+  "signInNotice.added": "{name} a été ajouté comme moyen de connexion à ton compte le {date}. Ce n’était pas toi ?",
+  "signInNotice.review": "Vérifier"
+}

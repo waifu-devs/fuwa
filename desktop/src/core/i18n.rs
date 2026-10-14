@@ -129,7 +129,8 @@ pub fn is_tag(value: &str) -> bool {
     value.len() <= 12 && base_ok && rest_ok
 }
 
-/// The shipped language closest to what's asked for: exact, then the same language ("es-MX" gets "es"), else English.
+/// The shipped language closest to what's asked for: exact, then the same language ("es-MX" gets "es",
+/// "pt" gets "pt-BR"), else English.
 pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
     for want in requested {
         let want = want.as_ref().trim().replace('_', "-").to_ascii_lowercase();
@@ -141,6 +142,10 @@ pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
         }
         let base = want.split('-').next().unwrap_or_default();
         if let Some(code) = available.iter().find(|c| c.to_ascii_lowercase() == base) {
+            return code.to_string();
+        }
+        // Another country's variant beats English: "pt-PT" gets "pt-BR".
+        if let Some(code) = available.iter().find(|c| c.split('-').next().is_some_and(|b| b.eq_ignore_ascii_case(base))) {
             return code.to_string();
         }
     }
@@ -328,11 +333,21 @@ pub fn plural(rule: &str, n: u64) -> &'static str {
                 "other"
             }
         }
-        // Spanish, French, Italian, Portuguese: exact millions take "many" ("1 millón de").
+        // Spanish and Italian: exact millions take "many" ("1 millón de").
         "one-many-other-romance" => {
             if n == 1 {
                 "one"
             } else if n != 0 && n.is_multiple_of(1_000_000) {
+                "many"
+            } else {
+                "other"
+            }
+        }
+        // French and Portuguese: like the above, but 0 is "one" too ("0 message").
+        "one-many-other-french" => {
+            if n <= 1 {
+                "one"
+            } else if n.is_multiple_of(1_000_000) {
                 "many"
             } else {
                 "other"
@@ -449,6 +464,12 @@ mod tests {
         assert_eq!(plural("one-many-other-romance", 1), "one");
         assert_eq!(plural("one-many-other-romance", 1_000_000), "many");
         assert_eq!(plural("one-many-other-romance", 1_000_001), "other");
+        assert_eq!(plural("one-many-other-romance", 0), "other");
+        assert_eq!(plural("one-many-other-french", 0), "one");
+        assert_eq!(plural("one-many-other-french", 1), "one");
+        assert_eq!(plural("one-many-other-french", 2), "other");
+        assert_eq!(plural("one-many-other-french", 3_000_000), "many");
+        assert_eq!(plural("other", 1), "other");
         assert_eq!(plural("one-few-many-other-slavic", 21), "one");
         assert_eq!(plural("one-few-many-other-slavic", 22), "few");
         assert_eq!(plural("one-few-many-other-slavic", 12), "many");
@@ -479,6 +500,8 @@ mod tests {
         assert_eq!(negotiate(&["es-MX", "en"], &shipped), "es");
         assert_eq!(negotiate(&["pt_br"], &shipped), "pt-BR");
         assert_eq!(negotiate(&["fr"], &shipped), "en");
+        assert_eq!(negotiate(&["pt-PT", "en"], &shipped), "pt-BR");
+        assert_eq!(negotiate(&["pt"], &shipped), "pt-BR");
         for ok in ["en", "es", "pt-BR", "zh-Hant", "fil"] {
             assert!(is_tag(ok), "{ok}");
         }
