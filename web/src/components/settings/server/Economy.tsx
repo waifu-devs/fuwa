@@ -1,10 +1,11 @@
-import { ChevronDownIcon, CoinsIcon, EyeOffIcon, InfinityIcon, PlusIcon, ShieldIcon, SparklesIcon, StoreIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import { ChevronDownIcon, CoinsIcon, DicesIcon, EyeOffIcon, InfinityIcon, PlusIcon, ShieldIcon, SparklesIcon, StoreIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Permission, type Currency, type ProfileItem, type Role, type ShopListing } from "@/gen/fuwa/v1/types_pb";
 import { createCurrency, createListing, deleteCurrency, deleteListing, economyMessage, updateCurrency, updateListing, useEconomy } from "@/fuwa/economy";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
+import { BannersSection } from "@/components/settings/server/GachaBanners";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { Amount, CurrencyIcon, ListingVisual, listingName } from "@/components/economy/shared";
 import { confirmFirst } from "@/components/menus/dialogs";
@@ -57,6 +58,7 @@ const NEW = "new";
 export function Economy({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const { t } = useI18n();
   const { currencies, shop } = useEconomy(instanceKey, serverId, true);
+  const gacha = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "gacha"));
   const [open, setOpen] = useState<Open>(null);
   const toggle = (next: NonNullable<Open>) => setOpen((o) => (o?.kind === next.kind && o.id === next.id ? null : next));
   const isOpen = (kind: "currency" | "listing", id: string) => open?.kind === kind && open.id === id;
@@ -133,6 +135,8 @@ export function Economy({ instanceKey, serverId }: { instanceKey: string; server
           </ul>
         )}
       </Section>
+
+      {gacha && <BannersSection instanceKey={instanceKey} serverId={serverId} currencies={currencies} shop={shop} />}
     </div>
   );
 }
@@ -157,7 +161,7 @@ function Coins() {
   );
 }
 
-function Section({ title, count, action, children }: { title: string; count: number; action: ReactNode; children: ReactNode }) {
+export function Section({ title, count, action, children }: { title: string; count: number; action: ReactNode; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -174,7 +178,7 @@ function Section({ title, count, action, children }: { title: string; count: num
   );
 }
 
-const Shimmer = () => (
+export const Shimmer = () => (
   <div className="flex flex-col gap-2">
     {[0, 1].map((n) => (
       <div key={n} className="shimmer h-16 rounded-2xl" />
@@ -182,7 +186,7 @@ const Shimmer = () => (
   </div>
 );
 
-function Empty({ icon, title, hint }: { icon: string; title: string; hint: string }) {
+export function Empty({ icon, title, hint }: { icon: string; title: string; hint: string }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-1 rounded-3xl border border-dashed py-8 text-center">
       <motion.span animate={{ y: [0, -6, 0], rotate: [0, 6, -6, 0] }} transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.8 }} className="text-4xl">
@@ -195,7 +199,7 @@ function Empty({ icon, title, hint }: { icon: string; title: string; hint: strin
 }
 
 /** A card that folds open to edit what it shows. */
-function Card({ open, summary, onToggle, children }: { open: boolean; summary: ReactNode; onToggle: () => void; children: ReactNode }) {
+export function Card({ open, summary, onToggle, children }: { open: boolean; summary: ReactNode; onToggle: () => void; children: ReactNode }) {
   return (
     <motion.li
       layout="position"
@@ -220,7 +224,7 @@ function Card({ open, summary, onToggle, children }: { open: boolean; summary: R
   );
 }
 
-function Field({ label, hint, children, wrong }: { label: string; hint?: ReactNode; children: ReactNode; wrong?: boolean }) {
+export function Field({ label, hint, children, wrong }: { label: string; hint?: ReactNode; children: ReactNode; wrong?: boolean }) {
   return (
     <label className="flex flex-col gap-1">
       <span className={cn("text-xs font-bold text-muted-foreground uppercase", wrong && "text-destructive")}>{label}</span>
@@ -504,6 +508,7 @@ function ListingCard({
   const access = useAccess(instanceKey, serverId);
   const roles = useMemo(() => inst?.roles[serverId] ?? [], [inst?.roles, serverId]);
   const items = inst?.serverProfileItems[serverId];
+  const gacha = instanceHas(inst?.node?.versions, "gacha");
   const [draft, setDraft] = useState<ListingDraft>(() => listingDraft(listing, currencies[0]?.id, position));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -573,6 +578,11 @@ function ListingCard({
               {listing && !listing.available && (
                 <span className="flex items-center gap-0.5 rounded bg-muted px-1 text-[0.6rem] font-extrabold tracking-wide text-muted-foreground uppercase">
                   <EyeOffIcon className="size-2.5" /> {t("serversettings.economy.hidden")}
+                </span>
+              )}
+              {listing?.gachaOnly && (
+                <span className="flex items-center gap-0.5 rounded bg-violet-500/15 px-1 text-[0.6rem] font-extrabold tracking-wide text-violet-600 uppercase dark:text-violet-400">
+                  <DicesIcon className="size-2.5" /> {t("chattools.economy.gacha.only")}
                 </span>
               )}
             </span>
@@ -645,6 +655,9 @@ function ListingCard({
         </Field>
       </div>
       <Toggle checked={draft.available} onChange={(available) => set({ available })} label={t("serversettings.economy.available")} hint={t("serversettings.economy.availableHint")} />
+      {(gacha || draft.gachaOnly) && (
+        <Toggle checked={draft.gachaOnly} onChange={(gachaOnly) => set({ gachaOnly })} label={t("serversettings.economy.gachaOnly")} hint={t("serversettings.economy.gachaOnlyHint")} />
+      )}
       {draft.kind === LISTING_PROFILE_ITEM && <p className="text-xs text-muted-foreground">{t("serversettings.economy.itemLockHint")}</p>}
       {listing && (
         <div className="flex justify-end">

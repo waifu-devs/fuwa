@@ -330,6 +330,7 @@ impl App {
                         | pb::MediaPurpose::Avatar
                         | pb::MediaPurpose::Attachment
                         | pb::MediaPurpose::Decoration
+                        | pb::MediaPurpose::ShopArt
                 ) && row.server_id.as_deref() == Some(server_id)
             }
         };

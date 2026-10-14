@@ -22,6 +22,7 @@ import {
   sameRules,
   ledgerLine,
   LEDGER_EARN,
+  LEDGER_GACHA,
   LEDGER_GRANT,
   LEDGER_KINDS,
   LEDGER_PURCHASE,
@@ -61,7 +62,7 @@ const at = (ms: number) => ({ seconds: BigInt(Math.floor(ms / 1000)), nanos: 0 }
 const cur = (id: string, position = 0, extra: Partial<Currency> = {}): Currency => ({ id, position, serverId: "S", name: id, iconEmoji: "", iconEmojiId: "", description: "", earn: [], transferable: false, ...extra }) as Currency;
 const bal = (currencyId: string, amount: number, extra: Partial<Balance> = {}): Balance => ({ currencyId, userId: "me", amount: BigInt(amount), earned: 0n, spent: 0n, dailyStreak: 0, ...extra }) as Balance;
 const lst = (id: string, extra: Partial<ShopListing> = {}): ShopListing =>
-  ({ id, currencyId: "C", kind: LISTING_CUSTOM, targetId: "", name: id, description: "", price: 10n, sold: 0n, position: 0, available: true, ...extra }) as ShopListing;
+  ({ id, currencyId: "C", kind: LISTING_CUSTOM, targetId: "", name: id, description: "", price: 10n, sold: 0n, position: 0, available: true, gachaOnly: false, ...extra }) as ShopListing;
 const rule = (extra: Partial<EarnRule> = {}): EarnRule => ({ action: DAILY, amount: 50n, cooldownSeconds: 0, dailyCap: 0n, streakBonus: 10n, streakMaxDays: 3, games: [], ...extra }) as EarnRule;
 const ev = (payload: EconomyPayload) => payload;
 
@@ -69,7 +70,7 @@ test("every action and ledger kind has words in both languages", () => {
   for (const a of ACTIONS) for (const key of [a.label, a.about]) assert.ok(known(key), key);
   for (const k of LEDGER_KINDS) assert.ok(known(k.label), k.label);
   assert.ok(known(actionLabel(99)));
-  for (const kind of [LEDGER_EARN, LEDGER_GRANT, LEDGER_TRANSFER, LEDGER_PURCHASE, 9])
+  for (const kind of [LEDGER_EARN, LEDGER_GRANT, LEDGER_TRANSFER, LEDGER_PURCHASE, LEDGER_GACHA, 9])
     for (const amount of [5n, -5n])
       for (const extra of [{ roleId: "" , actorId: "A" }, { roleId: "R", actorId: "A" }, { roleId: "", actorId: "" }])
         for (const action of [0, 1, 2, 3, 4, 5, 6]) {
@@ -220,7 +221,7 @@ test("the shop: what's for sale, what you own, what's locked", () => {
 });
 
 test("events keep a server's economy, and applying one twice changes nothing", () => {
-  const start: ServerEconomy = { currencies: [cur("A")], shop: [lst("L", { currencyId: "A" })], wallet: newWallet([bal("A", 5)], []) };
+  const start: ServerEconomy = { currencies: [cur("A")], shop: [lst("L", { currencyId: "A" })], wallet: newWallet([bal("A", 5)], []), banners: null, progress: {} };
   // A new currency starts at zero in the wallet; a deleted one takes its balance and listings.
   const listed = ev({ case: "currenciesUpdated", value: { currencies: [cur("B", 1), cur("A2", 0)] } } as EconomyPayload);
   const once = applyEconomy(start, listed, "me").state;

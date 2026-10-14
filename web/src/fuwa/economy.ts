@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
-import type { EconomyOverview, ListLedgerResponse } from "@/gen/fuwa/v1/economy_pb";
-import type { Balance, Currency, Event, LedgerKind, ShopListing, ShopListingKind } from "@/gen/fuwa/v1/types_pb";
+import { timestampFromMs } from "@bufbuild/protobuf/wkt";
+import type { EconomyOverview, ListGachaPullsResponse, ListLedgerResponse } from "@/gen/fuwa/v1/economy_pb";
+import type { Balance, Currency, Event, GachaBanner, GachaDuplicates, LedgerKind, ShopListing, ShopListingKind } from "@/gen/fuwa/v1/types_pb";
 import { i18n } from "@/i18n/i18n";
 import { instanceHas } from "@/lib/compat";
 import {
@@ -10,6 +11,7 @@ import {
   EMPTY,
   LEDGER_PAGE,
   newWallet,
+  sortBanners,
   sortCurrencies,
   sortListings,
   withBalance,
@@ -22,6 +24,7 @@ import {
   type NewListingValue,
   type ServerEconomy,
 } from "@/lib/economy";
+import { withProgress, type BannerValue } from "@/lib/gacha";
 import { reportUsage } from "@/lib/reports";
 import { toFuwaError } from "./errors";
 import { store, useFuwa } from "./store";
@@ -83,6 +86,7 @@ export function loadEconomy(instanceKey: string, serverId: string): Promise<void
       if (currencies.length) await readWallet(instanceKey, serverId);
       // Loaded again (joined anew): the shop shown follows.
       if (economyNow(instanceKey, serverId).shop) await loadShop(instanceKey, serverId);
+      if (economyNow(instanceKey, serverId).banners) await loadBanners(instanceKey, serverId);
     } catch {
       // Shown again the next time something asks.
     } finally {
@@ -111,6 +115,25 @@ export function loadShop(instanceKey: string, serverId: string): Promise<void> {
     .finally(() => shopLoading.delete(key));
 }
 
+/** Where the instance has gacha banners. */
+export const gachaHere = (instanceKey: string) => instanceHas(store.get().instances[instanceKey]?.node?.versions, "gacha");
+
+const bannersLoading = new Set<string>();
+/** Reads the gacha banners and your progress on them. */
+export function loadBanners(instanceKey: string, serverId: string): Promise<void> {
+  const key = keyOf(instanceKey, serverId);
+  if (bannersLoading.has(key) || !gachaHere(instanceKey)) return Promise.resolve();
+  bannersLoading.add(key);
+  return api(instanceKey)
+    .listGachaBanners({ serverId })
+    .then(
+      ({ banners, progress }) =>
+        update(instanceKey, serverId, (s) => ({ ...s, banners: sortBanners(banners), progress: Object.fromEntries(progress.map((p) => [p.bannerId, p])) })),
+      () => {},
+    )
+    .finally(() => bannersLoading.delete(key));
+}
+
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Several wallet changes at once (grants to a role) read the wallet once. */
 function rereadSoon(instanceKey: string, serverId: string) {
@@ -134,12 +157,17 @@ export function useEconomy(instanceKey: string, serverId: string, shop = false):
   const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "economy"));
   const missing = here && !!serverId && state.currencies === null;
   const shopMissing = here && !!serverId && shop && state.shop === null;
+  const gacha = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "gacha"));
+  const bannersMissing = gacha && !!serverId && shop && state.banners === null;
   useEffect(() => {
     if (missing) void loadEconomy(instanceKey, serverId);
   }, [missing, instanceKey, serverId]);
   useEffect(() => {
     if (shopMissing) void loadShop(instanceKey, serverId);
   }, [shopMissing, instanceKey, serverId]);
+  useEffect(() => {
+    if (bannersMissing) void loadBanners(instanceKey, serverId);
+  }, [bannersMissing, instanceKey, serverId]);
   return state;
 }
 
@@ -246,9 +274,11 @@ export async function updateCurrency(instanceKey: string, serverId: string, curr
 export async function deleteCurrency(instanceKey: string, serverId: string, currencyId: string) {
   await call(() => api(instanceKey).deleteCurrency({ serverId, currencyId }));
   update(instanceKey, serverId, (s) => ({
+    ...s,
     currencies: s.currencies?.filter((c) => c.id !== currencyId) ?? null,
     shop: s.shop?.filter((l) => l.currencyId !== currencyId) ?? null,
     wallet: s.wallet ? { ...s.wallet, balances: s.wallet.balances.filter((b) => b.currencyId !== currencyId) } : null,
+    banners: s.banners?.filter((b) => b.currencyId !== currencyId) ?? null,
   }));
 }
 
@@ -271,6 +301,71 @@ export async function updateListing(instanceKey: string, serverId: string, listi
 export async function deleteListing(instanceKey: string, serverId: string, listingId: string) {
   await call(() => api(instanceKey).deleteShopListing({ serverId, listingId }));
   update(instanceKey, serverId, (s) => ({ ...s, shop: s.shop?.filter((l) => l.id !== listingId) ?? null }));
+}
+
+// ── Gacha ────────────────────────────────────────────────────────────────
+
+/** Pulls once or the banner's multi-pull, at the price shown; what dropped comes back. */
+export async function pull(instanceKey: string, serverId: string, banner: GachaBanner, count: number, price: number) {
+  reportUsage(count > 1 ? "economy.gacha_multi" : "economy.gacha_pull");
+  const res = await call(() => api(instanceKey).pull({ serverId, bannerId: banner.id, count, expectedPrice: BigInt(price) }));
+  for (const balance of res.balances) keepBalance(instanceKey, serverId, balance, res.pull?.ledgerId);
+  update(instanceKey, serverId, (s) => ({ ...s, progress: withProgress(s.progress, res.progress) }));
+  return res;
+}
+
+/** Pulls, newest first, with their rolls: yours, someone's or (`userId` "*") everyone's. */
+export const listPulls = (instanceKey: string, serverId: string, filter: { bannerId?: string; userId?: string; beforeId?: string }): Promise<ListGachaPullsResponse> =>
+  call(() => api(instanceKey).listGachaPulls({ serverId, bannerId: filter.bannerId ?? "", userId: filter.userId ?? "", beforeId: filter.beforeId ?? "", limit: LEDGER_PAGE }));
+
+const toBanner = (serverId: string, b: BannerValue) => ({
+  id: b.id,
+  serverId,
+  name: b.name,
+  description: b.description,
+  artUrl: b.artUrl,
+  currencyId: b.currencyId,
+  pullPrice: b.pullPrice,
+  multiPull: b.multiPull,
+  multiPullPrice: b.multiPullPrice,
+  tiers: b.tiers,
+  prizes: b.prizes,
+  pityPulls: b.pityPulls,
+  pityTierId: b.pityTierId,
+  duplicates: b.duplicates as GachaDuplicates,
+  refundCurrencyId: b.refundCurrencyId,
+  refundAmount: b.refundAmount,
+  maxPulls: b.maxPulls,
+  startsAt: b.startsAtMs ? timestampFromMs(b.startsAtMs) : undefined,
+  endsAt: b.endsAtMs ? timestampFromMs(b.endsAtMs) : undefined,
+  available: b.available,
+  position: b.position,
+});
+
+const keepBanner = (instanceKey: string, serverId: string, banner: GachaBanner | undefined) =>
+  banner &&
+  update(instanceKey, serverId, (s) => {
+    const list = s.banners ?? [];
+    const at = list.findIndex((b) => b.id === banner.id);
+    return { ...s, banners: sortBanners(at === -1 ? [...list, banner] : list.map((b, n) => (n === at ? banner : b))) };
+  });
+
+export async function createBanner(instanceKey: string, serverId: string, banner: BannerValue) {
+  reportUsage("economy.banner_create");
+  const res = await call(() => api(instanceKey).createGachaBanner({ serverId, banner: toBanner(serverId, banner) }));
+  keepBanner(instanceKey, serverId, res.banner);
+  return res.banner;
+}
+
+export async function updateBanner(instanceKey: string, serverId: string, banner: BannerValue) {
+  const res = await call(() => api(instanceKey).updateGachaBanner({ serverId, banner: toBanner(serverId, banner) }));
+  keepBanner(instanceKey, serverId, res.banner);
+  return res.banner;
+}
+
+export async function deleteBanner(instanceKey: string, serverId: string, bannerId: string) {
+  await call(() => api(instanceKey).deleteGachaBanner({ serverId, bannerId }));
+  update(instanceKey, serverId, (s) => ({ ...s, banners: s.banners?.filter((b) => b.id !== bannerId) ?? null }));
 }
 
 /** The finance page for one currency over the last `days`. */
@@ -312,7 +407,7 @@ export function forgetEconomy(instanceKey: string) {
 
 // ── The shop, opened from anywhere ───────────────────────────────────────
 
-export type ShopTab = "shop" | "history" | "send";
+export type ShopTab = "shop" | "gacha" | "history" | "send";
 type ShopOpen = { instanceKey: string; serverId: string; tab: ShopTab; n: number };
 
 let shopView: { open: boolean; last: ShopOpen | null } = { open: false, last: null };

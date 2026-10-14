@@ -1,4 +1,4 @@
-import type { Balance, Currency, EarnRule, Event, LedgerEntry, ShopListing } from "@/gen/fuwa/v1/types_pb";
+import type { Balance, Currency, EarnRule, Event, GachaBanner, GachaProgress, LedgerEntry, ShopListing } from "@/gen/fuwa/v1/types_pb";
 import type { Key } from "../i18n/i18n.ts";
 
 /*
@@ -28,6 +28,7 @@ export const LEDGER_EARN = 1;
 export const LEDGER_GRANT = 2;
 export const LEDGER_TRANSFER = 3;
 export const LEDGER_PURCHASE = 4;
+export const LEDGER_GACHA = 5;
 
 /** What a currency without an icon shows, as every app does. */
 export const FALLBACK_ICON = "🪙";
@@ -70,6 +71,7 @@ export const LEDGER_KINDS: { kind: number; label: Key }[] = [
   { kind: LEDGER_GRANT, label: "chattools.economy.kind.grant" },
   { kind: LEDGER_TRANSFER, label: "chattools.economy.kind.transfer" },
   { kind: LEDGER_PURCHASE, label: "chattools.economy.kind.purchase" },
+  { kind: LEDGER_GACHA, label: "chattools.economy.kind.gacha" },
 ];
 
 // ── Numbers ──────────────────────────────────────────────────────────────
@@ -98,7 +100,7 @@ const byPosition = <T extends { position: number; id: string }>(a: T, b: T) => a
 export const sortCurrencies = <T extends Pick<Currency, "position" | "id">>(list: readonly T[]): T[] => [...list].sort(byPosition);
 export const sortListings = <T extends Pick<ShopListing, "position" | "id">>(list: readonly T[]): T[] => [...list].sort(byPosition);
 
-/** What members see of the shop: the available listings, of currencies still there. */
+/** What members see of the shop: the available listings, of currencies still there (gacha-only ones too, to show where they drop). */
 export const forSale = <T extends Pick<ShopListing, "available" | "currencyId">>(listings: readonly T[], currencies: readonly Pick<Currency, "id">[]): T[] =>
   listings.filter((l) => l.available && currencies.some((c) => c.id === l.currencyId));
 
@@ -143,10 +145,21 @@ export type Wallet = {
   seen: Record<string, string>;
 };
 
-/** One server's economy as the app knows it; null for what isn't loaded yet. */
-export type ServerEconomy = { currencies: Currency[] | null; shop: ShopListing[] | null; wallet: Wallet | null };
+/**
+ * One server's economy as the app knows it; null for what isn't loaded yet.
+ * `progress` is your pulls on each gacha banner, loaded with the banners.
+ */
+export type ServerEconomy = {
+  currencies: Currency[] | null;
+  shop: ShopListing[] | null;
+  wallet: Wallet | null;
+  banners: GachaBanner[] | null;
+  progress: Record<string, GachaProgress>;
+};
 
-export const EMPTY: ServerEconomy = { currencies: null, shop: null, wallet: null };
+export const EMPTY: ServerEconomy = { currencies: null, shop: null, wallet: null, banners: null, progress: {} };
+
+export const sortBanners = <T extends Pick<GachaBanner, "position" | "id">>(list: readonly T[]): T[] => [...list].sort(byPosition);
 
 export const newWallet = (balances: readonly Balance[], ownedItemIds: readonly string[]): Wallet => ({ balances: [...balances], ownedItemIds: [...ownedItemIds], seen: {} });
 
@@ -175,10 +188,19 @@ export function withListing(shop: readonly ShopListing[], listing: ShopListing):
 
 export type EconomyPayload = Extract<
   Event["payload"],
-  { case: "currenciesUpdated" | "shopUpdated" | "shopListingUpdated" | "balanceUpdated" | "walletsChanged" | "purchaseMade" }
+  { case: "currenciesUpdated" | "shopUpdated" | "shopListingUpdated" | "balanceUpdated" | "walletsChanged" | "purchaseMade" | "gachaBannersUpdated" | "gachaPulled" }
 >;
 
-export const ECONOMY_EVENTS: ReadonlySet<string> = new Set(["currenciesUpdated", "shopUpdated", "shopListingUpdated", "balanceUpdated", "walletsChanged", "purchaseMade"]);
+export const ECONOMY_EVENTS: ReadonlySet<string> = new Set([
+  "currenciesUpdated",
+  "shopUpdated",
+  "shopListingUpdated",
+  "balanceUpdated",
+  "walletsChanged",
+  "purchaseMade",
+  "gachaBannersUpdated",
+  "gachaPulled",
+]);
 
 /**
  * A server's economy after one of its events, and whether the wallet must
@@ -201,8 +223,9 @@ export function applyEconomy(state: ServerEconomy, payload: EconomyPayload, me: 
         wallet = kept.length === wallet.balances.length && !fresh.length ? wallet : { ...wallet, balances: [...kept, ...fresh] };
       }
       const shop = state.shop && state.shop.some((l) => !ids.has(l.currencyId)) ? state.shop.filter((l) => ids.has(l.currencyId)) : state.shop;
+      const banners = state.banners && state.banners.some((b) => !ids.has(b.currencyId)) ? state.banners.filter((b) => ids.has(b.currencyId)) : state.banners;
       // A first currency: there's a wallet to read now.
-      return { state: { currencies, shop, wallet }, reread: !wallet && currencies.length > 0 };
+      return { state: { ...state, currencies, shop, wallet, banners }, reread: !wallet && currencies.length > 0 };
     }
     case "shopUpdated":
       return { state: { ...state, shop: sortListings(payload.value.listings) }, reread: false };
@@ -223,6 +246,22 @@ export function applyEconomy(state: ServerEconomy, payload: EconomyPayload, me: 
       let next = state;
       if (listing && state.shop) next = { ...next, shop: withListing(state.shop, listing) };
       if (entry?.userId === me && listing?.kind === LISTING_PROFILE_ITEM && next.wallet) next = { ...next, wallet: withOwned(next.wallet, listing.targetId) };
+      return { state: next, reread: false };
+    }
+    case "gachaBannersUpdated":
+      return { state: { ...state, banners: sortBanners(payload.value.banners) }, reread: false };
+    case "gachaPulled": {
+      const { pull, progress } = payload.value;
+      if (!pull || pull.userId !== me) return { state, reread: false };
+      let next = state;
+      const had = progress ? state.progress[progress.bannerId] : undefined;
+      if (progress && !(had && had.pulls > progress.pulls)) next = { ...next, progress: { ...next.progress, [progress.bannerId]: progress } };
+      // Profile items won are yours to wear now.
+      const won = pull.results.filter((r) => r.outcome === 1 && r.listingId);
+      for (const r of won) {
+        const listing = state.shop?.find((l) => l.id === r.listingId);
+        if (listing?.kind === LISTING_PROFILE_ITEM && next.wallet) next = { ...next, wallet: withOwned(next.wallet, listing.targetId) };
+      }
       return { state: next, reread: false };
     }
   }
@@ -463,6 +502,8 @@ export type ListingDraft = {
   stock: string;
   position: string;
   available: boolean;
+  /** Won only from gacha banners, never bought. */
+  gachaOnly: boolean;
 };
 
 export const listingDraft = (l: ShopListing | undefined, currencyId = "", position = 0): ListingDraft => ({
@@ -475,6 +516,7 @@ export const listingDraft = (l: ShopListing | undefined, currencyId = "", positi
   stock: l?.stock === undefined ? "" : String(num(l.stock)),
   position: String(l?.position ?? position),
   available: l?.available ?? true,
+  gachaOnly: l?.gachaOnly ?? false,
 });
 
 export type ListingProblem = "currency" | "target" | "name" | "price" | "stock" | "position";
@@ -490,10 +532,20 @@ export type NewListingValue = {
   stock?: bigint;
   position: number;
   available: boolean;
+  gachaOnly: boolean;
 };
 
 /** A ShopListingChange's fields (unset ones stay as they are). */
-export type ListingChangeValue = { name?: string; description?: string; price?: bigint; stock?: bigint; unlimited: boolean; position?: number; available?: boolean };
+export type ListingChangeValue = {
+  name?: string;
+  description?: string;
+  price?: bigint;
+  stock?: bigint;
+  unlimited: boolean;
+  position?: number;
+  available?: boolean;
+  gachaOnly?: boolean;
+};
 
 /** A listing to create, or what to change in one that's there and how many things changed. */
 export function listingChange(
@@ -521,6 +573,7 @@ export function listingChange(
     stock: stock === null ? undefined : BigInt(stock),
     position,
     available: draft.available,
+    gachaOnly: draft.gachaOnly,
   };
   const change: ListingChangeValue = { unlimited: false };
   if (!saved) return { count: 1, create, change };
@@ -551,13 +604,17 @@ export function listingChange(
     change.available = draft.available;
     count++;
   }
+  if (draft.gachaOnly !== saved.gachaOnly) {
+    change.gachaOnly = draft.gachaOnly;
+    count++;
+  }
   return { count, create, change };
 }
 
 // ── The ledger ───────────────────────────────────────────────────────────
 
 /** How one ledger line reads: a catalog key, and which of its people and things to name. */
-export function ledgerLine(entry: Pick<LedgerEntry, "kind" | "amount" | "action" | "roleId" | "actorId">): Key {
+export function ledgerLine(entry: Pick<LedgerEntry, "kind" | "amount" | "action" | "roleId" | "actorId" | "note">): Key {
   const out = num(entry.amount) < 0;
   switch (entry.kind) {
     case LEDGER_EARN:
@@ -569,6 +626,8 @@ export function ledgerLine(entry: Pick<LedgerEntry, "kind" | "amount" | "action"
       return out ? "chattools.economy.line.sent" : "chattools.economy.line.received";
     case LEDGER_PURCHASE:
       return "chattools.economy.line.bought";
+    case LEDGER_GACHA:
+      return out ? "chattools.economy.line.pulled" : entry.note === "duplicate" ? "chattools.economy.line.gachaRefund" : "chattools.economy.line.gachaWon";
     default:
       return "chattools.economy.line.other";
   }
@@ -655,5 +714,11 @@ export function economyProblem(err: { code: number; message: string }): Worded |
   if (/can't hold any more/.test(message)) return { key: "chattools.economy.problem.full" };
   if (/sold in the server's shop/.test(message)) return { key: "chattools.economy.problem.buyFirst" };
   if (/can't carry permissions/.test(message)) return { key: "chattools.economy.problem.powerfulRole" };
+  if (/only be won from the server's gacha banners/.test(message)) return { key: "chattools.economy.problem.gachaOnly" };
+  if (/^this banner isn't open yet/.test(message)) return { key: "chattools.economy.problem.bannerSoon" };
+  if (/^this banner has closed/.test(message)) return { key: "chattools.economy.problem.bannerClosed" };
+  if (/every pull this banner allows/.test(message)) return { key: "chattools.economy.problem.noPullsLeft" };
+  if ((found = message.match(/^you have (\d+) pulls left/))) return { key: "chattools.economy.problem.pullsLeft", values: { count: found[1]! } };
+  if (/nothing on this banner can drop/.test(message)) return { key: "chattools.economy.problem.nothingToDrop" };
   return null;
 }

@@ -52,8 +52,8 @@ const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("server_settings/overview.rs", 1),
     ("settings.rs", 2),
     ("settings_menu.rs", 1),
-    // Sending: a full-screen column over nothing that scrolls.
-    ("shop.rs", 1),
+    // Sending and the gacha banners: full-screen columns over nothing that scrolls.
+    ("shop.rs", 2),
     ("sidebar.rs", 1),
     ("threads.rs", 2),
     ("voice_stage.rs", 1),

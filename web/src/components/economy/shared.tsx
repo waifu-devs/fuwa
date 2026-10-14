@@ -2,7 +2,7 @@ import { LoaderCircleIcon, PackageIcon, ShieldIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import type { Currency, LedgerEntry, ProfileItem, Role, ShopListing, User } from "@/gen/fuwa/v1/types_pb";
-import { listLedger } from "@/fuwa/economy";
+import { economyNow, listLedger } from "@/fuwa/economy";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { EmojiImage } from "@/components/EmojiImage";
@@ -14,7 +14,7 @@ import { MiniCard } from "@/components/settings/account/EffectPicker";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { T, useI18n } from "@/i18n/react";
-import { FALLBACK_ICON, ledgerLine, LISTING_PROFILE_ITEM, LISTING_ROLE, num, withPage } from "@/lib/economy";
+import { FALLBACK_ICON, LEDGER_GACHA, ledgerLine, LISTING_PROFILE_ITEM, LISTING_ROLE, num, withPage } from "@/lib/economy";
 import { displayName, formatStamp, toDate } from "@/lib/format";
 import { SPRING } from "@/lib/motion";
 import { cssColor } from "@/lib/permissions";
@@ -301,6 +301,7 @@ function LedgerRow({
   const who = <b>{displayName(person(entry.counterpartId || entry.actorId))}</b>;
   const role = <RoleChip role={roles.find((r) => r.id === entry.roleId)} fallback={t("serversettings.audit.aRole")} />;
   const bought = <b>{listingName(listing, roles, items, t("chattools.economy.somethingFromShop"))}</b>;
+  const banner = <b>{(entry.bannerId && economyNow(instanceKey, serverId).banners?.find((b) => b.id === entry.bannerId)?.name) || t("chattools.economy.gacha.aBanner")}</b>;
   const owner = whose ? person(entry.userId) : undefined;
   const at = toDate(entry.createdAt);
   return (
@@ -321,11 +322,11 @@ function LedgerRow({
       <span className="min-w-0 flex-1">
         <span className="block text-sm break-words">
           {whose && <b className="mr-1">{displayName(owner)}</b>}
-          <T k={ledgerLine(entry)} values={{ who, role, listing: bought }} />
+          <T k={ledgerLine(entry)} values={{ who, role, listing: bought, banner }} />
         </span>
         <span className="block truncate text-xs text-muted-foreground" title={formatStamp(at)}>
           {formatStamp(at)}
-          {entry.note && <> · {entry.note}</>}
+          {entry.note && entry.kind !== LEDGER_GACHA && <> · {entry.note}</>}
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end">
