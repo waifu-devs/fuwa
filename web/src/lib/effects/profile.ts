@@ -1,8 +1,9 @@
 /**
  * Profile effects: an animated layer over someone's profile card, like
  * petals drifting past or stars twinkling at the edges. Each effect is data
- * (`ProfileEffectSpec`), not code or pictures: layers of small shapes, each
- * with a way of moving. The app turns a spec into a plan of particles and
+ * (`ProfileEffectSpec`): layers of small shapes, or of the effect's own
+ * pictures, each with a way of moving, and optionally a shader (WGSL, the
+ * custom shaders' format, `lib/effects/custom.ts`) drawn under them. The app turns a spec into a plan of particles and
  * plays it with transform and opacity animations only, so the browser's
  * compositor does the work and the page's own thread stays free.
  *
@@ -48,7 +49,10 @@ export type Paint = (typeof PAINT_TOKENS)[number] | `#${string}`;
 export type Range = [min: number, max: number];
 
 export type EffectLayer = {
-  shape: Shape;
+  /** A built-in shape; layers that draw one of the effect's pictures (`image`) have none. */
+  shape?: Shape;
+  /** One of the effect's pictures, by its place in `ProfileEffectSpec.pictures`. */
+  image?: number;
   motion: Motion;
   /** Intro layers play once when the card opens; idle ones loop after. */
   phase: "intro" | "idle";
@@ -61,6 +65,7 @@ export type EffectLayer = {
   duration: Range;
   /** Intro layers: when each particle starts, in milliseconds after opening. */
   delay?: Range;
+  /** A shape's colors; a picture keeps its own, and may leave these empty (its glow is then the theme's primary). */
   colors: Paint[];
   /** Turns by up to this many degrees over a pass. */
   spin?: number;
@@ -74,18 +79,32 @@ export type EffectLayer = {
   opacity?: number;
 };
 
+/** A shader under the particles: a custom shader's `fn shade` (lib/effects/custom.ts), how strongly it covers the card, and how fast it runs. */
+export type EffectShader = { code: string; intensity: number; speed: number };
+
+/** One of an effect's own pictures: an upload on the instance offering it. */
+export type EffectPicture = { url: string; animated: boolean };
+
 export type ProfileEffectSpec = {
   id: string;
   name: string;
   /** One short line for the picker. */
   description: string;
+  /** May be empty when there's a shader. */
   layers: EffectLayer[];
+  shader?: EffectShader;
+  /** The pictures image layers draw. Not in the spec's JSON: they come with the profile item (`ProfileItem.pictures`). */
+  pictures?: EffectPicture[];
 };
 
 /** The card these counts and sizes are for: a profile popout. */
 export const REFERENCE = { width: 304, height: 420 } as const;
 export const MAX_LAYERS = 6;
 export const MAX_PER_LAYER = 24;
+/** The most pictures an effect has. */
+export const MAX_PICTURES = 8;
+/** A shader's WGSL, at most (the custom shaders' cap). */
+export const MAX_EFFECT_SHADER_BYTES = 16 * 1024;
 /** Particles on screen at once for one card, after scaling. */
 export const MAX_PARTICLES = 60;
 
@@ -201,14 +220,18 @@ const paint = (value: unknown): Paint | null =>
  * `planEffect` (`lib/profile-items.ts`), and the cap on colors stays ahead
  * of the mapping.
  */
-export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
+export function sanitizeEffect(raw: unknown, pictures: readonly EffectPicture[] = []): ProfileEffectSpec | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.id !== "string" || !isEffectId(r.id)) return null;
+  const shown = pictures.slice(0, MAX_PICTURES);
   const layers = (Array.isArray(r.layers) ? r.layers : []).slice(0, MAX_LAYERS).flatMap((l): EffectLayer[] => {
     if (!l || typeof l !== "object") return [];
     const x = l as Record<string, unknown>;
-    const shape = oneOf(x.shape, SHAPES);
+    const image = typeof x.image === "number" && Number.isInteger(x.image) && x.image >= 0 && x.image < shown.length ? x.image : null;
+    // A layer naming a picture the effect doesn't have draws nothing, rather than a shape it didn't ask for.
+    if (x.image !== undefined && x.image !== null && image === null) return [];
+    const shape = image === null ? oneOf(x.shape, SHAPES) : null;
     const motion = oneOf(x.motion, MOTIONS);
     const phase = oneOf(x.phase, ["intro", "idle"] as const);
     const from = oneOf(x.from, REGIONS);
@@ -216,8 +239,10 @@ export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
     const size = range(x.size, 2, 96);
     const duration = range(x.duration, 300, 20000);
     const colors = (Array.isArray(x.colors) ? x.colors.slice(0, 32) : []).map(paint).filter((c): c is Paint => !!c).slice(0, 8);
-    if (!shape || !motion || !phase || !from || !count || !size || !duration || !colors.length) return [];
-    const layer: EffectLayer = { shape, motion, phase, count: Math.round(count), from, size, duration, colors };
+    if ((!shape && image === null) || !motion || !phase || !from || !count || !size || !duration || (!colors.length && image === null)) return [];
+    const layer: EffectLayer = { motion, phase, count: Math.round(count), from, size, duration, colors };
+    if (shape) layer.shape = shape;
+    else layer.image = image!;
     const delay = range(x.delay, 0, 3000);
     if (delay) layer.delay = delay;
     const spin = num(x.spin, -1440, 1440);
@@ -230,16 +255,38 @@ export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
     if (x.glow === true) layer.glow = true;
     return [layer];
   });
-  if (!layers.length) return null;
+  const shader = sanitizeEffectShader(r.shader);
+  if (!layers.length && !shader) return null;
   const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
-  return { id: r.id, name: text(r.name, 40) || r.id, description: text(r.description, 120), layers };
+  const spec: ProfileEffectSpec = { id: r.id, name: text(r.name, 40) || r.id, description: text(r.description, 120), layers };
+  if (shader) spec.shader = shader;
+  if (shown.length) spec.pictures = shown.map((p) => ({ url: p.url, animated: !!p.animated }));
+  return spec;
+}
+
+/**
+ * An effect's shader, as text that can't break anything: line ends made
+ * plain, no control characters but tabs, at most 16 KB, and its numbers in
+ * range. Whether the code may run (`shaderProblem`), compiles and is fast
+ * enough is the painter's to find out, as for any custom shader.
+ */
+export function sanitizeEffectShader(raw: unknown): EffectShader | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.code !== "string") return null;
+  const code = r.code.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+  if (!code.trim() || new TextEncoder().encode(code).length > MAX_EFFECT_SHADER_BYTES) return null;
+  return { code, intensity: num(r.intensity, 0.05, 1) ?? 1, speed: num(r.speed, 0, 4) ?? 1 };
 }
 
 // ───────────────────────── Planning particles ─────────────────────────
 
 /** One particle, ready to play: its shape, look, and the keyframes it moves through. */
 export type Particle = {
-  shape: Shape;
+  /** A built-in shape, or null for one of the effect's pictures (`image`). */
+  shape: Shape | null;
+  /** The picture's place in the spec's `pictures`, or null for a shape. */
+  image: number | null;
   size: number;
   /** A CSS color. */
   color: string;
@@ -428,9 +475,10 @@ export function planEffect(spec: ProfileEffectSpec, { width, height, seed, lite 
       const intro = layer.phase === "intro";
       const duration = Math.round(between(layer.duration));
       particles.push({
-        shape: layer.shape,
+        shape: layer.shape ?? null,
+        image: layer.image ?? null,
         size,
-        color: paintCss(pick(layer.colors)),
+        color: layer.colors.length ? paintCss(pick(layer.colors)) : paintCss("primary"),
         glow: !!layer.glow && !lite,
         phase: layer.phase,
         keyframes: frames,

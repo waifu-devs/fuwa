@@ -54,8 +54,9 @@ enum MediaPurpose {
   MEDIA_PURPOSE_ATTACHMENT = 7;
   // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
   MEDIA_PURPOSE_GIF = 8;
-  // An avatar decoration (ProfileItemService): with a server_id, one the
-  // server offers; without, one the instance does (instance admins).
+  // A profile item's picture (ProfileItemService): an avatar decoration,
+  // or one an effect draws. With a server_id, for an item the server
+  // offers; without, for one the instance does (instance admins).
   MEDIA_PURPOSE_DECORATION = 9;
 }
 

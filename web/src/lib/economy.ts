@@ -16,6 +16,7 @@ export const JOIN = 3;
 export const ONBOARDING = 4;
 export const REACTION_RECEIVED = 5;
 export const VOICE_MINUTE = 6;
+export const GAME_MINUTE = 7;
 
 /** fuwa.v1.ShopListingKind. */
 export const LISTING_ROLE = 1;
@@ -39,6 +40,9 @@ export const NOTE_MAX = 200;
 export const AMOUNT_MAX = 1_000_000_000;
 export const PRICE_MAX = 1_000_000_000_000;
 export const COOLDOWN_MAX = 86_400;
+/** Games one GAME_MINUTE rule names at most, and how long a name is. */
+export const GAMES_MAX = 50;
+export const GAME_NAME_MAX = 128;
 /** A page of the ledger. */
 export const LEDGER_PAGE = 50;
 /** The finance page's periods, in days. */
@@ -47,10 +51,11 @@ export const PERIODS = [7, 30, 90, 365] as const;
 const DAY_MS = 86_400_000;
 
 /** Each action a currency can reward, in the order the editor lists them, with its words and what else its rule takes. */
-export const ACTIONS: { action: number; label: Key; about: Key; cooldown?: true; streak?: true }[] = [
+export const ACTIONS: { action: number; label: Key; about: Key; cooldown?: true; streak?: true; games?: true; feature?: string }[] = [
   { action: MESSAGE, label: "serversettings.economy.action.message", about: "serversettings.economy.action.messageAbout", cooldown: true },
   { action: REACTION_RECEIVED, label: "serversettings.economy.action.reaction", about: "serversettings.economy.action.reactionAbout", cooldown: true },
   { action: VOICE_MINUTE, label: "serversettings.economy.action.voice", about: "serversettings.economy.action.voiceAbout" },
+  { action: GAME_MINUTE, label: "serversettings.economy.action.game", about: "serversettings.economy.action.gameAbout", games: true, feature: "economy-games" },
   { action: DAILY, label: "serversettings.economy.action.daily", about: "serversettings.economy.action.dailyAbout", streak: true },
   { action: JOIN, label: "serversettings.economy.action.join", about: "serversettings.economy.action.joinAbout" },
   { action: ONBOARDING, label: "serversettings.economy.action.onboarding", about: "serversettings.economy.action.onboardingAbout" },
@@ -268,25 +273,26 @@ export const dailyRule = (currency: Pick<Currency, "earn">) => currency.earn.fin
 // ── The earn rules editor ────────────────────────────────────────────────
 
 /** One action's rule as the editor holds it: switched on or not, numbers as typed. */
-export type RuleForm = { on: boolean; amount: string; cooldown: string; dailyCap: string; streakBonus: string; streakMaxDays: string };
+export type RuleForm = { on: boolean; amount: string; cooldown: string; dailyCap: string; streakBonus: string; streakMaxDays: string; games: string };
 export type RulesForm = Record<number, RuleForm>;
 
-const OFF: RuleForm = { on: false, amount: "", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "" };
+const OFF: RuleForm = { on: false, amount: "", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" };
 
 /** What a rule just switched on starts with. */
 export const STARTER: Record<number, Omit<RuleForm, "on">> = {
-  [MESSAGE]: { amount: "1", cooldown: "60", dailyCap: "", streakBonus: "", streakMaxDays: "" },
-  [REACTION_RECEIVED]: { amount: "1", cooldown: "30", dailyCap: "", streakBonus: "", streakMaxDays: "" },
-  [VOICE_MINUTE]: { amount: "1", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "" },
-  [DAILY]: { amount: "50", cooldown: "", dailyCap: "", streakBonus: "10", streakMaxDays: "7" },
-  [JOIN]: { amount: "100", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "" },
-  [ONBOARDING]: { amount: "100", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "" },
+  [MESSAGE]: { amount: "1", cooldown: "60", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" },
+  [REACTION_RECEIVED]: { amount: "1", cooldown: "30", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" },
+  [VOICE_MINUTE]: { amount: "1", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" },
+  [GAME_MINUTE]: { amount: "1", cooldown: "", dailyCap: "60", streakBonus: "", streakMaxDays: "", games: "" },
+  [DAILY]: { amount: "50", cooldown: "", dailyCap: "", streakBonus: "10", streakMaxDays: "7", games: "" },
+  [JOIN]: { amount: "100", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" },
+  [ONBOARDING]: { amount: "100", cooldown: "", dailyCap: "", streakBonus: "", streakMaxDays: "", games: "" },
 };
 
 const text = (n: number | bigint) => (num(n) ? String(num(n)) : "");
 
 /** A currency's rules as the editor shows them: every action, switched on where it has a rule. */
-export function rulesForm(earn: readonly Pick<EarnRule, "action" | "amount" | "cooldownSeconds" | "dailyCap" | "streakBonus" | "streakMaxDays">[]): RulesForm {
+export function rulesForm(earn: readonly Pick<EarnRule, "action" | "amount" | "cooldownSeconds" | "dailyCap" | "streakBonus" | "streakMaxDays" | "games">[]): RulesForm {
   const form: RulesForm = {};
   for (const { action } of ACTIONS) {
     const rule = earn.find((r) => r.action === action);
@@ -298,6 +304,7 @@ export function rulesForm(earn: readonly Pick<EarnRule, "action" | "amount" | "c
           dailyCap: text(rule.dailyCap),
           streakBonus: text(rule.streakBonus),
           streakMaxDays: text(rule.streakMaxDays),
+          games: rule.games.join("\n"),
         }
       : { ...OFF };
   }
@@ -305,12 +312,32 @@ export function rulesForm(earn: readonly Pick<EarnRule, "action" | "amount" | "c
 }
 
 /** The plain shape of an EarnRule, for the request. */
-export type RuleValue = { action: number; amount: bigint; cooldownSeconds: number; dailyCap: bigint; streakBonus: bigint; streakMaxDays: number };
+export type RuleValue = { action: number; amount: bigint; cooldownSeconds: number; dailyCap: bigint; streakBonus: bigint; streakMaxDays: number; games: string[] };
 
 /** Which field of which action is wrong. */
 export type RuleProblem = { action: number; field: keyof Omit<RuleForm, "on"> };
 
 const orZero = (s: string) => (s.trim() === "" ? "0" : s);
+
+/**
+ * A game rule's games from what was typed, one per line: trimmed, each once
+ * (ignoring case, as the server matches them), or null when there are too
+ * many or one is too long.
+ */
+export function parseGames(text: string): string[] | null {
+  const seen = new Set<string>();
+  const games: string[] = [];
+  for (const line of text.split("\n")) {
+    const game = line.trim();
+    if (!game) continue;
+    if ([...game].length > GAME_NAME_MAX) return null;
+    const key = game.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    games.push(game);
+  }
+  return games.length > GAMES_MAX ? null : games;
+}
 
 /** The rules to send, from what's switched on, or the first field that isn't a number the server takes. */
 export function formRules(form: RulesForm): { rules: RuleValue[] } | { problem: RuleProblem } {
@@ -328,13 +355,15 @@ export function formRules(form: RulesForm): { rules: RuleValue[] } | { problem: 
     if (bonus === null) return { problem: { action: meta.action, field: "streakBonus" } };
     const days = meta.streak ? parseAmount(orZero(f.streakMaxDays), 0, 3650) : 0;
     if (days === null) return { problem: { action: meta.action, field: "streakMaxDays" } };
-    rules.push({ action: meta.action, amount: BigInt(amount), cooldownSeconds: cooldown, dailyCap: BigInt(cap), streakBonus: BigInt(bonus), streakMaxDays: days });
+    const games = meta.games ? parseGames(f.games) : [];
+    if (games === null) return { problem: { action: meta.action, field: "games" } };
+    rules.push({ action: meta.action, amount: BigInt(amount), cooldownSeconds: cooldown, dailyCap: BigInt(cap), streakBonus: BigInt(bonus), streakMaxDays: days, games });
   }
   return { rules };
 }
 
 /** Whether two sets of rules say the same. */
-export function sameRules(a: readonly RuleValue[], b: readonly Pick<EarnRule, "action" | "amount" | "cooldownSeconds" | "dailyCap" | "streakBonus" | "streakMaxDays">[]): boolean {
+export function sameRules(a: readonly RuleValue[], b: readonly Pick<EarnRule, "action" | "amount" | "cooldownSeconds" | "dailyCap" | "streakBonus" | "streakMaxDays" | "games">[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((r) => {
     const o = b.find((x) => x.action === r.action);
@@ -344,7 +373,9 @@ export function sameRules(a: readonly RuleValue[], b: readonly Pick<EarnRule, "a
       o.cooldownSeconds === r.cooldownSeconds &&
       num(o.dailyCap) === num(r.dailyCap) &&
       num(o.streakBonus) === num(r.streakBonus) &&
-      o.streakMaxDays === r.streakMaxDays
+      o.streakMaxDays === r.streakMaxDays &&
+      o.games.length === r.games.length &&
+      o.games.every((g, i) => g === r.games[i])
     );
   });
 }
@@ -551,6 +582,8 @@ const earnedLine = (action: number): Key => {
       return "chattools.economy.line.earnReaction";
     case VOICE_MINUTE:
       return "chattools.economy.line.earnVoice";
+    case GAME_MINUTE:
+      return "chattools.economy.line.earnGame";
     case DAILY:
       return "chattools.economy.line.earnDaily";
     case JOIN:

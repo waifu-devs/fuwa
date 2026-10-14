@@ -42,8 +42,18 @@ pub const PERIODS: [i32; 4] = [7, 30, 90, 365];
 const DAY_MS: i64 = 86_400_000;
 
 /// Every action a currency can reward, in the order the editor lists them.
-pub const ACTIONS: [Action; 6] =
-    [Action::Message, Action::ReactionReceived, Action::VoiceMinute, Action::Daily, Action::Join, Action::Onboarding];
+pub const ACTIONS: [Action; 7] = [
+    Action::Message,
+    Action::ReactionReceived,
+    Action::VoiceMinute,
+    Action::GameMinute,
+    Action::Daily,
+    Action::Join,
+    Action::Onboarding,
+];
+/// The most games one GAME_MINUTE rule may name, and how long a name may be.
+pub const MOST_GAMES: usize = 50;
+pub const GAME_NAME_MAX: usize = 128;
 
 /// Ledger kinds, as the finance page filters them.
 pub const KINDS: [LedgerKind; 4] = [LedgerKind::Earn, LedgerKind::Grant, LedgerKind::Transfer, LedgerKind::Purchase];
@@ -90,6 +100,7 @@ pub fn action_key(action: Action) -> &'static str {
         Action::Onboarding => "desktop.economy.action.onboarding",
         Action::ReactionReceived => "desktop.economy.action.reaction",
         Action::VoiceMinute => "desktop.economy.action.voice",
+        Action::GameMinute => "desktop.economy.action.game",
     }
 }
 
@@ -102,6 +113,7 @@ pub fn action_hint_key(action: Action) -> &'static str {
         Action::Onboarding => "desktop.economy.actionHint.onboarding",
         Action::ReactionReceived => "desktop.economy.actionHint.reaction",
         Action::VoiceMinute => "desktop.economy.actionHint.voice",
+        Action::GameMinute => "desktop.economy.actionHint.game",
     }
 }
 
@@ -113,7 +125,69 @@ pub fn action_glyph(action: Action) -> &'static str {
         Action::Onboarding => "party-popper",
         Action::ReactionReceived => "face-slightly-smiling",
         Action::VoiceMinute => "mic",
+        Action::GameMinute => "gamepad-2",
     }
+}
+
+/// Whether the editor offers an action on an instance: the game rule only
+/// where the instance knows it (`economy-games`).
+pub fn offered(action: Action, i: &InstanceState) -> bool {
+    action != Action::GameMinute || i.has("economy-games")
+}
+
+/// The games a GAME_MINUTE rule names, from what was typed: one per line
+/// (names may hold commas, "Warhammer 40,000"), trimmed, each once (ignoring case), in order. Too
+/// many or too long is left for [`CurrencyDraft::problem`] to say.
+pub fn parse_games(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    text.split('\n')
+        .map(str::trim)
+        .filter(|g| !g.is_empty() && seen.insert(g.to_lowercase()))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The games as the editor's box shows them, one per line.
+pub fn games_text(games: &[String]) -> String {
+    games.join("\n")
+}
+
+/// How a rule pays, for members: the action's name, or for the game rule
+/// which games and how much a minute.
+pub fn earn_line(rule: &pb::EarnRule) -> String {
+    use crate::core::i18n::{Arg, t, t_with};
+    let action = Action::try_from(rule.action).unwrap_or(Action::Message);
+    let amount = amount_text(rule.amount);
+    if action != Action::GameMinute {
+        return t_with(
+            "desktop.economy.earn.line",
+            &[("action", Arg::Str(&t(action_key(action)))), ("amount", Arg::Str(&amount))],
+        );
+    }
+    if rule.games.is_empty() {
+        t_with("desktop.economy.earn.anyGame", &[("amount", Arg::Str(&amount))])
+    } else {
+        t_with(
+            "desktop.economy.earn.games",
+            &[("games", Arg::Str(&rule.games.join(", "))), ("amount", Arg::Str(&amount))],
+        )
+    }
+}
+
+/// A game rule's games, short enough for a chip: the first few, then how
+/// many more; "any game" when it names none.
+pub fn games_short(games: &[String]) -> String {
+    use crate::core::i18n::{Arg, t, t_with};
+    const SHOWN: usize = 3;
+    if games.is_empty() {
+        return t("desktop.economy.earn.anyGameShort");
+    }
+    let mut out = games.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+    if games.len() > SHOWN {
+        out.push(' ');
+        out.push_str(&t_with("desktop.economy.earn.more", &[("count", Arg::Num((games.len() - SHOWN) as i64))]));
+    }
+    out
 }
 
 /// Whether a rule for this action waits between earnings.
@@ -347,6 +421,8 @@ pub struct RuleDraft {
     pub daily_cap: i64,
     pub streak_bonus: i64,
     pub streak_max_days: i32,
+    /// GAME_MINUTE: the games that pay, none for any.
+    pub games: Vec<String>,
 }
 
 impl RuleDraft {
@@ -354,7 +430,7 @@ impl RuleDraft {
         let (amount, cooldown) = match action {
             Action::Message => (1, 60),
             Action::ReactionReceived => (1, 30),
-            Action::VoiceMinute => (1, 0),
+            Action::VoiceMinute | Action::GameMinute => (1, 0),
             Action::Daily => (50, 0),
             _ => (100, 0),
         };
@@ -366,6 +442,7 @@ impl RuleDraft {
             daily_cap: 0,
             streak_bonus: 0,
             streak_max_days: 0,
+            games: Vec::new(),
         }
     }
 
@@ -378,6 +455,7 @@ impl RuleDraft {
             daily_cap: self.daily_cap,
             streak_bonus: if daily { self.streak_bonus } else { 0 },
             streak_max_days: if daily { self.streak_max_days } else { 0 },
+            games: if self.action == Action::GameMinute { self.games.clone() } else { Vec::new() },
         }
     }
 }
@@ -400,6 +478,7 @@ impl CurrencyDraft {
                     daily_cap: r.daily_cap,
                     streak_bonus: r.streak_bonus,
                     streak_max_days: r.streak_max_days,
+                    games: r.games.clone(),
                 },
                 None => RuleDraft::new(*a),
             })
@@ -437,6 +516,11 @@ impl CurrencyDraft {
             }
             if r.daily_cap < 0 || r.streak_bonus < 0 || r.streak_max_days < 0 {
                 return Some("desktop.economy.currency.negative");
+            }
+            if r.action == Action::GameMinute
+                && (r.games.len() > MOST_GAMES || r.games.iter().any(|g| g.chars().count() > GAME_NAME_MAX))
+            {
+                return Some("desktop.economy.currency.gamesRange");
             }
         }
         None
@@ -1105,6 +1189,45 @@ mod tests {
         l.stock = None;
         let change = l.change(&limited);
         assert!(change.unlimited && change.stock.is_none());
+    }
+
+    #[test]
+    fn games_read_one_per_line() {
+        assert_eq!(
+            parse_games("Celeste\n hollow knight \n\nCELESTE\nWarhammer 40,000"),
+            ["Celeste", "hollow knight", "Warhammer 40,000"]
+        );
+        assert!(parse_games(" \n  ").is_empty());
+        assert_eq!(parse_games(&games_text(&["A".into(), "B".into()])), ["A", "B"]);
+
+        let mut draft = CurrencyDraft::new();
+        draft.name = "Coins".into();
+        let game = draft.rules.iter_mut().find(|r| r.action == Action::GameMinute).unwrap();
+        assert_eq!(game.amount, 1);
+        game.enabled = true;
+        game.games = parse_games("Celeste\nHades");
+        assert_eq!(draft.problem(), None);
+        let earn = draft.earn();
+        assert_eq!(earn[0].action, Action::GameMinute as i32);
+        assert_eq!(earn[0].games, ["Celeste", "Hades"]);
+        // Read back, it's the same draft.
+        let c = pb::Currency { name: "Coins".into(), earn: earn.clone(), ..Default::default() };
+        assert_eq!(CurrencyDraft::of(&c).earn(), earn);
+
+        let game = draft.rules.iter_mut().find(|r| r.action == Action::GameMinute).unwrap();
+        game.games = (0..=MOST_GAMES).map(|n| format!("Game {n}")).collect();
+        assert_eq!(draft.problem(), Some("desktop.economy.currency.gamesRange"));
+        let game = draft.rules.iter_mut().find(|r| r.action == Action::GameMinute).unwrap();
+        game.games = vec!["x".repeat(GAME_NAME_MAX + 1)];
+        assert_eq!(draft.problem(), Some("desktop.economy.currency.gamesRange"));
+        let game = draft.rules.iter_mut().find(|r| r.action == Action::GameMinute).unwrap();
+        game.games = vec!["x".repeat(GAME_NAME_MAX)];
+        assert_eq!(draft.problem(), None);
+        // Other rules never carry games.
+        let message = draft.rules.iter_mut().find(|r| r.action == Action::Message).unwrap();
+        message.enabled = true;
+        message.games = vec!["Celeste".into()];
+        assert!(draft.earn().iter().find(|r| r.action == Action::Message as i32).unwrap().games.is_empty());
     }
 
     #[test]

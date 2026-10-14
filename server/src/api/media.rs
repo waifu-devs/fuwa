@@ -244,5 +244,7 @@ impl Api {
 #[derive(Clone, Copy)]
 pub enum PictureOwner<'a> {
     Account(&'a str, pb::MediaPurpose),
+    /// The instance's profile items' pictures, whichever admin uploaded them.
+    Instance,
     Server(&'a str),
 }

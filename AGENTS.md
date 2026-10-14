@@ -227,7 +227,7 @@
     title, labels, assignees and due date; comments are its thread.
     `board_columns` and `board_labels` are set whole by `SetBoard`. Moving,
     editing and archiving take Manage Cards (`PERMISSION_MANAGE_CARDS`,
-    given wherever Send Messages was by migration 0041); deleting a card is
+    given wherever Send Messages was by migration 0042); deleting a card is
     deleting its body, so `threads::after_delete` calls `boards::forget_card`.
     Events `BoardUpdated`, `CardUpdated`, `CardDeleted`. Web:
     `fuwa/board.ts`, `lib/board.ts`, `hooks/use-card-drag.ts` and
@@ -299,7 +299,11 @@
     and `profile_decoration`, set through `UpdateMember`). Effects are specs
     checked by `check_effect`; decorations are uploads
     (`MEDIA_PURPOSE_DECORATION`). Profiles and members name items by id and
-    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`);
+    apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`).
+    An effect may carry its own pictures (`ProfileItem.pictures`, uploads
+    like a decoration's, named by layers' `image`) and a shader (WGSL in
+    the custom backdrop shaders' format, checked by `shader_problem` and
+    drawn by apps under the particles: web `components/EffectShader.tsx`);
     deleting an item takes it off its wearers in the same write. Web:
     `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
     `components/settings/ProfileItems.tsx` (both settings dialogs) and
@@ -384,7 +388,9 @@
     while listed: `economy::may_wear` in `UpdateMember`). Earning
     (`economy::earn`) runs inside the write that did it: a message, a
     reaction to someone else's message, a join (`post_join`), finishing
-    onboarding; `spawn_voice_earnings` credits voice once a minute, and
+    onboarding; `spawn_minute_earnings` credits voice once a minute, and
+    games being played where people share them (`App::playing`, the
+    cluster call `Playing`, from `Presence::playing`), and
     `currency_earnings` holds the cooldowns, daily caps and once-only
     rewards. Agents never earn by actions. Manage Economy (`MANAGE_ECONOMY`)
     runs it and reads everyone's ledger and the finance page

@@ -29,7 +29,7 @@ Trello. Instances that have them list `boards` in `Node.versions.features`.
 
 A board is `CHANNEL_TYPE_BOARD = 7`. **A card is a message**: its body is a
 message in the board's channel whose id is the card's id, and `board_cards`
-(migration `0041_boards.sql`) holds what makes it a card. So the body is
+(migration `0042_boards.sql`) holds what makes it a card. So the body is
 Markdown with attachments, mentions, emoji (the server's and other
 servers'), reactions and AutoMod, all as in any message, through the same
 send and edit paths. Every message in a board is a card's body or a comment
@@ -98,7 +98,7 @@ whenever it's shown.
 
 - **View Channels**: see the board and its cards.
 - **Manage Cards** (`PERMISSION_MANAGE_CARDS`, new): add (with Send
-  Messages), move, edit and archive cards. Migration 0041 gives it wherever
+  Messages), move, edit and archive cards. Migration 0042 gives it wherever
   Send Messages was given or denied (roles and channel overwrites), so
   servers behave as before until they change it; a board where only some
   people move cards denies it to @everyone in the channel and allows it to

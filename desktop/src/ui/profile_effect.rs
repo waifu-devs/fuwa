@@ -1,23 +1,35 @@
-//! Profile effects on screen (the web's `ProfileEffect.tsx` and
-//! `EffectPicker.tsx`): the particles `core::profile_effects` plans, drawn as
-//! tinted shapes in a small view of their own that redraws only itself while
-//! it plays. With reduced motion, or while a picker tile rests, it shows a
+//! Profile effects on screen (the web's `ProfileEffect.tsx`, `EffectShader.tsx`
+//! and `EffectPicker.tsx`): the particles `core::profile_effects` plans, drawn
+//! as tinted shapes or the effect's own pictures in a small view of their own
+//! that redraws only itself while it plays, over the effect's shader if it
+//! has one. With reduced motion, or while a picker tile rests, it shows a
 //! still. The picker is None, then a tile per effect, each a tiny card.
+//!
+//! The shader is drawn by the backdrop's painter (`ui/effects.rs` over
+//! `core::effects::gpu`): checked, compiled and timed before it draws, at
+//! most 30 frames a second, and only while the window is in front. A shader
+//! that can't run here (no GPU, broken, too slow, it stopped the GPU) draws
+//! nothing, and the particles play as ever. Its inputs are a card's:
+//! `fuwa.primary` the theme's primary, `fuwa.accent` the card's own color,
+//! `fuwa.background` the card and `fuwa.foreground` its text.
 
+use std::path::PathBuf;
 use std::time::Instant;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Transformation, Window,
-    div, px, radians, rgb, size, svg,
+    AnyElement, AppContext as _, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
+    ParentElement as _, Render, Rgba, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _,
+    Transformation, Window, div, img, px, radians, rgb, size, svg,
 };
 
+use crate::core::effects::gpu::Source;
 use crate::core::i18n::t;
-use crate::core::profile_effects::{self as fx, Paint, Particle};
+use crate::core::profile_effects::{self as fx, Paint, Particle, Picture};
+use crate::ui::effects::{Wake, painted, shader_runs};
 use crate::ui::settings::SettingsView;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
-use crate::ui::widgets::{icon, pal};
+use crate::ui::widgets::{icon, pal, picture};
 
 /// One playing effect.
 pub struct EffectView {
@@ -30,6 +42,9 @@ pub struct EffectView {
     particles: Vec<Particle>,
     fade_at: f32,
     started: Instant,
+    /// The shader's clock, in seconds, moving at its speed while it runs.
+    shader_time: f32,
+    shader_last: Option<Instant>,
 }
 
 impl EffectView {
@@ -44,6 +59,8 @@ impl EffectView {
             particles: Vec::new(),
             fade_at: 0.0,
             started: Instant::now(),
+            shader_time: 0.0,
+            shader_last: None,
         }
     }
 
@@ -69,6 +86,8 @@ impl EffectView {
             self.height = height;
             self.particles = effect.map(|s| fx::plan(s, width, height, seed)).unwrap_or_default();
             self.fade_at = fx::idle_fade_at(&self.particles);
+            self.shader_time = 0.0;
+            self.shader_last = None;
         }
         if changed || (playing && !self.playing) {
             self.started = Instant::now();
@@ -78,6 +97,27 @@ impl EffectView {
             self.accent = accent;
             cx.notify();
         }
+    }
+}
+
+fn gpu_fps() -> f32 {
+    crate::core::effects::gpu::FPS as f32
+}
+
+/// One of an effect's pictures, filling its particle's box: an upload on the
+/// instance (loaded like every picture, from fuwa instances only), or a file
+/// being added, shown from this computer. A moving one holds its first frame
+/// when nothing may move (an image without an id stays on it).
+fn effect_picture(shown: &Picture, still: bool) -> AnyElement {
+    let fill = |el: gpui_kit::Img| el.size_full().object_fit(ObjectFit::Contain);
+    let holds = still && shown.animated;
+    match (shown.local, holds) {
+        (true, true) => fill(img(PathBuf::from(&shown.url))).into_any_element(),
+        (true, false) => fill(img(PathBuf::from(&shown.url)))
+            .id(SharedString::from(format!("picture|{}", shown.url)))
+            .into_any_element(),
+        (false, true) => fill(img(shown.url.clone())).into_any_element(),
+        (false, false) => picture(shown.url.clone()).size_full().object_fit(ObjectFit::Contain).into_any_element(),
     }
 }
 
@@ -110,6 +150,35 @@ impl Render for EffectView {
         // A cached view's root is laid out on its own, in the box the view is given: placed
         // absolutely there it would have no size, and clip every particle away.
         let mut layer = div().relative().size_full().overflow_hidden();
+        let shader = self.effect.as_ref().and_then(|s| s.shader.clone()).filter(|s| shader_runs(&s.code));
+        if let Some(shader) = shader {
+            // Still with the particles, and while the window is behind others.
+            let running = moving && window.is_window_active() && shader.speed > 0.0;
+            let now = Instant::now();
+            if running {
+                if let Some(last) = self.shader_last {
+                    // A long gap (a busy moment) moves it on a little, not by the whole gap.
+                    self.shader_time += (now - last).as_secs_f32().min(0.25) * shader.speed;
+                }
+                self.shader_last = Some(now);
+            } else {
+                self.shader_last = None;
+            }
+            // 30 frames a second: the clock changes no more often than that, so neither do the frames asked for.
+            let time = (self.shader_time * gpu_fps()).floor() / gpu_fps();
+            let rgba = |c: Rgba| [c.r, c.g, c.b, 1.0];
+            let colors = [rgba(p.primary), rgba(Rgba::from(profile)), rgba(p.card), rgba(p.card_foreground)];
+            layer = layer.child(painted(
+                Source::Custom(shader.code),
+                colors,
+                shader.intensity,
+                !running,
+                time,
+                false,
+                Wake::NextFrame,
+            ));
+        }
+        let pictures = self.effect.as_ref().map(|s| s.pictures.as_slice()).unwrap_or_default();
         for particle in &self.particles {
             let at = if moving { particle.at(elapsed, self.fade_at) } else { particle.still };
             let Some(f) = at else { continue };
@@ -117,25 +186,28 @@ impl Render for EffectView {
                 continue;
             }
             let squash = f.flip.map_or(1.0, |d| d.to_radians().cos().abs().max(0.08));
-            let color = paint(&p, particle.paint, profile);
-            layer = layer.child(
-                div()
-                    .absolute()
-                    .left(px(f.x))
-                    .top(px(f.y))
-                    .size(px(particle.size))
-                    .opacity(f.opacity.clamp(0.0, 1.0))
-                    .child(
-                        svg()
-                            .path(SharedString::from(format!("fx/{}.svg", particle.shape.name())))
-                            .size_full()
-                            .text_color(color)
-                            .with_transformation(
-                                Transformation::rotate(radians(f.rotate.to_radians()))
-                                    .with_scaling(size(f.scale * f.scale_x, f.scale * squash)),
-                            ),
-                    ),
-            );
+            let place =
+                div().absolute().left(px(f.x)).top(px(f.y)).size(px(particle.size)).opacity(f.opacity.clamp(0.0, 1.0));
+            let drawn = match (particle.shape, particle.image.and_then(|n| pictures.get(n))) {
+                (Some(shape), _) => place.child(
+                    svg()
+                        .path(SharedString::from(format!("fx/{}.svg", shape.name())))
+                        .size_full()
+                        .text_color(paint(&p, particle.paint, profile))
+                        .with_transformation(
+                            Transformation::rotate(radians(f.rotate.to_radians()))
+                                .with_scaling(size(f.scale * f.scale_x, f.scale * squash)),
+                        ),
+                ),
+                // A picture turns and scales with its box.
+                (None, Some(shown)) => place
+                    .rotate(radians(f.rotate.to_radians()))
+                    .scale_x(f.scale * f.scale_x)
+                    .scale_y(f.scale * squash)
+                    .child(effect_picture(shown, !moving)),
+                (None, None) => continue,
+            };
+            layer = layer.child(drawn);
         }
         if moving {
             window.request_animation_frame();

@@ -9,9 +9,11 @@ import {
   ITEM_EFFECT,
   itemEffect,
   itemsOfKind,
+  joinShader,
   nameFromFile,
   resolveDecoration,
   resolveEffect,
+  splitShader,
   starterText,
   TEMPLATE_AVATAR,
   TEMPLATE_SIZE,
@@ -119,4 +121,50 @@ test("the effect prompt's example is Sakura and plays, and both prompts end wher
   for (const prompt of [EFFECT_PROMPT, DECORATION_PROMPT]) assert.ok(prompt.endsWith("What I want:\n"));
   assert.ok(DECORATION_PROMPT.includes(`${TEMPLATE_SIZE} by ${TEMPLATE_SIZE}`) && DECORATION_PROMPT.includes(`${TEMPLATE_AVATAR} pixels across`));
   assert.equal(TEMPLATE_SIZE / TEMPLATE_AVATAR, 1.2);
+});
+
+test("image layers draw the item's own pictures, by their place", () => {
+  const pictures = [
+    { url: "https://fuwa.test/media/leaf", animated: false },
+    { url: "https://fuwa.test/media/moon", animated: true },
+  ];
+  const picture = { motion: "fall", phase: "idle", count: 4, from: "top", size: [20, 28], duration: [4000, 6000] };
+  const json = JSON.stringify({ layers: [{ ...picture, image: 1 }, { ...picture, image: 5 }, layer] });
+  const played = itemEffect({ ...effect("01JPICTURES000000000000000", json), pictures });
+  assert.ok(played);
+  // The layer naming a picture the item doesn't have draws nothing, not a shape.
+  assert.equal(played.layers.length, 2);
+  assert.equal(played.layers[0]!.image, 1);
+  assert.equal(played.layers[0]!.shape, undefined);
+  assert.deepEqual(played.pictures, pictures);
+  // New pictures, new spec: an effect playing restarts with them.
+  const fewer = itemEffect({ ...effect("01JPICTURES000000000000000", json), pictures: pictures.slice(0, 1) });
+  assert.notEqual(fewer, played);
+  assert.equal(fewer?.layers.length, 1);
+});
+
+test("a shader alone is an effect, and its code is kept as text that can't break anything", () => {
+  const code = "fn shade(uv: vec2f) -> vec4f {\r\n  return vec4f(1.0, 0.0, 0.0, uv.y * 0.2);\u0007\n}";
+  const played = itemEffect(effect("01JSHADER00000000000000000", JSON.stringify({ layers: [], shader: { code, intensity: 7, speed: 0.5 } })));
+  assert.ok(played?.shader);
+  assert.equal(played.layers.length, 0);
+  assert.equal(played.shader.code, "fn shade(uv: vec2f) -> vec4f {\n  return vec4f(1.0, 0.0, 0.0, uv.y * 0.2);\n}");
+  assert.equal(played.shader.intensity, 1);
+  assert.equal(played.shader.speed, 0.5);
+  assert.equal(itemEffect(effect("01JNOSHADER000000000000000", JSON.stringify({ layers: [], shader: { code: "  " } }))), null);
+});
+
+test("the shader's code is edited apart from the JSON, and put back the same", () => {
+  const code = "fn shade(uv: vec2f) -> vec4f {\n  return vec4f(0.0);\n}";
+  const whole = JSON.stringify({ layers: [layer], shader: { code, speed: 2 } });
+  const parts = splitShader(whole);
+  assert.equal(parts.wgsl, code);
+  assert.deepEqual(JSON.parse(parts.json), { layers: [layer], shader: { speed: 2 } });
+  assert.deepEqual(JSON.parse(joinShader(parts.json, parts.wgsl)), JSON.parse(whole));
+  // No code, no shader; no JSON, a shader alone; JSON that doesn't parse stays for the checks.
+  assert.deepEqual(JSON.parse(joinShader(parts.json, "")), { layers: [layer] });
+  assert.deepEqual(JSON.parse(joinShader("", code)), { layers: [], shader: { code } });
+  assert.equal(joinShader("{oops", code), "{oops");
+  assert.deepEqual(splitShader("{oops"), { json: "{oops", wgsl: "" });
+  assert.ok("spec" in checkEffectText(joinShader("", code)));
 });

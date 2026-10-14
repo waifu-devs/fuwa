@@ -3,7 +3,9 @@
 //! (docs/profile-items.md), as the web's `settings/ProfileItems.tsx`.
 //! Decorations are pictures dropped in or picked, shown around your avatar
 //! before they're added; effects are specs, pasted or from a `.json` file,
-//! checked and played before they're added. Each one's name and line change
+//! checked and played before they're added, with the pictures their layers
+//! draw and a shader under them where the instance has those (the WGSL
+//! edited apart from the JSON). Each one's name and line change
 //! in place, an effect can take a new spec, and deleting one asks first,
 //! since it takes it off everyone wearing it. Under each kind are the
 //! helpers for making one: a template to draw a decoration on, prompts to
@@ -26,11 +28,14 @@ use gpui_kit::{
 use crate::core::Core;
 use crate::core::account::picture_type;
 use crate::core::api::Problem;
-use crate::core::i18n::t;
+use crate::core::effects::custom::{STARTERS, shader_id, shader_problem};
+use crate::core::effects::gpu::{self, Gpu};
+use crate::core::effects::status::{self, ShaderStatus};
+use crate::core::i18n::{Arg, t, t_with};
 use crate::core::profile_effects::{self as fx, Spec};
 use crate::core::profile_items::{
-    DECORATION_DOCS, DECORATION_PROMPT, EFFECT_DOCS, EFFECT_PROMPT, NewItem, Scope, TEMPLATE_SIZE, check_effect_text,
-    item_effect, name_from_file, starter_text, template_pixels,
+    DECORATION_DOCS, DECORATION_PROMPT, DraftPicture, EFFECT_DOCS, EFFECT_PROMPT, NewItem, Scope, TEMPLATE_SIZE,
+    check_effect_text, item_effect, join_shader, name_from_file, split_shader, starter_text, template_pixels,
 };
 use crate::pb;
 use crate::ui::motion;
@@ -44,6 +49,60 @@ use crate::ui::widgets::{avatar, decorated, icon, pal};
 const MOST_EFFECT: u64 = 64 * 1024;
 const NAME_MAX: usize = 40;
 const DESCRIPTION_MAX: usize = 120;
+/// How long the shader's code rests before the preview compiles it.
+const SHADER_REST: Duration = Duration::from_millis(450);
+/// The instance feature that lets effects carry pictures and a shader.
+const MEDIA: &str = "profile-effect-media";
+
+/// An effect being written, beside its JSON box: its shader's WGSL apart
+/// from the JSON, and its pictures (the web's `useEffectDraft`).
+struct EffectDraft {
+    wgsl: Entity<TextareaState>,
+    pictures: Vec<DraftPicture>,
+    /// The shader's field is open: someone added one, or there is one.
+    shader_open: bool,
+    /// The code the preview plays: the box's, once typing has rested.
+    resting: String,
+    typed: u64,
+    /// What it started from (an effect being changed), to tell whether anything changed.
+    initial: String,
+    initial_urls: Vec<String>,
+    /// When a file that isn't a picture was refused, to shake the strip.
+    refused: Option<Instant>,
+}
+
+impl EffectDraft {
+    fn new(window: &mut Window, cx: &mut Context<ProfileItemsView>) -> Self {
+        let wgsl = cx.new(|cx| {
+            TextareaState::new(window, cx).auto_grow(6, 16).placeholder("fn shade(uv: vec2f) -> vec4f { ... }")
+        });
+        Self {
+            wgsl,
+            pictures: Vec::new(),
+            shader_open: false,
+            resting: String::new(),
+            typed: 0,
+            initial: String::new(),
+            initial_urls: Vec::new(),
+            refused: None,
+        }
+    }
+
+    fn urls(&self) -> Vec<String> {
+        self.pictures
+            .iter()
+            .map(|p| match p {
+                DraftPicture::Uploaded { url, .. } => url.clone(),
+                DraftPicture::File(path) => path.to_string_lossy().into_owned(),
+            })
+            .collect()
+    }
+
+    /// Whether its pictures differ from the ones it started with, or any is a file to upload.
+    fn pictures_changed(&self) -> bool {
+        self.urls() != self.initial_urls || self.pictures.iter().any(|p| matches!(p, DraftPicture::File(_)))
+    }
+}
 
 /// Something about to be added.
 enum Draft {
@@ -78,6 +137,9 @@ pub struct ProfileItemsView {
     /// An effect getting a new spec, and the box it's typed in.
     replacing: Option<String>,
     replace: Entity<TextareaState>,
+    /// The new effect's shader and pictures, and the changed one's.
+    fresh: EffectDraft,
+    changing: EffectDraft,
     /// The item asked about before it's deleted.
     confirming: Option<String>,
     /// The row under the pointer, whose effect plays.
@@ -112,19 +174,35 @@ impl ProfileItemsView {
                 cx.notify();
             }
         };
+        let fresh = EffectDraft::new(window, cx);
+        let changing = EffectDraft::new(window, cx);
         let subscriptions = vec![
             cx.subscribe(&name, notify),
             cx.subscribe(&description, notify),
-            cx.subscribe(&spec, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe_in(&spec, window, |this: &mut Self, _, e: &InputEvent, window, cx| {
                 if matches!(e, InputEvent::Change) {
                     this.error = None;
+                    this.take_shader(false, window, cx);
                     cx.notify();
                 }
             }),
-            cx.subscribe(&replace, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe_in(&replace, window, |this: &mut Self, _, e: &InputEvent, window, cx| {
                 if matches!(e, InputEvent::Change) {
                     this.error = None;
+                    this.take_shader(true, window, cx);
                     cx.notify();
+                }
+            }),
+            cx.subscribe(&fresh.wgsl, |this: &mut Self, _, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    this.error = None;
+                    this.rest_shader(false, cx);
+                }
+            }),
+            cx.subscribe(&changing.wgsl, |this: &mut Self, _, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    this.error = None;
+                    this.rest_shader(true, cx);
                 }
             }),
         ];
@@ -149,6 +227,8 @@ impl ProfileItemsView {
             spec,
             replacing: None,
             replace,
+            fresh,
+            changing,
             confirming: None,
             hovered: None,
             busy: false,
@@ -214,6 +294,11 @@ impl ProfileItemsView {
         self.description.update(cx, |s, cx| s.set_value("", window, cx));
         if matches!(draft, Draft::Effect) {
             self.spec.update(cx, |s, cx| s.set_value("", window, cx));
+            self.fresh.wgsl.update(cx, |s, cx| s.set_value("", window, cx));
+            self.fresh.pictures.clear();
+            self.fresh.shader_open = false;
+            self.fresh.resting.clear();
+            self.fresh.refused = None;
         }
         self.draft = Some(draft);
         self.error = None;
@@ -269,6 +354,7 @@ impl ProfileItemsView {
                     Ok(text) => {
                         let target = if replacing { this.replace.clone() } else { this.spec.clone() };
                         target.update(cx, |s, cx| s.set_value(text, window, cx));
+                        this.take_shader(replacing, window, cx);
                         if !replacing && this.name.read(cx).value().trim().is_empty() {
                             this.name.update(cx, |s, cx| s.set_value(name_from_file(&file), window, cx));
                         }
@@ -277,6 +363,113 @@ impl ProfileItemsView {
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    fn fx_draft(&mut self, replacing: bool) -> &mut EffectDraft {
+        if replacing { &mut self.changing } else { &mut self.fresh }
+    }
+
+    /// Whether the instance takes pictures and a shader in effects (older ones would refuse them).
+    fn media_here(&self) -> bool {
+        self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has(MEDIA)))
+    }
+
+    /// A spec with a shader in it (a file, a paste, an AI's answer) has its code moved to the shader's own field.
+    fn take_shader(&mut self, replacing: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let state = if replacing { self.replace.clone() } else { self.spec.clone() };
+        let (json, wgsl) = split_shader(&state.read(cx).value());
+        if wgsl.is_empty() {
+            return;
+        }
+        state.update(cx, |s, cx| s.set_value(json, window, cx));
+        self.set_wgsl(replacing, wgsl, window, cx);
+    }
+
+    /// Puts code in the shader's field (opening it), for the preview at once.
+    fn set_wgsl(&mut self, replacing: bool, wgsl: String, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self.fx_draft(replacing);
+        draft.shader_open = draft.shader_open || !wgsl.trim().is_empty();
+        draft.resting = wgsl.clone();
+        draft.typed += 1;
+        let state = draft.wgsl.clone();
+        state.update(cx, |s, cx| s.set_value(wgsl, window, cx));
+        self.error = None;
+        cx.notify();
+    }
+
+    /// The shader's code changed: the preview takes it once typing rests, so it isn't compiled on every key.
+    fn rest_shader(&mut self, replacing: bool, cx: &mut Context<Self>) {
+        let draft = self.fx_draft(replacing);
+        draft.typed += 1;
+        let typed = draft.typed;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SHADER_REST).await;
+            let _ = this.update(cx, |this, cx| {
+                let draft = this.fx_draft(replacing);
+                if draft.typed == typed {
+                    let code = draft.wgsl.read(cx).value().to_string();
+                    let draft = this.fx_draft(replacing);
+                    draft.resting = code;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The spec as it would be sent: the JSON with the shader's code put back in.
+    fn effect_text(&self, replacing: bool, cx: &Context<Self>) -> String {
+        let (state, draft) = if replacing { (&self.replace, &self.changing) } else { (&self.spec, &self.fresh) };
+        join_shader(&state.read(cx).value(), &draft.wgsl.read(cx).value())
+    }
+
+    /// The draft checked as the preview plays it (with the code that has rested).
+    fn checked(&self, replacing: bool, cx: &Context<Self>) -> Result<Spec, crate::core::profile_items::EffectProblem> {
+        let (state, draft) = if replacing { (&self.replace, &self.changing) } else { (&self.spec, &self.fresh) };
+        let pictures: Vec<fx::Picture> = draft.pictures.iter().map(DraftPicture::picture).collect();
+        check_effect_text(&join_shader(&state.read(cx).value(), &draft.resting), &pictures)
+    }
+
+    /// Pictures dropped on the strip or picked: the ones that are pictures, up to the most an effect has.
+    fn add_effect_pictures(&mut self, replacing: bool, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let fit: Vec<PathBuf> = paths
+            .iter()
+            .filter(|p| p.file_name().and_then(|n| picture_type(&n.to_string_lossy())).is_some())
+            .cloned()
+            .collect();
+        if !paths.is_empty() && fit.is_empty() {
+            self.error = Some(t("serversettings.profileItems.badType"));
+            self.fx_draft(replacing).refused = Some(Instant::now());
+            cx.notify();
+            return;
+        }
+        let draft = self.fx_draft(replacing);
+        let room = fx::MAX_PICTURES.saturating_sub(draft.pictures.len());
+        let full = fit.len() > room;
+        for path in fit.into_iter().take(room) {
+            if !draft.pictures.contains(&DraftPicture::File(path.clone())) {
+                draft.pictures.push(DraftPicture::File(path));
+            }
+        }
+        self.error = full.then(|| {
+            t_with("serversettings.profileItems.picturesFull", &[("count", Arg::Num(fx::MAX_PICTURES as i64))])
+        });
+        cx.notify();
+    }
+
+    fn pick_effect_pictures(&mut self, replacing: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(t("serversettings.profileItems.addPicture").into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let _ = this.update(cx, |this, cx| this.add_effect_pictures(replacing, paths, cx));
         })
         .detach();
     }
@@ -339,11 +532,12 @@ impl ProfileItemsView {
         let new = match draft {
             Draft::Decoration { path } => Err(path.clone()),
             Draft::Effect => {
-                let text = self.spec.read(cx).value().to_string();
-                if check_effect_text(&text).is_err() {
+                let text = self.effect_text(false, cx);
+                let pictures: Vec<fx::Picture> = self.fresh.pictures.iter().map(DraftPicture::picture).collect();
+                if check_effect_text(&text, &pictures).is_err() {
                     return;
                 }
-                Ok(NewItem::Effect { spec: text })
+                Ok((text, self.fresh.pictures.clone()))
             }
         };
         self.busy = true;
@@ -353,22 +547,31 @@ impl ProfileItemsView {
         self.run(
             cx,
             async move {
-                let new = match new {
-                    Ok(new) => new,
+                let (new, urls) = match new {
+                    Ok((spec, pictures)) => {
+                        let urls = core.send_pictures(&key, &scope, pictures).await?;
+                        (NewItem::Effect { spec, pictures: urls.clone() }, urls)
+                    }
                     Err(path) => {
                         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        NewItem::Decoration {
+                        let new = NewItem::Decoration {
                             content_type: picture_type(&file).unwrap_or("image/png").to_owned(),
                             bytes: crate::core::account::read_picture(&path).await?,
-                        }
+                        };
+                        (new, Vec::new())
                     }
                 };
-                core.add_profile_item(&key, &scope, &name, &description, new).await
+                Ok((urls, core.add_profile_item(&key, &scope, &name, &description, new).await))
             },
             |this, result, cx| {
                 this.busy = false;
                 match result {
-                    Ok(_) => this.draft = None,
+                    Ok((_, Ok(_))) => this.draft = None,
+                    Ok((urls, Err(err))) => {
+                        // Uploaded once: trying again after a refusal doesn't upload them again.
+                        uploaded(&mut this.fresh, urls);
+                        this.error = Some(err.message);
+                    }
                     Err(err) => this.error = Some(err.message),
                 }
                 cx.notify();
@@ -381,25 +584,59 @@ impl ProfileItemsView {
             self.replacing = None;
         } else {
             self.replacing = Some(item.id.clone());
-            let text = pretty(&item.effect);
-            self.replace.update(cx, |s, cx| s.set_value(text, window, cx));
+            let (json, wgsl) = split_shader(&item.effect);
+            let json = if wgsl.is_empty() { pretty(&item.effect) } else { json };
+            self.changing.initial = join_shader(&json, &wgsl);
+            self.changing.initial_urls = item.pictures.iter().map(|p| p.url.clone()).collect();
+            self.changing.pictures = item
+                .pictures
+                .iter()
+                .map(|p| DraftPicture::Uploaded { url: p.url.clone(), animated: p.animated })
+                .collect();
+            self.changing.shader_open = false;
+            self.changing.refused = None;
+            self.replace.update(cx, |s, cx| s.set_value(json, window, cx));
+            self.set_wgsl(true, wgsl, window, cx);
         }
         self.error = None;
         cx.notify();
     }
 
+    /// Whether the effect being changed differs from what it has.
+    fn replace_changed(&self, cx: &Context<Self>) -> bool {
+        self.effect_text(true, cx) != self.changing.initial || self.changing.pictures_changed()
+    }
+
     fn save_replace(&mut self, item: pb::ProfileItem, cx: &mut Context<Self>) {
-        let text = self.replace.read(cx).value().to_string();
-        if check_effect_text(&text).is_err() || text == pretty(&item.effect) || self.busy {
+        let text = self.effect_text(true, cx);
+        let pictures: Vec<fx::Picture> = self.changing.pictures.iter().map(DraftPicture::picture).collect();
+        if check_effect_text(&text, &pictures).is_err() || !self.replace_changed(cx) || self.busy {
             return;
         }
         self.busy = true;
+        self.error = None;
         let (core, key, scope) = (self.core.clone(), self.key.clone(), self.scope.clone());
-        let change = pb::ProfileItemChange { effect: Some(text), ..Default::default() };
-        self.run(cx, async move { core.change_profile_item(&key, &scope, &item.id, change).await }, |this, r, cx| {
+        let send = self.changing.pictures_changed().then(|| self.changing.pictures.clone());
+        let run = async move {
+            let urls = match send {
+                Some(pictures) => Some(core.send_pictures(&key, &scope, pictures).await?),
+                None => None,
+            };
+            let change = pb::ProfileItemChange {
+                effect: Some(text),
+                pictures: urls.clone().map(|urls| pb::ProfileItemPictureUrls { urls }),
+                ..Default::default()
+            };
+            Ok((urls, core.change_profile_item(&key, &scope, &item.id, change).await))
+        };
+        self.run(cx, run, |this, r, cx| {
             this.busy = false;
             match r {
-                Ok(_) => this.replacing = None,
+                Ok((_, Ok(_))) => this.replacing = None,
+                Ok((urls, Err(err))) => {
+                    uploaded(&mut this.changing, urls.unwrap_or_default());
+                    this.error = Some(err.message);
+                }
                 Err(err) => this.error = Some(err.message),
             }
             cx.notify();
@@ -835,7 +1072,390 @@ impl ProfileItemsView {
             .into_any_element()
     }
 
-    /// The spec box, the file button and what's wrong with it, beside a card playing it.
+    /// An effect's own pictures, in order: each with the number its layers name
+    /// it by (`"image": 0`), to take out, and a tile to add more (picked or
+    /// dropped) up to the most an effect has.
+    fn effect_pictures(&self, replacing: bool, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let draft = if replacing { &self.changing } else { &self.fresh };
+        let busy = self.busy;
+        let full = draft.pictures.len() >= fx::MAX_PICTURES;
+        let (primary, drag_bg) = (p.primary, alpha(p.primary, 0.1));
+        let which = if replacing { "replace" } else { "new" };
+        let mut strip = div()
+            .id(SharedString::from(format!("pi-pictures-{which}")))
+            .flex()
+            .flex_wrap()
+            .gap(px(8.0))
+            .p(px(8.0))
+            .rounded(radius_2xl())
+            .border_1()
+            .border_dashed()
+            .border_color(p.border)
+            .when(!busy && !full, |el| {
+                el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drag_bg).border_color(primary)).on_drop(
+                    cx.listener(move |this, paths: &ExternalPaths, _, cx| {
+                        this.add_effect_pictures(replacing, paths.paths().to_vec(), cx)
+                    }),
+                )
+            });
+        for (n, shown) in draft.pictures.iter().enumerate() {
+            let (key, face) = match shown {
+                DraftPicture::Uploaded { url, .. } => (
+                    url.clone(),
+                    crate::ui::widgets::picture(url.clone())
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                ),
+                DraftPicture::File(path) => {
+                    let key = path.to_string_lossy().into_owned();
+                    let face = img(path.clone())
+                        .id(SharedString::from(format!("picture|{key}")))
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element();
+                    (key, face)
+                }
+            };
+            let group = SharedString::from(format!("pi-pic-{which}-{n}"));
+            let remove_tip = t_with("serversettings.profileItems.removePicture", &[("n", Arg::Num(n as i64))]);
+            let (bg, fg, red) = (p.background, p.muted_foreground, p.destructive);
+            let gone = shown.clone();
+            let tile = div()
+                .id(group.clone())
+                .group(group.clone())
+                .relative()
+                .size(px(56.0))
+                .rounded(radius_xl())
+                .bg(alpha(p.muted, 0.6))
+                .child(div().size_full().p(px(4.0)).child(face))
+                .child(
+                    div().absolute().bottom(px(-4.0)).left_0().right_0().flex().justify_center().child(
+                        div()
+                            .rounded_full()
+                            .bg(bg)
+                            .px(px(6.0))
+                            .text_size(px(10.4))
+                            .font_weight(FontWeight::BOLD)
+                            .font_family(crate::ui::theme::mono())
+                            .shadow(shadow_sm())
+                            .child(n.to_string()),
+                    ),
+                )
+                .child(
+                    div()
+                        .id("pi-pic-remove")
+                        .absolute()
+                        .top(px(-6.0))
+                        .right(px(-6.0))
+                        .size(px(20.0))
+                        .rounded_full()
+                        .bg(bg)
+                        .text_color(fg)
+                        .shadow(shadow_sm())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .opacity(0.0)
+                        .group_hover(group, |s| s.opacity(1.0))
+                        .hover(move |s| s.text_color(red))
+                        .when(!busy, |el| {
+                            el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                                this.fx_draft(replacing).pictures.retain(|p| p != &gone);
+                                this.error = None;
+                                cx.notify();
+                            }))
+                        })
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(remove_tip.clone()).build(window, cx))
+                        .child(icon("x").size(px(12.0))),
+                );
+            strip = strip.child(motion::grow_in(tile, SharedString::from(format!("pi-pic-in-{which}-{key}")), 0.6));
+        }
+        if !full {
+            let (hover_bg, tip) = (alpha(p.primary, 0.2), t("serversettings.profileItems.addPicture"));
+            strip =
+                strip.child(
+                    div()
+                        .id(SharedString::from(format!("pi-pic-add-{which}")))
+                        .size(px(56.0))
+                        .rounded(radius_xl())
+                        .bg(alpha(p.primary, 0.1))
+                        .text_color(p.primary)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
+                        .when(busy, |el| el.opacity(0.5))
+                        .when(!busy, |el| {
+                            el.cursor_pointer()
+                                .hover(move |s| s.bg(hover_bg).translate_y(px(-2.0)))
+                                .active(|s| s.scale(0.94))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.pick_effect_pictures(replacing, window, cx)
+                                }))
+                        })
+                        .child(icon("image-plus").size(px(20.0))),
+                );
+        }
+        let strip: AnyElement = match draft.refused.filter(|at| at.elapsed() < Duration::from_millis(500)) {
+            Some(at) => strip
+                .with_animation(
+                    SharedString::from(format!("pi-pics-refused-{at:?}")),
+                    gpui_kit::Animation::new(Duration::from_millis(400)),
+                    |el, t| el.relative().left(px((t * std::f32::consts::TAU * 2.5).sin() * 8.0 * (1.0 - t))),
+                )
+                .into_any_element(),
+            None => strip.into_any_element(),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .text_xs()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.profileItems.pictures")))
+                    .child(div().text_color(p.muted_foreground).child(t("serversettings.profileItems.picturesHint"))),
+            )
+            .child(strip)
+            .into_any_element()
+    }
+
+    /// An effect's shader: WGSL in the custom shaders' format, drawn under the
+    /// particles. Closed until someone adds one; while it's open it says what
+    /// happened when this computer last ran it (from the painter, by its
+    /// code), and offers the backdrop's starters to begin from.
+    fn shader_field(&self, replacing: bool, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let draft = if replacing { &self.changing } else { &self.fresh };
+        let busy = self.busy;
+        let which = if replacing { "replace" } else { "new" };
+        let code = draft.wgsl.read(cx).value().to_string();
+        if !draft.shader_open && code.trim().is_empty() {
+            let (hover_border, hover_bg) = (alpha(p.primary, 0.5), alpha(p.primary, 0.05));
+            return div()
+                .flex()
+                .child(
+                    div()
+                        .id(SharedString::from(format!("pi-shader-add-{which}")))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .rounded_full()
+                        .border_1()
+                        .border_dashed()
+                        .border_color(p.border)
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.primary)
+                        .when(busy, |el| el.opacity(0.5))
+                        .when(!busy, |el| {
+                            el.cursor_pointer()
+                                .hover(move |s| s.border_color(hover_border).bg(hover_bg).translate_y(px(-1.0)))
+                                .active(|s| s.scale(0.97))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.fx_draft(replacing).shader_open = true;
+                                    cx.notify();
+                                }))
+                        })
+                        .child(icon("code").size(px(14.0)))
+                        .child(t("serversettings.profileItems.addShader"))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.profileItems.addShaderHint")),
+                        ),
+                )
+                .into_any_element();
+        }
+        let id = (!code.trim().is_empty()).then(|| shader_id(&code));
+        let nothing = t("appsettings.shader.nothing");
+        // What to say: its text, whether it's bad news, and whether it can be tried again.
+        let note: Option<(String, bool, bool)> = if code.trim().is_empty() {
+            None
+        } else if let Some(problem) = shader_problem(&code) {
+            Some((problem, true, false))
+        } else {
+            match id.as_deref().and_then(status::status) {
+                Some(ShaderStatus::Broken { message, line }) => Some((
+                    match line {
+                        Some(line) => format!(
+                            "{} {message}",
+                            t_with("appsettings.shader.line", &[("line", Arg::Num(line as i64))])
+                        ),
+                        None => message,
+                    },
+                    true,
+                    false,
+                )),
+                Some(ShaderStatus::Slow { .. }) => {
+                    Some((t_with("appsettings.shader.slow", &[("fallback", Arg::Str(&nothing))]), true, true))
+                }
+                Some(ShaderStatus::Stopped) => {
+                    Some((t_with("appsettings.shader.stopped", &[("fallback", Arg::Str(&nothing))]), true, true))
+                }
+                Some(ShaderStatus::Running { scale, .. }) => Some((
+                    t(if scale > 0.6 {
+                        "appsettings.shader.running"
+                    } else if scale > 0.4 {
+                        "appsettings.shader.runningHalf"
+                    } else {
+                        "appsettings.shader.runningThird"
+                    }),
+                    false,
+                    false,
+                )),
+                None if gpu::gpu() == Gpu::Missing => {
+                    Some((t_with("desktop.shader.noGpu", &[("fallback", Arg::Str(&nothing))]), true, false))
+                }
+                None => None,
+            }
+        };
+        let (border, hover_border, hover_bg) = (p.border, alpha(p.primary, 0.5), alpha(p.primary, 0.1));
+        let starters = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .mr(px(4.0))
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(t("serversettings.profileItems.startFrom")),
+            )
+            .children(STARTERS.iter().map(|starter| {
+                let tip = t(starter.hint);
+                let code = starter.code;
+                div()
+                    .id(SharedString::from(format!("pi-shader-start-{which}-{}", starter.id)))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(border)
+                    .bg(alpha(p.background, 0.6))
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .hover(move |s| s.border_color(hover_border).bg(hover_bg).translate_y(px(-1.0)))
+                    .active(|s| s.scale(0.94))
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(tip.clone()).build(window, cx))
+                    .when(!busy, |el| {
+                        el.on_click(
+                            cx.listener(move |this, _, window, cx| this.set_wgsl(replacing, code.into(), window, cx)),
+                        )
+                    })
+                    .child(starter.name)
+            }));
+        let state = draft.wgsl.clone();
+        let remove_tip = t("serversettings.profileItems.removeShader");
+        let remove =
+            round_icon(SharedString::from(format!("pi-shader-remove-{which}")), "trash", p, p.destructive.into())
+                .size(px(28.0))
+                .ml_auto()
+                .tooltip(move |window, cx| crate::ui::overlay::Tip::new(remove_tip.clone()).build(window, cx))
+                .when(!busy, |el| {
+                    el.on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_wgsl(replacing, String::new(), window, cx);
+                        this.fx_draft(replacing).shader_open = false;
+                        cx.notify();
+                    }))
+                });
+        let note = note.map(|(text, bad, retry)| {
+            let color = if bad { p.destructive } else { rgb(0x059669) };
+            let primary = p.primary;
+            motion::slide_in(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_xs()
+                    .text_color(color)
+                    .child(icon(if bad { "triangle-alert" } else { "check" }).size(px(14.0)))
+                    .child(text.clone())
+                    .when_some(id.clone().filter(|_| retry), |el, id| {
+                        el.child(
+                            div()
+                                .id("pi-shader-retry")
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(primary)
+                                .cursor_pointer()
+                                .hover(|s| s.underline())
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    status::retry(&id);
+                                    cx.notify();
+                                }))
+                                .child(t("appsettings.shader.retry")),
+                        )
+                    }),
+                SharedString::from(format!("pi-shader-note-{which}-{text}")),
+                -6.0,
+            )
+            .into_any_element()
+        });
+        motion::slide_in(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .text_xs()
+                        .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("serversettings.profileItems.shader")))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .text_color(p.muted_foreground)
+                                .child(t("serversettings.profileItems.addShaderHint")),
+                        )
+                        .child(remove),
+                )
+                .child(starters)
+                .child(
+                    div()
+                        .id(SharedString::from(format!("pi-wgsl-{which}")))
+                        .cursor_text()
+                        .on_click({
+                            let state = state.clone();
+                            move |_, window, cx| state.update(cx, |s, cx| s.focus(window, cx))
+                        })
+                        .min_h(px(144.0))
+                        .rounded(radius_xl())
+                        .border_1()
+                        .border_color(p.border)
+                        .bg(p.background)
+                        .px(px(12.0))
+                        .py(px(8.0))
+                        .text_xs()
+                        .font_family(crate::ui::theme::mono())
+                        .shadow(shadow_sm())
+                        .child(
+                            Textarea::new(&state)
+                                .appearance(false)
+                                .with_size(px(13.72))
+                                .font_family(crate::ui::theme::mono()),
+                        ),
+                )
+                .children(note),
+            SharedString::from(format!("pi-shader-{which}")),
+            -6.0,
+        )
+        .into_any_element()
+    }
+
+    /// The spec box, the file button and what's wrong with it, the effect's
+    /// pictures and shader (where the instance has them), beside a card playing it.
     fn effect_source(
         &mut self,
         replacing: bool,
@@ -846,6 +1466,12 @@ impl ProfileItemsView {
     ) -> AnyElement {
         let state = if replacing { self.replace.clone() } else { self.spec.clone() };
         let text = state.read(cx).value().to_string();
+        let media = self.media_here();
+        let extras: Vec<AnyElement> = if media {
+            vec![self.effect_pictures(replacing, p, cx), self.shader_field(replacing, p, cx)]
+        } else {
+            Vec::new()
+        };
         let status: Option<AnyElement> = match checked {
             Err(problem) if !text.trim().is_empty() => Some(
                 motion::slide_in(
@@ -971,7 +1597,8 @@ impl ProfileItemsView {
                                 p,
                             ))
                             .children(status),
-                    ),
+                    )
+                    .children(extras),
             )
             .child(div().flex_none().w(px(card_w)).child(card))
             .into_any_element()
@@ -1024,7 +1651,7 @@ impl ProfileItemsView {
                 ))
             }
             Draft::Effect => {
-                let checked = check_effect_text(&self.spec.read(cx).value());
+                let checked = self.checked(false, cx);
                 let ok = checked.is_ok();
                 let body =
                     vec![self.starters(p, cx), self.effect_source(false, me, &checked, p, cx), self.name_fields(p)];
@@ -1123,10 +1750,21 @@ impl ProfileItemsView {
         let meta = if decoration {
             let size = crate::core::attachments::format_bytes(item.size);
             if item.animated { format!("{size} · {}", t("serversettings.emoji.moves")) } else { size }
-        } else if spec.is_none() {
-            t("serversettings.profileItems.cantPlay")
+        } else if let Some(spec) = &spec {
+            let mut parts = Vec::new();
+            if !item.pictures.is_empty() {
+                let count = t_with(
+                    "serversettings.profileItems.pictureCount",
+                    &[("count", Arg::Num(item.pictures.len() as i64))],
+                );
+                parts.push(format!("{count} ({})", crate::core::attachments::format_bytes(item.size)));
+            }
+            if spec.shader.is_some() {
+                parts.push(t("serversettings.profileItems.shader"));
+            }
+            parts.join(" · ")
         } else {
-            String::new()
+            t("serversettings.profileItems.cantPlay")
         };
         let inline = self.inline.get(&id).expect("filled before drawing");
         let shake_at = inline.shook.filter(|at| at.elapsed() < Duration::from_millis(400));
@@ -1219,9 +1857,8 @@ impl ProfileItemsView {
                 .into_any_element()
         };
         let replace = replacing.then(|| {
-            let checked = check_effect_text(&self.replace.read(cx).value());
-            let changed = self.replace.read(cx).value() != pretty(&item.effect);
-            let ok = checked.is_ok() && changed;
+            let checked = self.checked(true, cx);
+            let ok = checked.is_ok() && self.replace_changed(cx);
             let body = vec![self.effect_source(true, me, &checked, p, cx)];
             let item = item.clone();
             self.panel(
@@ -1326,6 +1963,20 @@ fn round_icon(
         .hover(move |s| s.bg(bg).text_color(hover))
         .active(|s| s.translate_y(px(1.0)))
         .child(icon(glyph).size(px(16.0)))
+}
+
+/// A draft's pictures after they were uploaded: each file becomes its link,
+/// so trying again doesn't upload it again.
+fn uploaded(draft: &mut EffectDraft, urls: Vec<String>) {
+    if urls.len() != draft.pictures.len() {
+        return;
+    }
+    for (picture, url) in draft.pictures.iter_mut().zip(urls) {
+        if let DraftPicture::File(path) = picture {
+            let animated = path.to_string_lossy().to_ascii_lowercase().ends_with(".gif");
+            *picture = DraftPicture::Uploaded { url, animated };
+        }
+    }
 }
 
 /// A spec laid out to read and edit, or as it is if it isn't JSON.

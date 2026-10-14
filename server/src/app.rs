@@ -744,7 +744,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         spawn_sso_rechecks(app.clone());
         spawn_poll_closings(app.clone());
         crate::api::spawn_search_indexer(app.clone());
-        crate::api::spawn_voice_earnings(app.clone());
+        crate::api::spawn_minute_earnings(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());

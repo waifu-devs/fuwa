@@ -772,6 +772,37 @@ impl Presence {
             .retain(|_, (began, _)| now.duration_since(*began) < PICTURE_WINDOW);
     }
 
+    /// Who's playing games, in each server of theirs `keep` passes where
+    /// others see it (online, not invisible, sharing what they're doing
+    /// there): `(server id, account id, the games' names)`. For paying
+    /// GAME_MINUTE earn rules; nothing is kept.
+    pub fn playing(&self, index: &Index, keep: impl Fn(&str) -> bool) -> Vec<(String, String, Vec<String>)> {
+        let inner = self.lock();
+        let mut out = Vec::new();
+        for (user_id, person) in &inner.people {
+            let own = person.own(user_id);
+            let games: Vec<String> = own
+                .activities
+                .iter()
+                .filter(|a| a.kind == pb::ActivityKind::Playing as i32)
+                .map(|a| a.name.clone())
+                .collect();
+            if games.is_empty() {
+                continue;
+            }
+            for server_id in index.joined_ids(user_id) {
+                if !keep(&server_id) {
+                    continue;
+                }
+                let shown = person.seen_in(user_id, std::slice::from_ref(&server_id));
+                if !shown.activities.is_empty() {
+                    out.push((server_id, user_id.clone(), games.clone()));
+                }
+            }
+        }
+        out
+    }
+
     /// How many people have an app here now, for the usage counts.
     pub fn online_count(&self) -> usize {
         self.lock().people.values().filter(|p| !p.apps.is_empty()).count()
@@ -957,6 +988,32 @@ mod tests {
         assert_eq!(to_cy.len(), 1);
         assert!(to_cy[0].activities.is_empty());
         assert!(drain(&mut dee.rx).is_empty());
+    }
+
+    #[test]
+    fn playing_counts_only_where_it_shows() {
+        let index = index();
+        let presence = Presence::default();
+        let listening =
+            pb::Activity { kind: pb::ActivityKind::Listening as i32, name: "Song".into(), ..Default::default() };
+        presence.update(
+            &index,
+            "ann",
+            "t1",
+            "desktop",
+            false,
+            vec![playing("Celeste"), listening],
+            Some(sharing(&["s2"])),
+        );
+        presence.update(&index, "bo", "t2", "desktop", false, vec![playing("Tetris")], Some(default_settings()));
+        let mut seen = presence.playing(&index, |_| true);
+        seen.sort();
+        // ann hid it in s2; bo doesn't show activity at all.
+        assert_eq!(seen, vec![("s1".to_string(), "ann".to_string(), vec!["Celeste".to_string()])]);
+        assert!(presence.playing(&index, |id| id == "s2").is_empty());
+        let invisible = pb::PresenceSettings { status: pb::PresenceStatus::Invisible as i32, ..sharing(&[]) };
+        presence.settings_changed(&index, "ann", invisible);
+        assert!(presence.playing(&index, |_| true).is_empty());
     }
 
     #[test]

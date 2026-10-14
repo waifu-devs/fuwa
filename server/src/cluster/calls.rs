@@ -320,6 +320,7 @@ impl App {
         };
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
+            PictureOwner::Instance => row.purpose == pb::MediaPurpose::Decoration && row.server_id.is_none(),
             PictureOwner::Server(server_id) => {
                 matches!(
                     row.purpose,
@@ -367,6 +368,19 @@ impl App {
                 .await?
                 .filter(|row| !row.account.disabled)
                 .map(|row| FoundAgent { account: row.account, owner_id: row.owner_id, public: row.public })),
+        }
+    }
+
+    /// Who's playing games in this part's servers, where it shows:
+    /// `(server id, account id, the games)`.
+    pub async fn playing(&self) -> Result<Vec<(String, String, Vec<String>)>> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::PlayingRequest { shard_id: link.id.clone() };
+                let found = link.ask(request, |mut d, r| async move { d.playing(r).await }).await?;
+                Ok(found.players.into_iter().map(|p| (p.server_id, p.user_id, p.games)).collect())
+            }
+            _ => Ok(self.presence.playing(&self.index, |_| true)),
         }
     }
 

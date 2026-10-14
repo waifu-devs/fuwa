@@ -291,8 +291,9 @@ export enum MediaPurpose {
   GIF = 8,
 
   /**
-   * An avatar decoration (ProfileItemService): with a server_id, one the
-   * server offers; without, one the instance does (instance admins).
+   * A profile item's picture (ProfileItemService): an avatar decoration,
+   * or one an effect draws. With a server_id, for an item the server
+   * offers; without, for one the instance does (instance admins).
    *
    * @generated from enum value: MEDIA_PURPOSE_DECORATION = 9;
    */

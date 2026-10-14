@@ -327,7 +327,8 @@ message ProfileItem {
   string description = 5;
   // An effect's spec, as JSON in the format of docs/profile-effects.md,
   // checked by the instance, with the item's id (in lowercase), name and
-  // description. Empty for a decoration.
+  // description. It may hold a shader (WGSL) and layers of the item's own
+  // pictures. Empty for a decoration.
   string effect = 6;
   // A decoration's picture: an upload on this instance
   // (MEDIA_PURPOSE_DECORATION), square and see-through in the middle,
@@ -338,9 +339,21 @@ message ProfileItem {
   bool animated = 8;
   // Who added it.
   string creator_id = 9;
-  // The picture's size; a server's count in its attachment usage.
+  // The picture's size (an effect's, all its pictures'); a server's count
+  // in its attachment usage.
   int64 size = 10;
   google.protobuf.Timestamp created_at = 11;
+  // An effect's own pictures, which its layers name by their place in this
+  // list. Uploads on this instance (MEDIA_PURPOSE_DECORATION).
+  repeated ProfileItemPicture pictures = 12;
+}
+
+// One of an effect's pictures.
+message ProfileItemPicture {
+  string url = 1;
+  // A GIF that moves.
+  bool animated = 2;
+  int64 size = 3;
 }
 
 message Member {
@@ -1897,6 +1910,11 @@ enum CurrencyAction {
   CURRENCY_ACTION_REACTION_RECEIVED = 5;
   // Each minute in a voice channel with someone else there, not deafened.
   CURRENCY_ACTION_VOICE_MINUTE = 6;
+  // Each minute playing a game (an activity of kind PLAYING) the rule
+  // names, or any game when it names none, while the member shares what
+  // they're doing in the server (docs/presence.md). Apps say what's being
+  // played, so a daily cap is worth setting.
+  CURRENCY_ACTION_GAME_MINUTE = 7;
 }
 
 // How much one action earns.
@@ -1913,6 +1931,10 @@ message EarnRule {
   int64 streak_bonus = 5;
   // ...up to this many days (0 for no streak bonus).
   int32 streak_max_days = 6;
+  // GAME_MINUTE: the games that pay, by name as activities give it
+  // ("Celeste"), matched ignoring case. Empty for any game. At most 50, each
+  // 1 to 128 characters.
+  repeated string games = 7;
 }
 
 enum ShopListingKind {

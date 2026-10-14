@@ -5,8 +5,8 @@
 //! shop (`shop_listings`, with `profile_item_owners` for items bought).
 //!
 //! Earning runs inside the write that did the thing ([`earn`]), so a message
-//! AutoMod blocks earns nothing; voice is credited once a minute by
-//! [`spawn_voice_earnings`]. Balances never go below zero, and only their
+//! AutoMod blocks earns nothing; time in voice and playing games is
+//! credited once a minute by [`spawn_minute_earnings`]. Balances never go below zero, and only their
 //! owner (and people who run the economy) see them.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -39,6 +39,10 @@ const MAX_EARN: i64 = 1_000_000_000;
 const MAX_AMOUNT: i64 = 1_000_000_000_000;
 const MAX_COOLDOWN: i32 = 86_400;
 const MAX_STREAK_DAYS: i32 = 365;
+/// Games one GAME_MINUTE rule may name, and how long a name is (as long as
+/// an activity's).
+const MAX_GAMES: usize = 50;
+const MAX_GAME_NAME: usize = 128;
 /// How many people a finance page's rankings show.
 const TOP: i64 = 10;
 /// A ledger page.
@@ -175,7 +179,9 @@ fn checked_rules(rules: &[pb::EarnRule]) -> Result<Vec<pb::EarnRule>> {
             return Err(Error::invalid(format!("a streak bonus is 0 to {MAX_EARN}, for up to {MAX_STREAK_DAYS} days")));
         }
         let daily = action == Action::Daily;
-        let capped = matches!(action, Action::Message | Action::ReactionReceived | Action::VoiceMinute);
+        let capped =
+            matches!(action, Action::Message | Action::ReactionReceived | Action::VoiceMinute | Action::GameMinute);
+        let games = if action == Action::GameMinute { checked_games(&rule.games)? } else { vec![] };
         out.push(pb::EarnRule {
             action: rule.action,
             amount: rule.amount,
@@ -183,10 +189,39 @@ fn checked_rules(rules: &[pb::EarnRule]) -> Result<Vec<pb::EarnRule>> {
             daily_cap: if capped { rule.daily_cap } else { 0 },
             streak_bonus: if daily { rule.streak_bonus } else { 0 },
             streak_max_days: if daily { rule.streak_max_days } else { 0 },
+            games,
         });
     }
     out.sort_by_key(|r| r.action);
     Ok(out)
+}
+
+/// A GAME_MINUTE rule's games: trimmed, each once (ignoring case), in the
+/// order given.
+fn checked_games(games: &[String]) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for game in games {
+        let game = text("game", game, 1, MAX_GAME_NAME)?;
+        if seen.insert(game_key(&game)) {
+            out.push(game);
+        }
+    }
+    if out.len() > MAX_GAMES {
+        return Err(Error::invalid(format!("a rule names at most {MAX_GAMES} games")));
+    }
+    Ok(out)
+}
+
+/// How game names are compared: trimmed, ignoring case.
+fn game_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+/// Whether a GAME_MINUTE rule pays for playing any of `games`.
+fn pays_for(rule: &pb::EarnRule, games: &[String]) -> bool {
+    !games.is_empty()
+        && (rule.games.is_empty() || games.iter().any(|g| rule.games.iter().any(|r| game_key(r) == game_key(g))))
 }
 
 /// Applies a change to a currency, checked. Whether anything changed.
@@ -609,7 +644,7 @@ async fn rules_for(
         .await?
         .into_iter()
         .filter_map(|c| {
-            let rule = *c.earn.iter().find(|r| r.action == action as i32)?;
+            let rule = c.earn.iter().find(|r| r.action == action as i32)?.clone();
             Some((c, rule))
         })
         .collect())
@@ -661,14 +696,18 @@ async fn earn_by(
     Ok(())
 }
 
-/// How often voice is credited.
-const VOICE_EVERY: Duration = Duration::from_secs(60);
+/// How often voice and games are credited.
+const MINUTE: Duration = Duration::from_secs(60);
 
 /// Every minute: credits the people in each server's voice channels with
-/// someone else there, who aren't deafened, under its VOICE_MINUTE rules.
-pub fn spawn_voice_earnings(app: Arc<App>) {
+/// someone else there, who aren't deafened, under its VOICE_MINUTE rules,
+/// and the people playing a game where they share it under its
+/// GAME_MINUTE rules.
+pub fn spawn_minute_earnings(app: Arc<App>) {
     tokio::spawn(async move {
-        let mut every = tokio::time::interval(VOICE_EVERY);
+        let mut every = tokio::time::interval(MINUTE);
+        // A minute missed (a slow directory) isn't paid twice after.
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         every.tick().await;
         loop {
             tokio::select! {
@@ -682,10 +721,58 @@ pub fn spawn_voice_earnings(app: Arc<App>) {
                             tracing::warn!("couldn't credit time in voice");
                         }
                     }
+                    credit_games(&app).await;
                 }
             }
         }
     });
+}
+
+/// Credits everyone playing a game in this part's servers.
+async fn credit_games(app: &App) {
+    let players = match app.playing().await {
+        Ok(players) => players,
+        Err(err) => {
+            tracing::info!(%err, "couldn't learn who's playing; games are credited next minute");
+            return;
+        }
+    };
+    let mut by_server: HashMap<String, Vec<(String, Vec<String>)>> = HashMap::new();
+    for (server_id, user_id, games) in players {
+        by_server.entry(server_id).or_default().push((user_id, games));
+    }
+    for (server_id, players) in by_server {
+        if credit_players(app, &server_id, players).await.is_err() {
+            tracing::warn!("couldn't credit time playing games");
+        }
+    }
+}
+
+async fn credit_players(app: &App, server_id: &str, players: Vec<(String, Vec<String>)>) -> Result<()> {
+    let Ok(sdb) = app.servers.get(server_id).await else { return Ok(()) };
+    let rules = rules_for(&*sdb.read()?, &sdb.id, Action::GameMinute).await?;
+    if rules.is_empty() {
+        return Ok(());
+    }
+    // Each person, with the rules their games pass.
+    let paid: Vec<(String, Vec<(pb::Currency, pb::EarnRule)>)> = players
+        .into_iter()
+        .filter_map(|(user_id, games)| {
+            let theirs: Vec<_> = rules.iter().filter(|(_, rule)| pays_for(rule, &games)).cloned().collect();
+            (!theirs.is_empty()).then_some((user_id, theirs))
+        })
+        .collect();
+    if paid.is_empty() {
+        return Ok(());
+    }
+    let now = now_ms();
+    sdb.write("", async |conn, events| {
+        for (user_id, rules) in &paid {
+            earn_by(conn, rules, user_id, Action::GameMinute, now, events).await?;
+        }
+        Ok(())
+    })
+    .await
 }
 
 async fn credit_voice(app: &App, server_id: &str) -> Result<()> {
@@ -1565,5 +1652,51 @@ impl EconomyService for Api {
             }
             .await,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn game_rule(games: &[&str]) -> pb::EarnRule {
+        pb::EarnRule {
+            action: Action::GameMinute as i32,
+            amount: 1,
+            games: games.iter().map(|g| g.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn game_rules_pay_for_the_games_they_name() {
+        let played = |games: &[&str]| games.iter().map(|g| g.to_string()).collect::<Vec<_>>();
+        let named = game_rule(&["Celeste", "Hollow Knight"]);
+        assert!(pays_for(&named, &played(&["celeste"])));
+        assert!(pays_for(&named, &played(&["Tetris", " HOLLOW KNIGHT "])));
+        assert!(!pays_for(&named, &played(&["Tetris"])));
+        // No games named: any game pays, but not playing nothing.
+        let any = game_rule(&[]);
+        assert!(pays_for(&any, &played(&["Tetris"])));
+        assert!(!pays_for(&any, &[]));
+    }
+
+    #[test]
+    fn game_lists_are_checked() {
+        let games = |n: usize| (0..n).map(|i| format!("Game {i}")).collect::<Vec<_>>();
+        assert_eq!(checked_games(&games(MAX_GAMES)).unwrap().len(), MAX_GAMES);
+        assert!(checked_games(&games(MAX_GAMES + 1)).is_err());
+        // Repeats don't count against the limit.
+        let mut repeated = games(MAX_GAMES);
+        repeated.push("GAME 0".into());
+        assert_eq!(checked_games(&repeated).unwrap().len(), MAX_GAMES);
+        assert!(checked_games(&["".into()]).is_err());
+        assert!(checked_games(&["x".repeat(MAX_GAME_NAME + 1)]).is_err());
+        // Only game rules keep games (rules come back in action order).
+        let rules = checked_rules(&[pb::EarnRule { games: vec!["Celeste".into()], ..game_rule(&[]) }, {
+            pb::EarnRule { action: Action::Join as i32, games: vec!["Celeste".into()], ..game_rule(&[]) }
+        }])
+        .unwrap();
+        assert_eq!(rules.iter().map(|r| r.games.len()).collect::<Vec<_>>(), vec![0, 1]);
     }
 }
