@@ -57,7 +57,7 @@ fn entry(id: &'static str, key: &str, keywords: &'static str) -> (&'static str, 
 }
 
 /// The menu: the instance's settings, then what an admin manages (the web's `settingsGroups`).
-pub(super) fn groups(name: &str, items_here: bool) -> Vec<Group> {
+pub(super) fn groups(name: &str, items_here: bool, previews_here: bool) -> Vec<Group> {
     let instance = vec![
         Section::new(
             Page::General,
@@ -79,31 +79,38 @@ pub(super) fn groups(name: &str, items_here: bool) -> Vec<Group> {
             t("instancesettings.nav.signUpsAbout"),
             "",
         )
-        .with(vec![
-            entry("local-accounts", "instancesettings.nav.localAccounts", "sign up password"),
-            entry("linked-accounts", "instancesettings.nav.linkedAccounts", "linked sign in sign up"),
-            entry("linked-issuer", "instancesettings.nav.linkedIssuer", "issuer openauth waifu.dev linked"),
-            entry("server-creation", "instancesettings.nav.serverCreation", ""),
-            entry("servers-per-account", "instancesettings.nav.serversPerAccount", ""),
-            entry("agent-creation", "instancesettings.nav.agentCreation", "bots integrations"),
-            entry(
-                "agent-endpoints",
-                "instancesettings.nav.agentEndpoints",
-                "agents bots webhook http url events deliveries",
-            ),
-            entry("mcp", "instancesettings.nav.mcp", "mcp claude ai model context protocol"),
-            entry("shared-channels", "serversettings.nav.shared", "share connect servers slack connect"),
-            entry(
-                "profile-effects",
-                "instancesettings.nav.profileEffects",
-                "sparkles petals animation card decoration",
-            ),
-            entry(
-                "rich-presence",
-                "instancesettings.nav.richPresence",
-                "activity playing game status discord presence",
-            ),
-        ]),
+        .with(
+            vec![
+                entry("local-accounts", "instancesettings.nav.localAccounts", "sign up password"),
+                entry("linked-accounts", "instancesettings.nav.linkedAccounts", "linked sign in sign up"),
+                entry("linked-issuer", "instancesettings.nav.linkedIssuer", "issuer openauth waifu.dev linked"),
+                entry("server-creation", "instancesettings.nav.serverCreation", ""),
+                entry("servers-per-account", "instancesettings.nav.serversPerAccount", ""),
+                entry("agent-creation", "instancesettings.nav.agentCreation", "bots integrations"),
+                entry(
+                    "agent-endpoints",
+                    "instancesettings.nav.agentEndpoints",
+                    "agents bots webhook http url events deliveries",
+                ),
+                entry("mcp", "instancesettings.nav.mcp", "mcp claude ai model context protocol"),
+                entry("shared-channels", "serversettings.nav.shared", "share connect servers slack connect"),
+                entry(
+                    "profile-effects",
+                    "instancesettings.nav.profileEffects",
+                    "sparkles petals animation card decoration",
+                ),
+                entry(
+                    "rich-presence",
+                    "instancesettings.nav.richPresence",
+                    "activity playing game status discord presence",
+                ),
+            ]
+            .into_iter()
+            .chain(previews_here.then(|| {
+                entry("link-previews", "instancesettings.nav.linkPreviews", "embeds unfurl links opengraph cards")
+            }))
+            .collect(),
+        ),
         Section::new(
             Page::Sso,
             "building",
@@ -343,7 +350,7 @@ impl InstanceSettingsView {
     /// Enter in the search: the first thing it found.
     pub(super) fn pick_first(&mut self, cx: &mut Context<Self>) {
         let query = self.query.read(cx).value().to_string();
-        let groups = groups(&self.name(), self.instance_has("profile-items"));
+        let groups = groups(&self.name(), self.instance_has("profile-items"), self.instance_has("link-previews"));
         let first = search(&groups, &query)
             .and_then(|results| results.first().map(|(s, settings)| (s.page, settings.first().map(|x| x.0))));
         if let Some((page, setting)) = first {

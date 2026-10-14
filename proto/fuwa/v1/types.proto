@@ -1310,6 +1310,13 @@ message Embed {
   repeated EmbedField fields = 5;
   string thumbnail_url = 6;
   string image_url = 7;
+  // A link preview: made by the instance from a link in the message's text
+  // (docs/link-previews.md), not sent by its author. Apps show its words as
+  // plain text, never Markdown. Ignored in what apps send.
+  bool preview = 8;
+  // The name of the site a link preview is from (its og:site_name, or its
+  // host). Empty on other embeds.
+  string site_name = 9;
 }
 
 message EmbedField {

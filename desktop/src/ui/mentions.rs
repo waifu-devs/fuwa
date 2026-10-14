@@ -411,6 +411,11 @@ pub fn set_app(app: gpui_kit::WeakEntity<crate::ui::app::FuwaApp>) {
     APP.with(|a| *a.borrow_mut() = Some(app));
 }
 
+/// The window's app, for other Markdown nodes (spoilers) to reach.
+pub fn app() -> Option<gpui_kit::WeakEntity<crate::ui::app::FuwaApp>> {
+    APP.with(|a| a.borrow().clone())
+}
+
 /// Opens the card of the person a chip names, in the server on screen.
 fn open_mention(username: &str, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
     let Some(app) = APP.with(|a| a.borrow().clone()) else { return };

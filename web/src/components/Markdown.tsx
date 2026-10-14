@@ -2,7 +2,11 @@ import { memo, type ComponentProps, type ReactElement } from "react";
 import renderMarkdown, { type Components, type Options } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { guardMasked } from "@/components/LeavingDialog";
+import { Spoiler } from "@/components/Spoiler";
 import { Timestamp } from "@/components/Timestamp";
+import { remarkMaskedLinks } from "@/lib/links";
+import { remarkSpoilers } from "@/lib/spoilers";
 import { remarkTimestamps } from "@/lib/timestamps";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +21,8 @@ import { cn } from "@/lib/utils";
  * pictures on someone else's page.
  *
  * Timestamps (`<t:SECONDS:STYLE>`, as in Discord) read in each reader's own
- * time zone, in block and inline Markdown alike.
+ * time zone, in block and inline Markdown alike, and `||spoilers||` stay
+ * covered until the reader reveals them.
  *
  * Styles live in app.css (.markdown and .markdown-inline) and only use theme
  * tokens, so Markdown looks right in every theme.
@@ -37,13 +42,23 @@ function resolve(href: string): URL | null {
 
 /**
  * Links leaving the site open in a new tab and don't pass on ranking or the
- * referrer. A link whose URL was dropped as unsafe is just its text.
+ * referrer; masked ones ask first (components/LeavingDialog.tsx). A link
+ * whose URL was dropped as unsafe is just its text.
  */
 function Anchor({ node: _node, href, ...props }: AnchorProps) {
   const url = href ? resolve(href) : null;
   if (!url) return <span>{props.children}</span>;
   const external = url.origin !== location.origin;
-  return <a href={url.href} {...(external ? { rel: "nofollow ugc noopener noreferrer", target: "_blank" } : {})} {...props} />;
+  // Words that aren't the address (remarkMaskedLinks): ask before going.
+  const masked = (props as Record<string, unknown>)["data-masked"] === "true";
+  return (
+    <a
+      href={url.href}
+      {...(external ? { rel: "nofollow ugc noopener noreferrer", target: "_blank" } : {})}
+      {...props}
+      onClick={masked && external ? (event) => guardMasked(event, url.href) : props.onClick}
+    />
+  );
 }
 
 const blockComponents: Components = {
@@ -57,6 +72,7 @@ const blockComponents: Components = {
   h5: ({ node: _node, ...props }) => <h4 {...props} />,
   h6: ({ node: _node, ...props }) => <h4 {...props} />,
   "fuwa-time": Timestamp,
+  "fuwa-spoiler": Spoiler,
 } as Components;
 
 /** Extra syntax for one kind of text, like mentions in chat: more remark plugins and the elements they make. */
@@ -89,7 +105,7 @@ function cached(kind: string, text: string, make: () => ReactElement): ReactElem
   return made;
 }
 
-const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks, remarkTimestamps];
+const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks, remarkTimestamps, remarkSpoilers, remarkMaskedLinks];
 const extensionIds = new WeakMap<MarkdownExtension, string>();
 let extensions = 0;
 const extensionOptions = (extension: MarkdownExtension): Options => ({
@@ -118,13 +134,13 @@ export const Markdown = memo(function Markdown({
   return <div className={cn("markdown", className)}>{content}</div>;
 });
 
-const INLINE = ["em", "strong", "del", "code", "a", "fuwa-time"];
+const INLINE = ["em", "strong", "del", "code", "a", "fuwa-time", "fuwa-spoiler"];
 const INLINE_NO_LINKS = INLINE.filter((tag) => tag !== "a");
-const INLINE_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkTimestamps];
-const INLINE_COMPONENTS = { a: Anchor, "fuwa-time": Timestamp } as Components;
+const INLINE_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkTimestamps, remarkSpoilers, remarkMaskedLinks];
+const INLINE_COMPONENTS = { a: Anchor, "fuwa-time": Timestamp, "fuwa-spoiler": Spoiler } as Components;
 
 /**
- * Markdown for one-line text: bold, italics, strikethrough, code and links.
+ * Markdown for one-line text: bold, italics, strikethrough, code, links and spoilers.
  * Anything block-level is flattened to its text. Pass `links={false}` inside
  * something that is already a link.
  */

@@ -197,6 +197,12 @@ pub enum Dialog {
     },
     /// Starting a screen share in the call you're in (`ui/screen_share.rs`).
     ShareScreen,
+    /// Before a masked link opens: where it really goes (`ui/leaving.rs`).
+    Leaving {
+        url: String,
+        /// "Trust links to this site" is on.
+        trust: bool,
+    },
     /// Reporting a message or a person to the server's moderators (`ui/report.rs`).
     Report {
         key: String,
@@ -1792,6 +1798,8 @@ impl FuwaApp {
             Dialog::CreateServer { .. } => self.create_server_now(window, cx),
             Dialog::Apply { .. } | Dialog::Application { .. } => {}
             Dialog::ShareScreen => self.start_share(cx),
+            // Enter is "Go back", the safe answer, as the web's focus starts there.
+            Dialog::Leaving { .. } => self.close_dialog(cx),
             Dialog::Report { .. } if self.report.sent.is_some() => {
                 self.dialog = None;
                 self.close_dialog(cx);

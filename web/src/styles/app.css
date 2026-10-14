@@ -371,6 +371,25 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
 /* ───────────────────────── Member Markdown ─────────────────────────
    Rendered by components/Markdown.tsx; colors come from theme tokens. */
 .markdown { overflow-wrap: anywhere; }
+/* Spoilers (components/Spoiler.tsx): a cover that fades off when revealed. */
+.spoiler {
+  border-radius: 0.3em;
+  padding: 0 0.15em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  transition: background-color 0.25s ease-out, color 0.25s ease-out;
+}
+.spoiler[data-hidden] {
+  background: color-mix(in oklab, var(--foreground) 82%, transparent);
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+.spoiler[data-hidden] * { visibility: hidden; }
+.spoiler[data-hidden]:hover { background: color-mix(in oklab, var(--foreground) 72%, transparent); }
+.spoiler[data-hidden]:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .spoiler { transition: none; } }
 .markdown > * + * { margin-top: 0.75em; }
 .markdown :where(h3, h4) { font-weight: 800; line-height: 1.3; }
 .markdown h3 { font-size: 1.15em; }

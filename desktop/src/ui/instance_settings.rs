@@ -788,7 +788,8 @@ impl Render for InstanceSettingsView {
         let inner = main.min(960.0);
         self.column = inner - 64.0 - 80.0;
 
-        let groups = frame::groups(&self.name(), self.instance_has("profile-items"));
+        let groups =
+            frame::groups(&self.name(), self.instance_has("profile-items"), self.instance_has("link-previews"));
         let menu = self.menu(&groups, &p, window, cx);
         let (label, about) = groups
             .iter()

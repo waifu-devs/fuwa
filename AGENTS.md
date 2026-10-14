@@ -308,6 +308,18 @@
     `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
     `components/settings/ProfileItems.tsx` (both settings dialogs) and
     `settings/account/DecorationPicker.tsx`.
+  - `previews.rs`: link previews (docs/link-previews.md). It finds the links
+    in a message's text (`links`, pure: not in code, spoilers or `<...>`, 3
+    at most) and reads each page's OpenGraph tags (`read_page`, pure) through
+    its own public-only fetcher with a 30-minute cache (`page`). After a
+    message is sent or its text edited (members', webhooks', a shared
+    channel's guests'), `api/messages.rs`'s `preview_links` reads them in the
+    background and replaces the message's `Embed.preview` embeds in one
+    write (`MessageUpdated`, not an edit); pictures go through
+    `picture_link`. Only the author may hide them (`HideLinkPreviews`,
+    `previews_hidden` in extras). Never for DMs or secure channels; the
+    `link_previews` setting turns it off. Apps draw preview words as plain
+    text (web `chat/Embeds.tsx`, desktop `ui/embeds.rs`).
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
@@ -968,6 +980,16 @@
     `hasIn`, `above`, `mayChange`) and the labels for each permission. UI
     asks `useAccess` from `fuwa/hooks.ts` what you may do and hides what you
     can't, but the server decides.
+  - Spoilers: `||text||` in any Markdown (`lib/spoilers.ts`, a remark plugin
+    in both `Markdown` and `InlineMarkdown`) is drawn covered by
+    `components/Spoiler.tsx` until the reader reveals it; `hideSpoilers`
+    blanks them in plain-text places (system notifications). Link previews
+    skip links inside them. Desktop: the same in its Markdown.
+  - Masked links (a Markdown link whose words aren't its address, and an
+    app embed's title link): `lib/links.ts` marks them (`remarkMaskedLinks`)
+    and `components/LeavingDialog.tsx` asks before opening one, showing the
+    real address, unless its site is in `Prefs.trustedDomains` (this
+    device's; added from the dialog or Settings > Chat).
   - `src/components/chat/mentions.tsx`: mentions in messages as chips (a remark
     plugin for `Markdown`), and `ServerLook`, the roles and members a server's
     messages need to color names. `MentionPicker.tsx` is the @ list in the

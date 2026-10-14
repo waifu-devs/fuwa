@@ -6,6 +6,7 @@ import { loadFontFile, sweepFontFiles } from "@/lib/font-files";
 import { DEFAULT_FONT, fontStack, sanitizeFont, type FontPick } from "@/lib/fonts";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { isTag } from "@/i18n/core";
+import { cleanDomain } from "@/lib/links";
 import { DEFAULT_SHARE, SHARE_SURFACES, shareQuality, type ShareFps, type ShareHeight, type ShareSurface } from "@/lib/screen-share";
 import { applyTheme, BUILTIN_THEMES, isDark, type Theme, type ThemeTokens } from "@/lib/themes";
 
@@ -118,7 +119,12 @@ export type Prefs = {
   shareSurface: ShareSurface;
   shareHeight: ShareHeight;
   shareFps: ShareFps;
+  /** Sites whose masked links open without asking first (lib/links.ts), by host; their subdomains too. */
+  trustedDomains: string[];
 };
+
+/** Most sites kept in the trusted list. */
+const MAX_TRUSTED_DOMAINS = 500;
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -182,6 +188,7 @@ export const DEFAULT_PREFS: Prefs = {
   shareSurface: "monitor",
   shareHeight: DEFAULT_SHARE.height,
   shareFps: DEFAULT_SHARE.fps,
+  trustedDomains: [],
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -266,6 +273,9 @@ function sanitize(p: Prefs): Prefs {
     shareReports: p.shareReports !== false,
     othersEffects: p.othersEffects !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
+    trustedDomains: Array.isArray(p.trustedDomains)
+      ? [...new Set(p.trustedDomains.filter((d): d is string => typeof d === "string").map(cleanDomain).filter(Boolean))].slice(0, MAX_TRUSTED_DOMAINS)
+      : [],
     customKeybinds: Array.isArray(p.customKeybinds)
       ? p.customKeybinds.filter((k) => typeof k?.id === "string" && typeof k.action === "string" && typeof k.combo === "string")
       : [],

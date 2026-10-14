@@ -1056,7 +1056,10 @@ impl FuwaApp {
             let marked = mark_hits(&message.content, &search::byte_ranges(&message.content, &result.highlights));
             hits_as_markdown(&crate::ui::mentions::mention_links(
                 &crate::ui::timestamps::timestamp_nodes(&crate::ui::text::hard_breaks(
-                    &crate::ui::text::images_as_links(&marked),
+                    &crate::ui::spoilers::spoiler_nodes(
+                        &crate::ui::text::images_as_links(&marked),
+                        &format!("search-{}", message.id),
+                    ),
                 )),
                 &look.mentions.with(&message.emojis),
             ))

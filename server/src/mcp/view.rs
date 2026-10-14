@@ -171,7 +171,9 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
     let embeds: Vec<Value> = m
         .embeds
         .iter()
-        .map(|e| trim(json!({ "title": e.title, "description": e.description, "url": e.url })))
+        .map(|e| {
+            trim(json!({ "title": e.title, "description": e.description, "url": e.url, "preview": e.preview, "site": e.site_name }))
+        })
         .collect();
     // As members see it: the file on this instance and its credit, never the seal.
     let gif = m.gif.as_ref().map(|g| {

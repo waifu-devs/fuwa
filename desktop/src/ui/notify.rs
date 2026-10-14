@@ -66,9 +66,10 @@ pub fn show(title: String, body: String, target: Clicked) {
         .ok();
 }
 
-/// A message's text, as plain words for a notification.
+/// A message's text, as plain words for a notification, its spoilers blanked out.
 pub fn plain(text: &str) -> String {
-    let stripped: String = text.chars().filter(|c| !matches!(c, '*' | '_' | '~' | '`' | '>' | '#')).collect();
+    let stripped: String =
+        crate::ui::spoilers::hide(text).chars().filter(|c| !matches!(c, '*' | '_' | '~' | '`' | '>' | '#')).collect();
     let words = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     if words.chars().count() > 160 { format!("{}…", words.chars().take(159).collect::<String>()) } else { words }
 }
@@ -79,5 +80,6 @@ mod tests {
     fn notifications_read_as_plain_words() {
         assert_eq!(super::plain("**hi**\n> there `you`"), "hi there you");
         assert_eq!(super::plain(&"a".repeat(200)).chars().count(), 160);
+        assert_eq!(super::plain("it was ||the butler||"), "it was ▒▒▒▒▒▒▒▒▒▒");
     }
 }

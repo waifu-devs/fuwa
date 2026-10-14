@@ -13006,3 +13006,159 @@ async fn boards_hold_cards_whose_bodies_are_messages() {
     assert_eq!(gone.code(), Code::NotFound);
     assert_eq!(usage(&mut c, &juan, &sid).await.messages, messages_before);
 }
+
+/// A message's link previews, once they've come (or what it has after a while).
+async fn previews_of(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    id: &str,
+    want: usize,
+) -> Vec<pb::Embed> {
+    for _ in 0..100 {
+        let found = messages(c, token, server_id, channel_id).await.into_iter().find(|m| m.id == id).unwrap();
+        let previews: Vec<pb::Embed> = found.embeds.into_iter().filter(|e| e.preview).collect();
+        if previews.len() == want {
+            return previews;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("{id} never had {want} link previews");
+}
+
+#[tokio::test]
+async fn link_previews_read_pages_people_link() {
+    use axum::http::header;
+    let site = axum::Router::new()
+        .route(
+            "/page",
+            axum::routing::get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    r##"<html><head><title>Ignored</title>
+                    <meta property="og:title" content="A &amp; B">
+                    <meta property="og:description" content="What the page is about">
+                    <meta property="og:site_name" content="Example">
+                    <meta property="og:image" content="/pic.png">
+                    <meta name="theme-color" content="#00ff00"></head><body>hi</body></html>"##,
+                )
+            }),
+        )
+        .route("/plain", axum::routing::get(|| async { "just text" }))
+        .route("/pic.png", axum::routing::get(|| async { ([(header::CONTENT_TYPE, "image/png")], png(100, 1)) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let site_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, site).await.unwrap() });
+
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LINK_PREVIEWS_ALLOW_PRIVATE", "1")]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Links", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+    let (sid, cid) = (server.id.as_str(), general.id.as_str());
+
+    // A page gets a card; a link in <...> and one that isn't a page don't.
+    let page = format!("http://{site_addr}/page");
+    let text = format!("look {page}, <http://{site_addr}/page?quiet> and http://{site_addr}/plain");
+    let sent = send(&mut c, &owner, sid, cid, &text).await.unwrap();
+    let previews = previews_of(&mut c, &member, sid, cid, &sent.id, 1).await;
+    let card = &previews[0];
+    assert_eq!((card.title.as_str(), card.description.as_str()), ("A & B", "What the page is about"));
+    assert_eq!((card.site_name.as_str(), card.url.as_str(), card.color), ("Example", page.as_str(), 0x00FF00));
+    assert!(card.thumbnail_url.starts_with("http://localhost:8080/media/outside/"), "{}", card.thumbnail_url);
+    let shown = messages(&mut c, &member, sid, cid).await.into_iter().find(|m| m.id == sent.id).unwrap();
+    assert!(shown.edited_at.is_none(), "a preview isn't an edit");
+
+    // An edit to a picture's link makes its card the picture.
+    let picture = format!("http://{site_addr}/pic.png");
+    c.messages
+        .update_message(authed(
+            &owner,
+            pb::UpdateMessageRequest {
+                server_id: sid.into(),
+                message_id: sent.id.clone(),
+                content: format!("now {picture}"),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        let previews = previews_of(&mut c, &member, sid, cid, &sent.id, 1).await;
+        if previews[0].url == picture {
+            assert!(previews[0].image_url.contains("/media/outside/") && previews[0].title.is_empty());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Only the author takes them off, and then they stay off.
+    let hide = |message_id: &str| pb::HideLinkPreviewsRequest { server_id: sid.into(), message_id: message_id.into() };
+    assert_eq!(
+        c.messages.hide_link_previews(authed(&member, hide(&sent.id))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let hidden = c.messages.hide_link_previews(authed(&owner, hide(&sent.id))).await.unwrap().into_inner();
+    assert!(hidden.message.unwrap().embeds.is_empty());
+    c.messages
+        .update_message(authed(
+            &owner,
+            pb::UpdateMessageRequest {
+                server_id: sid.into(),
+                message_id: sent.id.clone(),
+                content: format!("again {page}"),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    previews_of(&mut c, &member, sid, cid, &sent.id, 0).await;
+
+    // Apps can't send previews of their own.
+    let made = c
+        .messages
+        .send_message(authed(
+            &owner,
+            pb::SendMessageRequest {
+                server_id: sid.into(),
+                channel_id: cid.into(),
+                embeds: vec![pb::Embed {
+                    title: "Mine".into(),
+                    preview: true,
+                    site_name: "x".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert!(!made.embeds[0].preview && made.embeds[0].site_name.is_empty());
+
+    // With the setting off, no new previews are made.
+    let settings = c.admin.get_settings(authed(ADMIN_TOKEN, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let mut off = settings.config.unwrap().settings.unwrap();
+    assert!(off.link_previews, "on unless set");
+    off.link_previews = false;
+    c.admin.update_settings(authed(ADMIN_TOKEN, settings_update(off, &["link_previews"], &[]))).await.unwrap();
+    let quiet = send(&mut c, &owner, sid, cid, &page).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    previews_of(&mut c, &member, sid, cid, &quiet.id, 0).await;
+}

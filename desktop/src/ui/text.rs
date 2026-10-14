@@ -267,7 +267,38 @@ pub fn markdown(
     id: impl Into<gpui_kit::ElementId>,
     source: impl Into<gpui_kit::SharedString>,
 ) -> gpui_kit::component::text::TextView {
-    gpui_kit::component::text::TextView::markdown(id, source).on_link_click(|url, _, _, cx| open_link(url, cx))
+    let source: gpui_kit::SharedString = source.into();
+    let written = source.clone();
+    gpui_kit::component::text::TextView::markdown(id, source).on_link_click(move |url, _, window, cx| {
+        let masked = crate::core::links::masked_in(&written, url);
+        open_written(url, masked, window, cx)
+    })
+}
+
+/// Markdown whose every link counts as masked: an app's card title, whose
+/// words are never its address (the web's embed title).
+pub fn markdown_masked(
+    id: impl Into<gpui_kit::ElementId>,
+    source: impl Into<gpui_kit::SharedString>,
+) -> gpui_kit::component::text::TextView {
+    gpui_kit::component::text::TextView::markdown(id, source)
+        .on_link_click(|url, _, window, cx| open_written(url, true, window, cx))
+}
+
+/// Opens a link from someone's words: when it's safe to, and for a masked
+/// one (its words aren't where it goes) only after asking, unless its site
+/// is trusted (`ui/leaving.rs`).
+pub fn open_written(url: &str, masked: bool, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    let web = url.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("http"));
+    if masked
+        && web
+        && safe_link(url)
+        && let Some(app) = crate::ui::mentions::app()
+        && app.update(cx, |this, cx| this.ask_to_leave(url.to_owned(), window, cx)).is_ok()
+    {
+        return;
+    }
+    open_link(url, cx);
 }
 
 /// A line from the translations with some of its placeholders filled in

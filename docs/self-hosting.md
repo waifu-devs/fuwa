@@ -226,6 +226,12 @@ still show the first 100; 0 isn't taken. How many reactions one
 account may add or take off a minute (`FUWA_LIMIT_REACTIONS_PER_MINUTE`) is
 unlimited unless set.
 
+Link previews are on: when someone links to a page in a server, the instance
+reads that page (public addresses only) and puts a card with its title and
+picture under the message, so your instance's address reaches the sites people
+link to (theirs never does). `FUWA_LINK_PREVIEWS=off`, or Link previews in the
+instance settings, turns them off; see [docs/link-previews.md](link-previews.md).
+
 Direct messages are end-to-end encrypted with nothing to set up: the instance
 keeps only ciphertext and public keys for them (`dms.db`), and can't read them.
 If a proxy in front of fuwa sets its own `Content-Security-Policy`, let scripts

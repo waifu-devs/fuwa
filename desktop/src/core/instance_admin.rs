@@ -144,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 60] = [
+pub const PATHS: [&str; 61] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -161,6 +161,7 @@ pub const PATHS: [&str; 60] = [
     "profile_effects",
     "profile_decorations",
     "rich_presence",
+    "link_previews",
     "servers_per_account",
     "default_limits.members",
     "default_limits.channels",
@@ -336,6 +337,7 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "profile_effects" => a.profile_effects != b.profile_effects,
         "profile_decorations" => a.profile_decorations != b.profile_decorations,
         "rich_presence" => a.rich_presence != b.rich_presence,
+        "link_previews" => a.link_previews != b.link_previews,
         "telemetry" => a.telemetry != b.telemetry,
         "web" => a.web != b.web,
         "calls" => a.calls != b.calls,
@@ -428,6 +430,7 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "profile_effects" => into.profile_effects = from.profile_effects,
         "profile_decorations" => into.profile_decorations = from.profile_decorations,
         "rich_presence" => into.rich_presence = from.rich_presence,
+        "link_previews" => into.link_previews = from.link_previews,
         "telemetry" => into.telemetry = from.telemetry,
         "web" => into.web = from.web,
         "calls" => into.calls = from.calls,
