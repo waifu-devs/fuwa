@@ -297,6 +297,8 @@ impl Api {
             false => self.app.settings().streams_per_account(),
         };
         let ticket = self.app.streams.open(crate::streams::Kind::Events, &account.id, per_account)?;
+        // An agent with a stream open is online.
+        let online = self.agent_online(&account).await?;
         // A split instance's gateway follows new servers itself, from the
         // directory, and asks shards only for the ones it knows of.
         let follow_new = follow_new_servers && !self.app.config.cluster.is_split();
@@ -341,7 +343,7 @@ impl Api {
         let account_id = account.id.clone();
         let api = self.clone();
         tokio::spawn(async move {
-            let _ticket = ticket;
+            let (_ticket, _online) = (ticket, online);
             let send = async |item: Result<pb::SubscribeResponse, Status>| tx.send(item.map(events_item)).await.is_ok();
             for event in gone {
                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {

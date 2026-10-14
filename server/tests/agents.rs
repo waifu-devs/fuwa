@@ -195,6 +195,63 @@ async fn a_stream_follows_servers_its_agent_is_added_to_and_ends_when_its_token_
     instance.stop().await;
 }
 
+/// The status of `user_id` that next reaches a presence stream.
+async fn next_status(stream: &mut Streaming<pb::WatchPresenceResponse>, user_id: &str) -> pb::PresenceStatus {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(10), stream.message())
+            .await
+            .expect("no presence came")
+            .unwrap()
+            .unwrap();
+        if let Some(presence) = message.presence.filter(|p| p.user_id == user_id) {
+            return presence.status();
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_agent_is_online_while_a_stream_of_its_is_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = instance.channel.clone();
+    let w = world(&channel).await;
+    add_agent(&channel, &w).await;
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel.clone())
+        .watch_presence(authed(&w.owner, pb::WatchPresenceRequest {}))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(presence.message().await.unwrap().unwrap().ready, "nobody's online yet");
+
+    let mut events = pb::event_service_client::EventServiceClient::new(channel.clone());
+    let follow = || {
+        let server = pb::ServerCursor { server_id: w.server_id.clone(), after_sequence: None };
+        authed(&w.agent, pb::SubscribeRequest { servers: vec![server], ..Default::default() })
+    };
+    let mut first = events.subscribe(follow()).await.unwrap().into_inner();
+    next(&mut first).await.unwrap().ready.expect("ready first");
+    assert_eq!(next_status(&mut presence, &w.agent_id).await, pb::PresenceStatus::Online);
+    // Online while any of its streams is: offline once the last one closes.
+    let mut second = events.subscribe(follow()).await.unwrap().into_inner();
+    next(&mut second).await.unwrap().ready.expect("ready first");
+    drop(first);
+    drop(second);
+    assert_eq!(next_status(&mut presence, &w.agent_id).await, pb::PresenceStatus::Offline);
+    // Its owner, who opened no app, was never shown online.
+    let watched = pb::presence_service_client::PresenceServiceClient::new(channel.clone())
+        .watch_presence(authed(&w.owner, pb::WatchPresenceRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .message()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(watched.ready, "nobody's online once the agent's streams closed");
+
+    instance.stop().await;
+}
+
 #[tokio::test]
 async fn messages_name_their_mentions_and_slow_mode_says_how_long_to_wait() {
     let dir = tempfile::tempdir().unwrap();

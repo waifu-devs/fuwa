@@ -2022,6 +2022,49 @@ async fn presence_goes_through_the_directory() {
     cluster.stop().await;
 }
 
+/// An agent following servers through a gateway shows online where
+/// presence is kept, the directory.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_agent_streaming_through_a_gateway_is_online() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let channel = Channel::from_shared(cluster.gateway.url()).unwrap().connect().await.unwrap();
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel);
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Games").await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let (agent, agent_id) = (made.token, made.agent.unwrap().user.unwrap().id);
+    let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+    c.agents.add_agent(authed(&juan, add)).await.unwrap();
+
+    let mut heard = presence.watch_presence(authed(&juan, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    let first = tokio::time::timeout(Duration::from_secs(10), heard.message()).await.unwrap().unwrap().unwrap();
+    assert!(first.ready);
+    let cursor = pb::ServerCursor { server_id: server.id.clone(), after_sequence: None };
+    let request = pb::SubscribeRequest { servers: vec![cursor], ..Default::default() };
+    let stream = c.events.subscribe(authed(&agent, request)).await.unwrap().into_inner();
+    let seen = loop {
+        let message = tokio::time::timeout(Duration::from_secs(10), heard.message()).await.unwrap().unwrap().unwrap();
+        if let Some(presence) = message.presence {
+            break presence;
+        }
+    };
+    assert_eq!(seen.user_id, agent_id);
+    assert_eq!(seen.status, pb::PresenceStatus::Online as i32);
+    assert_eq!(seen.apps, ["agent"]);
+    drop((heard, stream));
+    cluster.stop().await;
+}
+
 async fn fed_a_fingerprint(c: &mut Clients, admin: &str) -> String {
     c.admin.get_federation(authed(admin, pb::GetFederationRequest {})).await.unwrap().into_inner().fingerprint
 }

@@ -61,7 +61,16 @@ through like `DirectMessageService`).
 - One account holds at most 16 streams (a tab or app each); a 17th ends the
   oldest, whose app watches again if it's still open. Streams give their
   place back however they end.
-- Agents report their own presence but can't watch anyone's.
+- Agents report their own presence but can't watch anyone's. They don't have
+  to report it to show online: an agent is online while one of its event
+  streams (`Subscribe`, or `LiveService.Open` following servers) is open,
+  and while it has an endpoint that's on and not failing (its last delivery
+  went through, or none has been tried yet). Its stream closing takes it
+  offline at once on a single process; through a split instance's gateway,
+  which renews a lease for it on the directory, within the lease's 150
+  seconds. A failed delivery takes it offline until one goes through again,
+  and so does the instance turning endpoints off. People's presence never
+  comes from their streams, only from their apps.
 
 What someone is doing lives only in memory (`server/src/presence.rs`): it's
 never written to disk, logged, put in a server's event log or in a report. A

@@ -95,6 +95,12 @@
     150 seconds), people's saved choices (node.db's `presence_settings`) and
     the live streams of people who share a server (`Index::neighbours`),
     at most 5 changes per 20 seconds each, the rest merged by `tick`.
+    Agents are also held online (`Presence::hold`, an app that never lapses)
+    while an event stream of theirs is open (`Api::agent_online` in `events`;
+    a split instance's gateway renews a lease on the directory instead,
+    `keep_agent_online`) and while their endpoint works (`spawn_endpoint_presence`
+    in `app.rs`, from node.db's `working_agent_endpoints`, looked at again
+    when an endpoint changes or a delivery is reported).
     `api/presence.rs` is `PresenceService`; joins call `Presence::joined`
     where the index learns of them. Activities are user content: checked
     and capped in `check_activities`, pictures through `picture_link`, and
