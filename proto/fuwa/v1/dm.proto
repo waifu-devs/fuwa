@@ -571,6 +571,20 @@ message SealedFile {
   // A spoiler, as its sender marked it: apps cover it until the reader
   // clicks it, as Attachment.spoiler.
   bool spoiler = 12;
+  // Set when the file is a GIF picked from the GIF picker (docs/gifs.md):
+  // apps show it like a GIF in a channel (playing inline, still under
+  // reduce motion, with its credit) instead of as a file. The sender fetched
+  // it from its instance and sealed it like any other file, so the instance
+  // can't tell it from one.
+  SealedGif gif = 13;
+}
+
+// What a GIF sealed as a file shows besides itself.
+message SealedGif {
+  // What it shows, for screen readers. May be empty; at most 200 characters.
+  string title = 1;
+  // Who to credit, where their terms ask for it.
+  GifProvider provider = 2;
 }
 
 // ───────────────────────── Message backup ─────────────────────────

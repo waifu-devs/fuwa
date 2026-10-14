@@ -1567,6 +1567,9 @@ impl FuwaApp {
         let voice =
             (voice_here && (recording || (!typed && !picked && self.can_record()))).then(|| self.voice_button(&p, cx));
         let attach = (c.files && !recording).then(|| self.encrypted_attach(&place, ready, &p, cx));
+        // GIFs go sealed like files, from the conversation's or channel's own box.
+        let gif_button = (c.files && ready && !thread && !recording).then(|| self.gif_button(&p, cx)).flatten();
+        let gif_panel = if thread { None } else { self.gif_panel(&p, window, cx) };
         let tray = if c.files { self.picked_tray(&place, &p, cx) } else { None };
         let field: AnyElement = if recording {
             self.recording_bar(&p, cx)
@@ -1650,6 +1653,7 @@ impl FuwaApp {
                         .child(self.timestamp_button(&p, cx)),
                 )
             })
+            .children(gif_button)
             .children(voice)
             .children(send);
         let card = div()
@@ -1715,6 +1719,7 @@ impl FuwaApp {
             .pb(px(12.0))
             .children(typing)
             .children(time_panel)
+            .children(gif_panel)
             .child(self.shaken(card))
             .child(footer)
             .children(drop)

@@ -25,7 +25,7 @@ import {
 import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type SetStateAction } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
-import type { Member, User } from "@/gen/fuwa/v1/types_pb";
+import type { Member, MessageGif, User } from "@/gen/fuwa/v1/types_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
@@ -42,6 +42,7 @@ import {
   retryPending,
   sendDm,
   sendDmFiles,
+  sendDmGif,
   sendVoiceDm,
   voiceLimits,
   voiceLoader,
@@ -62,6 +63,7 @@ import { reactedWith, type DmReaction, type ReactionLike } from "@/lib/reactions
 import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
+import { GifButton } from "@/components/chat/GifPicker";
 import { insertAtCaret } from "@/lib/caret";
 import { filesIn } from "@/lib/pasted";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
@@ -1225,6 +1227,13 @@ function ComposerBox({
     }
   }
 
+  /** Sends a GIF from the picker on its own, leaving what's typed in the box. The picker says if it can't be fetched. */
+  async function sendGif(gif: MessageGif) {
+    setError(null);
+    sentFrom(instanceKey, typing);
+    await sendDmGif(instanceKey, id, gif, thread && { thread: thread.parent, inChannel: alsoChannel });
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
     if (sendsMessage(e, sendWith)) {
@@ -1291,6 +1300,7 @@ function ComposerBox({
             </AnimatePresence>
             {files && <EncryptedAttach draft={draft} disabled={status !== "ready"} />}
             <TimestampPicker onPick={(token) => insertAtCaret(box, write, token)} />
+            {files && status === "ready" && <GifButton instanceKey={instanceKey} onSend={(gif) => sendGif(gif)} />}
             {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
