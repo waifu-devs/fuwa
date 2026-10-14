@@ -47,6 +47,7 @@ const banner = (extra: Partial<GachaBanner> = {}): GachaBanner =>
     serverId: "S",
     name: "Stars",
     description: "",
+    artUrl: "",
     currencyId: "C",
     pullPrice: 100n,
     multiPull: 10,
@@ -183,6 +184,11 @@ test("a saved banner round-trips through the editor unchanged", () => {
   const draft = bannerDraft(saved);
   assert.equal(draftChanged(saved, draft), false);
   assert.equal(draftChanged(saved, { ...draft, name: "Moons" }), true);
+  assert.equal(draft.artUrl, "");
+  assert.equal(draftChanged(saved, { ...draft, artUrl: "https://fuwa.test/media/box" }), true);
+  const boxed = bannerDraft({ ...saved, artUrl: "https://fuwa.test/media/box" });
+  const sent = bannerValue(boxed, saved.id);
+  assert.ok("banner" in sent && sent.banner.artUrl === "https://fuwa.test/media/box");
   const value = bannerValue(draft, saved.id);
   assert.ok("banner" in value);
   const b = value.banner;

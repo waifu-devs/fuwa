@@ -12949,6 +12949,44 @@ async fn gacha_banners_pulls_pity_and_duplicates() {
 
     // Not enough to pay: nothing happens.
     assert_eq!(pull(&mut c, &mika, &sid, &made.id, 1, 10).await.unwrap_err(), Code::FailedPrecondition);
+    let current = c
+        .economy
+        .list_gacha_banners(authed(&rin, pb::ListGachaBannersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .banners
+        .remove(0);
+    // A picture of the box: uploaded here for this server, never a link.
+    let art = |token: &str, url: &str| {
+        let banner = pb::GachaBanner { art_url: url.into(), ..current.clone() };
+        authed(token, pb::UpdateGachaBannerRequest { server_id: sid.clone(), banner: Some(banner) })
+    };
+    let bytes = png(300, 5);
+    let reserved = c
+        .media
+        .create_upload(authed(
+            &juan,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::ShopArt as i32,
+                content_type: "image/png".into(),
+                size: bytes.len() as i64,
+                server_id: sid.clone(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(put(&instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    let box_art = reserved.media.unwrap().url;
+    let linked = c.economy.update_gacha_banner(art(&juan, "https://example.com/box.png")).await;
+    assert_eq!(linked.unwrap_err().code(), Code::InvalidArgument);
+    let other = upload(&mut c, &instance, &juan, pb::MediaPurpose::Avatar, png(300, 6)).await;
+    assert_eq!(c.economy.update_gacha_banner(art(&juan, &other)).await.unwrap_err().code(), Code::PermissionDenied);
+    let saved = c.economy.update_gacha_banner(art(&juan, &box_art)).await.unwrap().into_inner().banner.unwrap();
+    assert_eq!(saved.art_url, box_art);
+    assert_eq!(fetch(&instance, &box_art).await.0, reqwest::StatusCode::OK);
+
     // Deleting a listing takes its prizes; deleting the banner keeps the log.
     let request = pb::DeleteShopListingRequest { server_id: sid.clone(), listing_id: plush.id.clone() };
     c.economy.delete_shop_listing(authed(&juan, request)).await.unwrap();
@@ -12964,6 +13002,8 @@ async fn gacha_banners_pulls_pity_and_duplicates() {
     c.economy.delete_gacha_banner(authed(&juan, request)).await.unwrap();
     let mine = c.economy.list_gacha_pulls(authed(&rin, log(""))).await.unwrap().into_inner();
     assert_eq!(mine.pulls.len(), 6);
+    // Its picture goes with it.
+    assert_eq!(fetch(&instance, &box_art).await.0, reqwest::StatusCode::NOT_FOUND);
     instance.stop().await;
 }
 

@@ -1,8 +1,10 @@
-import { ArrowUpIcon, CircleCheckIcon, CircleXIcon, DicesIcon, EyeOffIcon, InfinityIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowUpIcon, CircleCheckIcon, CircleXIcon, DicesIcon, EyeOffIcon, ImageUpIcon, InfinityIcon, LoaderCircleIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { Currency, GachaBanner, ShopListing } from "@/gen/fuwa/v1/types_pb";
 import { createBanner, deleteBanner, economyMessage, updateBanner, useEconomy } from "@/fuwa/economy";
+import { run, uploadPicture } from "@/fuwa/actions";
 import { useInstance } from "@/fuwa/hooks";
 import { Amount, CurrencyIcon, listingName } from "@/components/economy/shared";
 import { confirmFirst } from "@/components/menus/dialogs";
@@ -43,6 +45,8 @@ import {
 import { useNow } from "@/lib/notifications";
 import { cssColor } from "@/lib/permissions";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
+import { PICTURE_TYPES } from "@/lib/pictures";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 const NEW = "new";
@@ -108,6 +112,94 @@ export function BannersSection({ instanceKey, serverId, currencies, shop }: { in
         </ul>
       )}
     </Section>
+  );
+}
+
+/**
+ * The box or card pack members see on the banner, uploaded here for the
+ * server. Optional: without one the banner shows its lead tier's color.
+ */
+function BannerArt({ instanceKey, serverId, url, glow, onChange }: { instanceKey: string; serverId: string; url: string; glow: string; onChange: (url: string) => void }) {
+  const { t } = useI18n();
+  const input = useRef<HTMLInputElement>(null);
+  const [sent, setSent] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const shown = shownPicture(url);
+
+  async function send(file: File | undefined) {
+    if (!file) return;
+    if (!PICTURE_TYPES.includes(file.type)) {
+      setError(t("serversettings.economy.gacha.artType"));
+      return;
+    }
+    setError(null);
+    setSent(0);
+    try {
+      onChange(await run(uploadPicture(instanceKey, MediaPurpose.SHOP_ART, file, setSent, serverId)));
+    } catch (err) {
+      setError((err as Error).message || t("serversettings.economy.gacha.artFailed"));
+    } finally {
+      setSent(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-bold text-muted-foreground uppercase">{t("serversettings.economy.gacha.art")}</span>
+      <div
+        className="flex items-center gap-3"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          void send(e.dataTransfer.files[0]);
+        }}
+      >
+        <button
+          type="button"
+          disabled={sent !== null}
+          onClick={() => input.current?.click()}
+          aria-label={t("serversettings.economy.gacha.artUpload")}
+          className="relative grid h-24 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-2 border-dashed transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          style={shown ? { borderStyle: "solid", borderColor: "transparent", background: `radial-gradient(circle, ${glow}33, transparent 70%)` } : undefined}
+        >
+          {shown ? <img src={shown} alt="" className="size-full object-contain" /> : <ImageUpIcon className="size-6 text-muted-foreground" />}
+          {sent !== null && (
+            <span className="absolute inset-0 grid place-items-center bg-background/70">
+              <LoaderCircleIcon className="size-5 animate-spin" />
+              <span className="absolute inset-x-2 bottom-2 h-1 overflow-hidden rounded-full bg-muted">
+                <span className="block h-full bg-primary transition-[width]" style={{ width: `${Math.round(sent * 100)}%` }} />
+              </span>
+            </span>
+          )}
+        </button>
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          <span className="text-xs text-muted-foreground">{t("serversettings.economy.gacha.artHint")}</span>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" className="rounded-xl" disabled={sent !== null} onClick={() => input.current?.click()}>
+              <ImageUpIcon /> {url ? t("serversettings.economy.gacha.artReplace") : t("serversettings.economy.gacha.artUpload")}
+            </Button>
+            {url && (
+              <Button type="button" size="sm" variant="ghost" className="rounded-xl text-destructive" disabled={sent !== null} onClick={() => onChange("")}>
+                <Trash2Icon /> {t("serversettings.economy.gacha.artRemove")}
+              </Button>
+            )}
+          </div>
+          {error && <span className="text-xs font-bold text-destructive">{error}</span>}
+        </div>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        accept={PICTURE_TYPES.join(",")}
+        className="hidden"
+        onChange={(e) => {
+          void send(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+    </div>
   );
 }
 
@@ -192,9 +284,13 @@ function BannerCard({
       onToggle={onToggle}
       summary={
         <>
-          <span className="grid size-10 shrink-0 place-items-center rounded-2xl text-white" style={{ backgroundColor: glow }}>
-            <DicesIcon className="size-5" />
-          </span>
+          {shownPicture(banner?.artUrl) ? (
+            <img src={shownPicture(banner?.artUrl)} alt="" className="size-10 shrink-0 rounded-2xl object-contain" />
+          ) : (
+            <span className="grid size-10 shrink-0 place-items-center rounded-2xl text-white" style={{ backgroundColor: glow }}>
+              <DicesIcon className="size-5" />
+            </span>
+          )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <span className="truncate font-bold">{banner?.name || t("serversettings.economy.gacha.new")}</span>
@@ -242,6 +338,7 @@ function BannerCard({
           <Segmented label={t("chattools.economy.currency")} value={draft.currencyId} onChange={(currencyId) => set({ currencyId })} options={currencies.map((c) => ({ value: c.id, label: c.name }))} className="self-start" />
         </Field>
       )}
+      <BannerArt instanceKey={instanceKey} serverId={serverId} url={draft.artUrl} glow={glow} onChange={(artUrl) => set({ artUrl })} />
       <Field label={t("serversettings.economy.description")}>
         <Textarea rows={2} value={draft.description} maxLength={BANNER_DESCRIPTION_MAX} onChange={(e) => set({ description: e.target.value })} placeholder={t("serversettings.economy.gacha.descriptionPlaceholder")} className="rounded-xl" />
       </Field>

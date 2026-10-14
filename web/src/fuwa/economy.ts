@@ -323,6 +323,7 @@ const toBanner = (serverId: string, b: BannerValue) => ({
   serverId,
   name: b.name,
   description: b.description,
+  artUrl: b.artUrl,
   currencyId: b.currencyId,
   pullPrice: b.pullPrice,
   multiPull: b.multiPull,

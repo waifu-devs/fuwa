@@ -134,6 +134,8 @@ export type PrizeDraft = { id: string; tierId: string; listingId: string; curren
 export type BannerDraft = {
   name: string;
   description: string;
+  /** The box or card pack's picture, uploaded for the server; "" for none. */
+  artUrl: string;
   currencyId: string;
   price: string;
   /** "" for no multi-pull. */
@@ -196,6 +198,7 @@ export function bannerDraft(b: GachaBanner | undefined, currencyId = "", positio
     return {
       name: "",
       description: "",
+      artUrl: "",
       currencyId,
       price: "100",
       multi: "10",
@@ -217,6 +220,7 @@ export function bannerDraft(b: GachaBanner | undefined, currencyId = "", positio
   return {
     name: b.name,
     description: b.description,
+    artUrl: b.artUrl,
     currencyId: b.currencyId,
     price: String(num(b.pullPrice)),
     multi: text(b.multiPull),
@@ -288,6 +292,7 @@ export type BannerValue = {
   id: string;
   name: string;
   description: string;
+  artUrl: string;
   currencyId: string;
   pullPrice: bigint;
   multiPull: number;
@@ -355,6 +360,7 @@ export function bannerValue(draft: BannerDraft, id = ""): { banner: BannerValue 
       id,
       name,
       description: draft.description.trim(),
+      artUrl: draft.artUrl,
       currencyId: draft.currencyId,
       pullPrice: BigInt(price),
       multiPull: multi,

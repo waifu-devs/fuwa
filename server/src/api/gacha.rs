@@ -15,6 +15,7 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::economy::{Short, Why, amount, credit, currencies, listings, load_currency, load_listing, sellable_role};
+use super::media::PictureOwner;
 use super::{Api, Seat, respond, text, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
@@ -801,6 +802,28 @@ pub(super) async fn list_pulls(
     )
 }
 
+/// A banner's art as it's being saved: unchanged (`had`), cleared, or a
+/// picture just uploaded here for the server's shop, handed back to keep
+/// once the banner is saved. Never a link to another site, which every
+/// member's app would then fetch.
+async fn checked_art(
+    api: &Api,
+    account: &crate::node::Account,
+    server_id: &str,
+    url: &str,
+    had: &str,
+) -> Result<(String, Option<pb::Media>)> {
+    let url = url.trim();
+    if url.is_empty() || url == had {
+        return Ok((url.to_string(), None));
+    }
+    let upload = api
+        .check_upload(account, pb::MediaPurpose::ShopArt, url, Some(server_id))
+        .await?
+        .ok_or_else(|| Error::invalid("upload the banner's picture here rather than linking to it"))?;
+    Ok((upload.url.clone(), Some(upload)))
+}
+
 pub(super) async fn create_banner(
     api: &Api,
     request: Request<pb::CreateGachaBannerRequest>,
@@ -813,7 +836,9 @@ pub(super) async fn create_banner(
             let mut banner = req.banner.ok_or_else(|| Error::invalid("banner is needed"))?;
             banner.id = new_id();
             banner.created_at = Some(timestamp(now_ms()));
-            let banner = sdb
+            let (art, upload) = checked_art(api, &account, &sdb.id, &banner.art_url, "").await?;
+            banner.art_url = art;
+            let written = sdb
                 .write(&account.id, async |conn, events| {
                     let count = query_one(conn, "SELECT count(*) FROM gacha_banners", (), |r| r.get::<i64>(0))
                         .await?
@@ -828,7 +853,18 @@ pub(super) async fn create_banner(
                     banners_changed(conn, &sdb.id, events).await?;
                     Ok(banner)
                 })
-                .await?;
+                .await;
+            // Nothing saved: the picture just checked in goes again.
+            let banner = match written {
+                Ok(banner) => banner,
+                Err(err) => {
+                    if upload.is_some() {
+                        api.drop_picture(&banner.art_url, "", PictureOwner::Server(&sdb.id)).await;
+                    }
+                    return Err(err);
+                }
+            };
+            api.keep_picture(upload.as_ref().map(|u| u.id.as_str()), Some(&sdb.id)).await;
             Ok(pb::CreateGachaBannerResponse { banner: Some(banner) })
         }
         .await,
@@ -844,15 +880,18 @@ pub(super) async fn update_banner(
             let account = api.account(request.metadata()).await?;
             let req = request.into_inner();
             let Seat { sdb, access, .. } = api.with(&account, &req.server_id, Permission::ManageEconomy).await?;
-            let banner = req.banner.ok_or_else(|| Error::invalid("banner is needed"))?;
-            let banner = sdb
+            let mut banner = req.banner.ok_or_else(|| Error::invalid("banner is needed"))?;
+            let had = load_banner(&*sdb.read()?, &sdb.id, &banner.id).await?.art_url;
+            let (art, upload) = checked_art(api, &account, &sdb.id, &banner.art_url, &had).await?;
+            banner.art_url = art;
+            let written = sdb
                 .write(&account.id, async |conn, events| {
                     let before = load_banner(conn, &sdb.id, &banner.id).await?;
                     let mut banner = banner.clone();
                     banner.created_at = before.created_at;
                     let banner = checked(conn, &sdb.id, &access, banner).await?;
                     if banner == before {
-                        return Ok(banner);
+                        return Ok((banner, before));
                     }
                     // Pity counts toward a tier: when it changes, everyone starts again.
                     if banner.pity_tier_id != before.pity_tier_id || banner.pity_pulls != before.pity_pulls {
@@ -866,9 +905,21 @@ pub(super) async fn update_banner(
                     let entry = banner_audit(pb::AuditAction::GachaBannerUpdate, Some(&before), &banner);
                     store::audit(conn, &account.id, entry).await?;
                     banners_changed(conn, &sdb.id, events).await?;
-                    Ok(banner)
+                    Ok((banner, before))
                 })
-                .await?;
+                .await;
+            let (banner, before) = match written {
+                Ok(written) => written,
+                Err(err) => {
+                    if upload.is_some() {
+                        api.drop_picture(&banner.art_url, &had, PictureOwner::Server(&sdb.id)).await;
+                    }
+                    return Err(err);
+                }
+            };
+            api.keep_picture(upload.as_ref().map(|u| u.id.as_str()), Some(&sdb.id)).await;
+            // What the write replaced, read inside it.
+            api.drop_picture(&before.art_url, &banner.art_url, PictureOwner::Server(&sdb.id)).await;
             Ok(pb::UpdateGachaBannerResponse { banner: Some(banner) })
         }
         .await,
@@ -884,15 +935,19 @@ pub(super) async fn delete_banner(
             let account = api.account(request.metadata()).await?;
             let req = request.into_inner();
             let sdb = api.with(&account, &req.server_id, Permission::ManageEconomy).await?.sdb;
-            sdb.write(&account.id, async |conn, events| {
-                let banner = load_banner(conn, &sdb.id, &req.banner_id).await?;
-                conn.execute("DELETE FROM gacha_banners WHERE id = ?1", [banner.id.as_str()]).await?;
-                conn.execute("DELETE FROM gacha_progress WHERE banner_id = ?1", [banner.id.as_str()]).await?;
-                let entry = Audit::new(pb::AuditAction::GachaBannerDelete, &banner.id).change("name", &banner.name, "");
-                store::audit(conn, &account.id, entry).await?;
-                banners_changed(conn, &sdb.id, events).await
-            })
-            .await?;
+            let gone = sdb
+                .write(&account.id, async |conn, events| {
+                    let banner = load_banner(conn, &sdb.id, &req.banner_id).await?;
+                    conn.execute("DELETE FROM gacha_banners WHERE id = ?1", [banner.id.as_str()]).await?;
+                    conn.execute("DELETE FROM gacha_progress WHERE banner_id = ?1", [banner.id.as_str()]).await?;
+                    let entry =
+                        Audit::new(pb::AuditAction::GachaBannerDelete, &banner.id).change("name", &banner.name, "");
+                    store::audit(conn, &account.id, entry).await?;
+                    banners_changed(conn, &sdb.id, events).await?;
+                    Ok(banner)
+                })
+                .await?;
+            api.drop_picture(&gone.art_url, "", PictureOwner::Server(&sdb.id)).await;
             Ok(pb::DeleteGachaBannerResponse {})
         }
         .await,

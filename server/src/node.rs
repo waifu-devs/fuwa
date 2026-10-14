@@ -2388,7 +2388,7 @@ impl NodeDb {
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4, ?5, ?6, ?7) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5, ?6, ?7, ?8) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
@@ -2397,6 +2397,7 @@ impl NodeDb {
                 pb::MediaPurpose::Attachment as i64,
                 pb::MediaPurpose::Banner as i64,
                 pb::MediaPurpose::Decoration as i64,
+                pb::MediaPurpose::ShopArt as i64,
             ),
             |r| r.get::<String>(0),
         )

@@ -93,7 +93,7 @@ can't do in the apps' API, it can't do here.
 | `list_roles`, `list_emojis`, `get_profile` | `RoleService.ListRoles`, `EmojiService.ListEmojis`, `AuthService.GetProfile` |
 | `time_out_member`, `kick_member`, `ban_member`, `unban_member` | `ServerService`'s moderation calls |
 | `add_member_role`, `remove_member_role` | `RoleService.AddMemberRole`, `RemoveMemberRole` |
-| `upload_picture` | `MediaService.CreateUpload` and the upload itself (emoji, server icons and banners, webhook pictures, decorations) |
+| `upload_picture` | `MediaService.CreateUpload` and the upload itself (emoji, server icons and banners, webhook pictures, decorations, gacha banner art) |
 | `create_emoji` | `EmojiService.CreateEmoji` |
 | `set_commands`, `list_commands` | `CommandService.SetCommands`, `ListCommands` ([docs/commands.md](commands.md)) |
 

@@ -2122,6 +2122,11 @@ message GachaBanner {
   // Lower first.
   int32 position = 20;
   google.protobuf.Timestamp created_at = 21;
+  // A picture of what's pulled (a box, a card pack), or empty for none:
+  // uploaded here for this server (MediaService.CreateUpload with
+  // MEDIA_PURPOSE_SHOP_ART), never a link to another site. Replacing or
+  // clearing it, or deleting the banner, deletes the old picture.
+  string art_url = 22;
 }
 
 // A banner's rarity tier.

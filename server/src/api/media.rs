@@ -28,11 +28,12 @@ impl MediaService for Api {
                         | pb::MediaPurpose::Background
                         | pb::MediaPurpose::Attachment
                         | pb::MediaPurpose::Gif
-                        | pb::MediaPurpose::Decoration),
+                        | pb::MediaPurpose::Decoration
+                        | pb::MediaPurpose::ShopArt),
                     ) => purpose,
                     _ => {
                         return Err(Error::invalid(
-                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF, a decoration or an attachment",
+                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF, a decoration, shop art or an attachment",
                         ));
                     }
                 };
@@ -54,6 +55,9 @@ impl MediaService for Api {
                 if attachment && req.server_id.trim().is_empty() {
                     return Err(Error::invalid("attachments are uploaded for the server they're sent in"));
                 }
+                if purpose == pb::MediaPurpose::ShopArt && req.server_id.trim().is_empty() {
+                    return Err(Error::invalid("shop art is uploaded for the server whose shop it's in"));
+                }
                 let server_id = match req.server_id.trim() {
                     "" => None,
                     id => {
@@ -65,9 +69,10 @@ impl MediaService for Api {
                                 | pb::MediaPurpose::Avatar
                                 | pb::MediaPurpose::Attachment
                                 | pb::MediaPurpose::Decoration
+                                | pb::MediaPurpose::ShopArt
                         ) {
                             return Err(Error::invalid(
-                                "only icons, banners, emoji, decorations, webhook pictures and attachments are uploaded for a server",
+                                "only icons, banners, emoji, decorations, webhook pictures, shop art and attachments are uploaded for a server",
                             ));
                         }
                         let id = crate::id::parse_id("server_id", id)?;

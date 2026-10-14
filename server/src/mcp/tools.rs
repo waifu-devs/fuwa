@@ -499,11 +499,11 @@ const TOOLS: &[Tool] = &[
         title: "Upload a picture",
         description: "Stores a picture on the instance and returns its URL, for create_emoji (purpose emoji), \
                       update_server's icon_url (server_icon) or banner_url (server_banner), a webhook's avatar_url \
-                      (webhook_avatar) or create_profile_item (decoration). PNG, JPEG, GIF, WebP or AVIF, at most \
+                      (webhook_avatar), create_profile_item (decoration) or a gacha banner's art_url (shop_art). PNG, JPEG, GIF, WebP or AVIF, at most \
                       the instance's picture size limit.",
         properties: || {
             json!({
-                "purpose": { "type": "string", "enum": ["emoji", "server_icon", "server_banner", "webhook_avatar", "decoration"] },
+                "purpose": { "type": "string", "enum": ["emoji", "server_icon", "server_banner", "webhook_avatar", "decoration", "shop_art"] },
                 "server_id": server_id(),
                 "content_type": { "type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"] },
                 "data_base64": { "type": "string", "description": "The file's bytes, base64." }
@@ -1120,9 +1120,10 @@ async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status
         "server_banner" => pb::MediaPurpose::Banner,
         "webhook_avatar" => pb::MediaPurpose::Avatar,
         "decoration" => pb::MediaPurpose::Decoration,
+        "shop_art" => pb::MediaPurpose::ShopArt,
         _ => {
             return Err(RpcError::invalid(
-                "purpose must be emoji, server_icon, server_banner, webhook_avatar or decoration",
+                "purpose must be emoji, server_icon, server_banner, webhook_avatar, decoration or shop_art",
             ));
         }
     };

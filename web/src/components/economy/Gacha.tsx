@@ -15,6 +15,7 @@ import { formatLeft, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cssColor } from "@/lib/permissions";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 /**
@@ -136,6 +137,7 @@ function BannerCard({
   const glow = cssColor(tierColor(lead ?? {}, 0));
   const held = access.pending ? t("chattools.economy.agreeFirst") : timedOutUntil(member, now) ? t("chattools.economy.timedOut") : null;
   const counts = [1, ...(banner.multiPull >= 2 ? [banner.multiPull] : [])];
+  const art = shownPicture(banner.artUrl);
 
   async function go(count: number) {
     const price = pullCost(banner, count);
@@ -161,14 +163,27 @@ function BannerCard({
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-25" style={{ background: `radial-gradient(120% 90% at 100% 0%, ${glow}, transparent 60%)` }} />
       <div className="relative flex flex-col gap-3 p-4">
         <div className="flex items-start gap-3">
-          <motion.span
-            animate={{ rotate: [0, -12, 12, 0] }}
-            transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 2.5 }}
-            className="grid size-12 shrink-0 place-items-center rounded-2xl text-white shadow-lg"
-            style={{ backgroundColor: glow }}
-          >
-            <SparklesIcon className="size-6" />
-          </motion.span>
+          {art ? (
+            // The box or card pack, rocking now and then as if it wants opening.
+            <motion.img
+              src={art}
+              alt=""
+              draggable={false}
+              animate={{ rotate: [0, -6, 6, -3, 0], y: [0, -3, 0] }}
+              transition={{ duration: 1.4, repeat: Infinity, repeatDelay: 3 }}
+              className="h-24 w-20 shrink-0 rounded-2xl object-contain drop-shadow-lg"
+              style={{ filter: `drop-shadow(0 6px 16px ${glow}66)` }}
+            />
+          ) : (
+            <motion.span
+              animate={{ rotate: [0, -12, 12, 0] }}
+              transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 2.5 }}
+              className="grid size-12 shrink-0 place-items-center rounded-2xl text-white shadow-lg"
+              style={{ backgroundColor: glow }}
+            >
+              <SparklesIcon className="size-6" />
+            </motion.span>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-lg font-extrabold">{banner.name}</p>
             <p className="text-xs font-bold text-muted-foreground">
@@ -329,15 +344,30 @@ function Reveal({
   const [kept, setKept] = useState<GachaPull | null>(result);
   if (result && result !== kept) setKept(result);
   const shown = result ?? kept;
+  const art = shownPicture(banner.artUrl);
   return (
     <Dialog open={!!result} onOpenChange={(o) => !o && onClose()}>
       <DialogContent wide>
         {shown && (
           <div className="flex flex-col gap-4">
             <DialogHeader title={t("chattools.economy.gacha.revealTitle", { banner: banner.name })} description={t("chattools.economy.gacha.revealAbout", { count: shown.results.length })} />
+            {art && (
+              // The pack shakes, bursts, and makes way for what was in it.
+              <motion.img
+                key={shown.id}
+                src={art}
+                alt=""
+                aria-hidden
+                draggable={false}
+                initial={{ scale: 0.9, rotate: 0, opacity: 1, height: 112 }}
+                animate={{ rotate: [0, -10, 10, -8, 8, 0], scale: [0.9, 1, 1, 1.15, 1.3, 0], opacity: [1, 1, 1, 1, 0.8, 0], height: [112, 112, 112, 112, 112, 0] }}
+                transition={{ duration: 0.9, ease: "easeIn" }}
+                className="mx-auto w-28 object-contain"
+              />
+            )}
             <ul className={cn("grid gap-2", shown.results.length > 1 ? "grid-cols-2 sm:grid-cols-5" : "mx-auto w-48 grid-cols-1")}>
               {shown.results.map((r, n) => (
-                <Drop key={`${shown.id}-${n}`} instanceKey={instanceKey} result={r} index={n} banner={banner} currencies={currencies} name={r.listingId ? r.prizeName || name(r.listingId) : r.prizeName} roles={roles} items={items} />
+                <Drop key={`${shown.id}-${n}`} instanceKey={instanceKey} result={r} index={n} after={art ? 0.75 : 0} banner={banner} currencies={currencies} name={r.listingId ? r.prizeName || name(r.listingId) : r.prizeName} roles={roles} items={items} />
               ))}
             </ul>
             <div className="flex justify-end gap-2">
@@ -361,6 +391,7 @@ function Drop({
   instanceKey,
   result,
   index,
+  after,
   banner,
   currencies,
   name,
@@ -368,6 +399,8 @@ function Drop({
   instanceKey: string;
   result: GachaResult;
   index: number;
+  /** Seconds to wait first, while the pack opens. */
+  after: number;
   banner: GachaBanner;
   currencies: Currency[];
   name: string;
@@ -385,7 +418,7 @@ function Drop({
     <motion.li
       initial={{ opacity: 0, rotateY: 90, scale: 0.8 }}
       animate={{ opacity: 1, rotateY: 0, scale: rare ? [0.8, 1.12, 1] : 1 }}
-      transition={{ ...SPRING, delay: 0.15 + index * 0.12 }}
+      transition={{ ...SPRING, delay: after + 0.15 + index * 0.12 }}
       className="relative flex flex-col items-center gap-1 overflow-hidden rounded-2xl border-2 p-3 text-center"
       style={{ borderColor: color, boxShadow: rare ? `0 0 24px ${color}66` : undefined }}
     >

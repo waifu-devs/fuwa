@@ -14,8 +14,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    UniformListScrollHandle, Window, div, px, uniform_list,
+    ObjectFit, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    StyledImage as _, Subscription, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
 use crate::core::Core;
@@ -1708,7 +1708,8 @@ impl ShopView {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(
+                    // The box or card pack, when the server uploaded one.
+                    .child(if b.art_url.is_empty() {
                         div()
                             .size(px(44.0))
                             .flex_none()
@@ -1718,8 +1719,17 @@ impl ShopView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("dices").size(px(22.0))),
-                    )
+                            .child(icon("dices").size(px(22.0)))
+                    } else {
+                        div()
+                            .w(px(72.0))
+                            .h(px(88.0))
+                            .flex_none()
+                            .rounded(radius_xl())
+                            .bg(glow.opacity(0.12))
+                            .overflow_hidden()
+                            .child(picture(b.art_url.clone()).size_full().object_fit(ObjectFit::Contain))
+                    })
                     .child(
                         div()
                             .flex_1()

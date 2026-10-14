@@ -112,6 +112,10 @@ A banner has:
 - **A name, description and price**: one pull's price, and optionally a
   **multi-pull** (2 to 100 pulls at once) with its own price, or the
   single price times the count.
+- **Art** (optional, `art_url`): a picture of the box or card pack members
+  open, uploaded for the server with the `SHOP_ART` purpose (never a link
+  to another site). Replacing or clearing it, or deleting the banner,
+  deletes the old picture.
 - **Rarity tiers**, rarest first (1 to 10): each with an id the banner's
   maker picks, a name, an optional color and a **rate**, in millionths,
   the rates adding up to exactly 100%.
@@ -206,8 +210,8 @@ Both apps show, where the server has currencies:
 - **Server settings > Economy** (Manage Economy): currencies with their
   icon, description, transfer switch and earn rules; the shop's listings
   (and whether each is gacha-only); and the gacha banners, with their
-  tiers, prizes, rates, pity and duplicates.
-- **Banners** in the Shop: each open banner with its price, its drop
+  art, tiers, prizes, rates, pity and duplicates (the art on the web).
+- **Banners** in the Shop: each open banner with its art, its price, its drop
   rates (every tier and prize, with its chance), the member's pity count,
   and Pull buttons that show what dropped.
 - **Server settings > Finances** (Manage Economy): the finance page, with

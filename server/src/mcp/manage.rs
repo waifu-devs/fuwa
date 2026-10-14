@@ -381,7 +381,8 @@ tools! {
          rarest first with ids you choose and rates in millionths adding up to 1000000, prizes (a shop \
          listing_id, or a currency_id and amount) each in a tier with a weight, optional pity (pity_pulls and \
          pity_tier_id), duplicates (KEEP, REFUND with refund_currency_id and refund_amount, or SKIP_OWNED), \
-         max_pulls per member, starts_at and ends_at, and available. Mark listings gacha_only with \
+         max_pulls per member, starts_at and ends_at, available, and art_url (a picture upload_picture \
+         returned for shop_art: the box or card pack). Mark listings gacha_only with \
          update_shop_listing so they can't be bought. Needs Manage Economy (and Manage Roles for role prizes).";
     "update_gacha_banner" => economy_service_client::EconomyServiceClient.update_gacha_banner(UpdateGachaBannerRequest), Writes,
         "Change a gacha banner",
