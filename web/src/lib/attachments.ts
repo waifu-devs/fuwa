@@ -82,3 +82,12 @@ export function cantAdd(t: I18n["t"], already: number, adding: number): string {
   if (already + adding <= MAX_FILES) return "";
   return t("system.attachments.tooMany", { count: MAX_FILES });
 }
+
+/**
+ * The files in a tray that finished going up, for the message being sent,
+ * each marked as a spoiler when it was picked as one (and only then, so a
+ * file is never sent marked by mistake).
+ */
+export function readyFiles<T extends { spoiler: boolean }>(tray: { done: T | null; spoiler: boolean }[]): T[] {
+  return tray.flatMap((s) => (s.done ? [{ ...s.done, spoiler: s.spoiler }] : []));
+}

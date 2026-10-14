@@ -174,6 +174,7 @@ pub fn files_of(list: &[pb::SealedFile]) -> Vec<FileRef> {
             width: f.width.min(16_384),
             height: f.height.min(16_384),
             file_size,
+            spoiler: f.spoiler,
         });
     }
     out
@@ -195,6 +196,7 @@ pub fn to_sealed(files: &[FileRef]) -> Vec<pb::SealedFile> {
             height: f.height,
             chunk_bytes: f.chunk_bytes,
             file_size: f.file_size,
+            spoiler: f.spoiler,
         })
         .collect()
 }
@@ -263,12 +265,14 @@ pub fn opened(media_id: &str) -> Option<Arc<Vec<u8>>> {
     OPENED.lock().get(media_id).cloned()
 }
 
-/// A file picked to send: its name, what the system says it is, and its bytes.
+/// A file picked to send: its name, what the system says it is, its bytes,
+/// and whether it's marked as a spoiler (inside the encryption, like the rest).
 #[derive(Clone)]
 pub struct Outgoing {
     pub name: String,
     pub content_type: String,
     pub bytes: Arc<Vec<u8>>,
+    pub spoiler: bool,
 }
 
 /// Why these files can't go, if they can't (the web's `cantSendFiles`).
@@ -351,6 +355,7 @@ impl crate::core::Core {
                 width,
                 height,
                 file_size: file.bytes.len() as i64,
+                spoiler: file.spoiler,
             });
         }
         let files = to_sealed(&refs);
@@ -395,6 +400,29 @@ mod tests {
         let cut = &sealed.bytes[..64 * 1024 + 16];
         let digest: [u8; 32] = Sha256::digest(cut).into();
         assert!(open(cut, &sealed.key, &digest, sealed.chunk_bytes).is_none());
+    }
+
+    #[test]
+    fn spoiler_marks_go_inside_the_message() {
+        let file = pb::SealedFile {
+            media_id: "01j9zzzzzzzzzzzzzzzzzzzzzz".into(),
+            key: vec![1; 32],
+            sha256: vec![2; 32],
+            size: sealed_size(padded_size(10), CHUNK_BYTES as u64) as i64,
+            chunk_bytes: CHUNK_BYTES as u32,
+            name: "ending.png".into(),
+            spoiler: true,
+            ..Default::default()
+        };
+        let plain = pb::SealedFile { spoiler: false, ..file.clone() };
+        let read = files_of(&[file, pb::SealedFile { media_id: "01j9yyyyyyyyyyyyyyyyyyyyyy".into(), ..plain }]);
+        assert_eq!(read.iter().map(|f| f.spoiler).collect::<Vec<_>>(), [true, false]);
+        assert_eq!(to_sealed(&read).iter().map(|f| f.spoiler).collect::<Vec<_>>(), [true, false]);
+        // Kept files from before marks existed read as plain ones.
+        let mut kept = serde_json::to_value(&read[1]).unwrap();
+        assert!(kept.get("spoiler").is_none());
+        kept.as_object_mut().unwrap().remove("spoiler");
+        assert!(!serde_json::from_value::<FileRef>(kept).unwrap().spoiler);
     }
 
     #[test]

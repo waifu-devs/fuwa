@@ -165,6 +165,8 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
                 "width": (a.width > 0).then_some(a.width),
                 "height": (a.height > 0).then_some(a.height),
                 "voice_duration_ms": voice_ms,
+                // Members see it covered until they choose to.
+                "spoiler": a.spoiler,
             }))
         })
         .collect();
@@ -556,6 +558,7 @@ mod tests {
             width,
             height: width / 2,
             voice: None,
+            spoiler: width == 0,
         };
         let m = pb::Message {
             id: "m".into(),
@@ -574,7 +577,13 @@ mod tests {
                     "width": 640,
                     "height": 320,
                 },
-                { "filename": "dog.png", "content_type": "image/png", "size": 2048, "url": "https://fuwa.example/media/f" },
+                {
+                    "filename": "dog.png",
+                    "content_type": "image/png",
+                    "size": 2048,
+                    "url": "https://fuwa.example/media/f",
+                    "spoiler": true,
+                },
             ])
         );
         // A voice message: its length, never its waveform.

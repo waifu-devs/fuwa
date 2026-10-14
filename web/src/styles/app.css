@@ -390,6 +390,12 @@ button.hosted-chip:hover { background: color-mix(in srgb, var(--primary) 20%, tr
 .spoiler[data-hidden]:hover { background: color-mix(in oklab, var(--foreground) 72%, transparent); }
 .spoiler[data-hidden]:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .spoiler { transition: none; } }
+/* A file marked as a spoiler (components/chat/SpoilerCover.tsx): blurred, and clipped to its corners, until uncovered. */
+.spoiler-file-inside { transition: filter 0.35s ease-out, transform 0.35s ease-out; }
+.spoiler-file[data-hidden] { overflow: hidden; user-select: none; }
+.spoiler-file[data-hidden][data-look="media"] > .spoiler-file-inside { filter: blur(44px) brightness(0.85); transform: scale(1.12); }
+.spoiler-file[data-hidden][data-look="card"] > .spoiler-file-inside { filter: blur(8px); }
+@media (prefers-reduced-motion: reduce) { .spoiler-file-inside { transition: none; } }
 .markdown > * + * { margin-top: 0.75em; }
 .markdown :where(h3, h4) { font-weight: 800; line-height: 1.3; }
 .markdown h3 { font-size: 1.15em; }

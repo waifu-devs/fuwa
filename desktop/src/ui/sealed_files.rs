@@ -3,7 +3,9 @@
 //! inline once opened (small ones by themselves), and only when their own
 //! bytes say they're a picture; everything else is a card to save. Also the
 //! paperclip and the tray of files waiting to be sealed and sent
-//! (`dm/EncryptedFiles.tsx`).
+//! (`dm/EncryptedFiles.tsx`), where each can be marked as a spoiler (the
+//! mark goes inside the encryption): readers see it covered until they
+//! click it, as in a server's channels.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -23,6 +25,7 @@ use crate::core::vault::FileRef;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::dm_view::seal;
 use crate::ui::motion;
+use crate::ui::spoilers;
 use crate::ui::theme::{Palette, alpha, radius_lg, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -133,6 +136,8 @@ fn one_file(
     let hinted = file.content_type.starts_with("image/") || file.width > 0;
     let auto = hinted && (if file.file_size > 0 { file.file_size } else { file.size }) <= AUTO_OPEN_BYTES;
     let state = state_of(&file.media_id);
+    // A spoiler stays covered until it's clicked (it may open meanwhile, unseen).
+    let shown = spoilers::file_shown(&file.media_id, file.spoiler);
     // Small pictures open by themselves when they show.
     if auto && state.is_none() {
         let (this, key, file) = (this.clone(), key.to_owned(), file.clone());
@@ -141,6 +146,22 @@ fn one_file(
     if let Some(State::Open { bytes, picture: Some(picture) }) = &state {
         let (w, h) = attachments::fit_box(file.width as i32, file.height as i32, MEDIA_BOX);
         let (this, name, bytes) = (this.clone(), file.name.clone(), bytes.clone());
+        let cover = (shown != spoilers::Shown::Revealed)
+            .then(|| spoilers::picture_cover(id, &file.media_id, shown == spoilers::Shown::Fading, p));
+        if shown == spoilers::Shown::Covered {
+            return div()
+                .relative()
+                .w(px(w))
+                .h(px(h))
+                .max_w_full()
+                .rounded(radius_xl())
+                .overflow_hidden()
+                .border_1()
+                .border_color(p.border)
+                .bg(alpha(p.muted, 0.6))
+                .children(cover)
+                .into_any_element();
+        }
         return div()
             .id(SharedString::from(format!("sealed-pic|{id}")))
             .group("sealed")
@@ -190,6 +211,7 @@ fn one_file(
                     .on_click(move |_, _, cx| save(&this, name.clone(), bytes.clone(), cx))
                     .child(icon("download").size(px(16.0))),
             )
+            .children(cover)
             .into_any_element();
     }
     let opened = match &state {
@@ -287,7 +309,43 @@ fn one_file(
             }
         })
     };
+    // A covered spoiler hides its name and kind, and the card's first click only reveals it.
+    let covered = shown == spoilers::Shown::Covered;
+    let status = if covered { div().child(t("chat.files.spoilerBadge")).into_any_element() } else { status };
+    let name_line: AnyElement = if covered {
+        div()
+            .flex()
+            .text_sm()
+            .line_height(px(20.0))
+            .font_weight(gpui_kit::FontWeight::BOLD)
+            .child(spoilers::covered_name(&file.name, p))
+            .into_any_element()
+    } else {
+        div()
+            .truncate()
+            .text_sm()
+            .line_height(px(20.0))
+            .font_weight(gpui_kit::FontWeight::BOLD)
+            .child(attachments::short_name(&file.name, 48))
+            .into_any_element()
+    };
+    let (show, download) = if covered {
+        let eye = div()
+            .size(px(32.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(p.muted_foreground)
+            .child(icon("eye").size(px(16.0)))
+            .into_any_element();
+        (None, eye)
+    } else {
+        (show.map(IntoElement::into_any_element), download.into_any_element())
+    };
+    let media_id = file.media_id.clone();
     div()
+        .id(SharedString::from(format!("sealed-card|{id}")))
         .flex()
         .items_center()
         .gap(px(12.0))
@@ -299,8 +357,16 @@ fn one_file(
         .border_1()
         .border_color(if failed.is_some() { alpha(p.destructive, 0.5) } else { p.border.into() })
         .bg(alpha(p.muted, 0.4))
+        .when(covered, |el| {
+            el.cursor_pointer()
+                .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.attachments.spoiler")).build(window, cx))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    spoilers::reveal_file(&media_id, cx);
+                })
+        })
         .child(
-            div().relative().child(crate::ui::attachments::badge(&file.name, 40.0)).child(
+            div().relative().child(crate::ui::attachments::badge(if covered { "" } else { &file.name }, 40.0)).child(
                 div()
                     .absolute()
                     .right(px(-4.0))
@@ -316,36 +382,23 @@ fn one_file(
                     .child(icon("lock-keyhole").size(px(10.0))),
             ),
         )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .truncate()
-                        .text_sm()
-                        .line_height(px(20.0))
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .child(attachments::short_name(&file.name, 48)),
-                )
-                .child(div().truncate().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(
-                    motion::rise(
-                        div().child(status),
-                        SharedString::from(format!(
-                            "sealed-status|{id}|{}",
-                            if failed.is_some() {
-                                "failed"
-                            } else if busy {
-                                "busy"
-                            } else {
-                                "idle"
-                            }
-                        )),
-                        Duration::ZERO,
-                        3.0,
-                    ),
+        .child(div().flex_1().min_w_0().child(name_line).child(
+            div().truncate().text_xs().line_height(px(16.0)).text_color(p.muted_foreground).child(motion::rise(
+                div().child(status),
+                SharedString::from(format!(
+                    "sealed-status|{id}|{}",
+                    if failed.is_some() {
+                        "failed"
+                    } else if busy {
+                        "busy"
+                    } else {
+                        "idle"
+                    }
                 )),
-        )
+                Duration::ZERO,
+                3.0,
+            )),
+        ))
         .children(show)
         .child(download)
         .into_any_element()
@@ -446,7 +499,7 @@ impl FuwaApp {
                             let bytes = std::fs::read(&path).ok()?;
                             let name = path.file_name()?.to_string_lossy().into_owned();
                             let content_type = attachments::content_type_of(&name).to_owned();
-                            Some(Outgoing { name, content_type, bytes: Arc::new(bytes) })
+                            Some(Outgoing { name, content_type, bytes: Arc::new(bytes), spoiler: false })
                         })
                         .collect::<Vec<_>>()
                 })
@@ -474,6 +527,38 @@ impl FuwaApp {
         for (n, file) in files.iter().enumerate() {
             let place = place.to_owned();
             let hover = p.muted;
+            // Marked as a spoiler: its readers see it covered until they click it.
+            let on = file.spoiler;
+            let (lit, lit_fg) = (p.primary, p.primary_foreground);
+            let spoiler = div()
+                .id(SharedString::from(format!("picked-spoiler|{n}")))
+                .size(px(24.0))
+                .flex_none()
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(p.muted_foreground)
+                .cursor_pointer()
+                .hover(move |st| st.bg(hover))
+                .when(on, |el| el.bg(lit).text_color(lit_fg).hover(move |st| st.bg(lit)))
+                .tooltip({
+                    let label = if on { "chat.files.unspoiler" } else { "chat.files.spoiler" };
+                    let label = t_with(label, &[("name", Arg::Str(&file.name))]);
+                    move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx)
+                })
+                .on_click({
+                    let place = place.clone();
+                    cx.listener(move |_, _, _, cx| {
+                        PICKED.with(|pk| {
+                            if let Some(f) = pk.borrow_mut().get_mut(&place).and_then(|list| list.get_mut(n)) {
+                                f.spoiler = !f.spoiler;
+                            }
+                        });
+                        cx.notify();
+                    })
+                })
+                .child(icon("eye-off").size(px(14.0)));
             tray = tray.child(motion::rise(
                 div()
                     .flex()
@@ -485,7 +570,7 @@ impl FuwaApp {
                     .py(px(4.0))
                     .rounded(radius_xl())
                     .border_1()
-                    .border_color(p.border)
+                    .border_color(if on { alpha(p.primary, 0.6) } else { p.border.into() })
                     .bg(alpha(p.muted, 0.4))
                     .child(crate::ui::attachments::badge(&file.name, 28.0))
                     .child(
@@ -502,12 +587,23 @@ impl FuwaApp {
                             )
                             .child(
                                 div()
+                                    .flex()
+                                    .gap(px(4.0))
                                     .text_size(px(11.0))
                                     .line_height(px(14.0))
                                     .text_color(p.muted_foreground)
-                                    .child(attachments::format_bytes(file.bytes.len() as i64)),
+                                    .child(attachments::format_bytes(file.bytes.len() as i64))
+                                    .when(on, |el| {
+                                        el.child(
+                                            div()
+                                                .font_weight(gpui_kit::FontWeight::BOLD)
+                                                .text_color(p.primary)
+                                                .child(t("chat.files.spoilerBadge")),
+                                        )
+                                    }),
                             ),
                     )
+                    .child(spoiler)
                     .child(
                         div()
                             .id(SharedString::from(format!("picked-remove|{n}")))

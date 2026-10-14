@@ -547,6 +547,9 @@ message SealedFile {
   uint32 chunk_bytes = 10;
   // The file's own size before padding, to show before it's fetched.
   int64 file_size = 11;
+  // A spoiler, as its sender marked it: apps cover it until the reader
+  // clicks it, as Attachment.spoiler.
+  bool spoiler = 12;
 }
 
 // ───────────────────────── Message backup ─────────────────────────

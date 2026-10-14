@@ -1147,9 +1147,12 @@ impl FuwaApp {
                                     .text_xs()
                                     .text_color(p.muted_foreground)
                                     .child(icon("paperclip").size(px(12.0)).flex_none())
-                                    .child(
-                                        div().truncate().child(crate::core::attachments::short_name(&a.filename, 32)),
-                                    )
+                                    // A spoiler's name stays hidden here: it's shown only in the message.
+                                    .child(div().truncate().child(if a.spoiler {
+                                        t("chat.files.spoilerBadge")
+                                    } else {
+                                        crate::core::attachments::short_name(&a.filename, 32)
+                                    }))
                             }),
                         ))
                     })

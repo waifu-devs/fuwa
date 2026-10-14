@@ -561,6 +561,7 @@ pub(super) async fn check_files(
             height: pixels(file.height),
             id: id.clone(),
             voice,
+            spoiler: file.spoiler,
         };
         total += upload.size;
         seen.push(id);

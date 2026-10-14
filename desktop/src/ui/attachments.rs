@@ -2,7 +2,8 @@
 //! when there are several) and opened large on a click, anything else as a
 //! card to save. The composer's paperclip (or dropping files on it) uploads
 //! files for the server as soon as they're picked, and they go with the next
-//! message.
+//! message, each one marked as a spoiler if its sender wants (where the
+//! instance has "spoiler-files"): covered until each reader clicks it.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -20,6 +21,7 @@ use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Target};
 use crate::ui::motion;
 use crate::ui::overlay::shade;
+use crate::ui::spoilers;
 use crate::ui::theme::{Palette, alpha, radius_xl};
 use crate::ui::widgets::icon;
 
@@ -49,6 +51,8 @@ pub struct Staged {
     /// A picture, shown from disk while it uploads.
     preview: Option<PathBuf>,
     state: Upload,
+    /// Marked as a spoiler: it goes covered until each reader clicks it.
+    spoiler: bool,
 }
 
 pub enum Upload {
@@ -158,8 +162,12 @@ pub(crate) fn attachments_view(
                 bytes: file.size,
             };
             let this = this.clone();
+            // A spoiler stays covered until it's clicked: until then nothing of it is drawn or opened.
+            let (spoiler, sid) = (file.spoiler, spoiler_id(file).to_owned());
+            let shown = spoilers::file_shown(&sid, spoiler);
             let picture = div()
                 .id(SharedString::from(format!("pic|{mid}|{n}")))
+                .relative()
                 .w(px(w))
                 .h(px(h))
                 .rounded(crate::ui::theme::radius_xl())
@@ -172,37 +180,52 @@ pub(crate) fn attachments_view(
                 .hover(|s| s.scale(1.01))
                 .active(|s| s.scale(0.98))
                 .on_mouse_down(gpui_kit::MouseButton::Right, {
-                    let (this, mid) = (this.clone(), mid.to_owned());
+                    let (this, mid, sid) = (this.clone(), mid.to_owned(), sid.clone());
                     // Says which picture it was; the message's own handler opens the menu.
-                    move |_, _, cx| _ = this.update(cx, |this, _| this.right_picture = Some((mid.clone(), place)))
+                    move |_, _, cx| {
+                        if spoilers::file_shown(&sid, spoiler) == spoilers::Shown::Revealed {
+                            _ = this.update(cx, |this, _| this.right_picture = Some((mid.clone(), place)))
+                        }
+                    }
                 })
-                .on_click(move |_, window, cx| {
-                    let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
+                .on_click({
+                    let sid = sid.clone();
+                    move |_, window, cx| {
+                        if spoilers::file_shown(&sid, spoiler) != spoilers::Shown::Revealed {
+                            return;
+                        }
+                        let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
+                    }
                 })
-                .child(
-                    crate::ui::widgets::picture(file.url.clone())
-                        .size_full()
-                        .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
-                        .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
-                        // `animate-pulse bg-muted` until it's here.
-                        .with_loading({
-                            let (bg, id) = (p.muted, SharedString::from(format!("pic-wait|{mid}|{n}")));
-                            move || Pulse { id: id.clone(), bg }.into_any_element()
-                        })
-                        .with_fallback({
-                            let fg = p.muted_foreground;
-                            move || {
-                                div()
-                                    .size_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_color(fg)
-                                    .child(icon("file-image").size(px(24.0)))
-                                    .into_any_element()
-                            }
-                        }),
-                );
+                .when(shown != spoilers::Shown::Covered, |el| {
+                    el.child(
+                        crate::ui::widgets::picture(file.url.clone())
+                            .size_full()
+                            .rounded(px((f32::from(crate::ui::theme::radius_xl()) - 1.0).max(0.0)))
+                            .object_fit(if tiled { ObjectFit::Cover } else { ObjectFit::Contain })
+                            // `animate-pulse bg-muted` until it's here.
+                            .with_loading({
+                                let (bg, id) = (p.muted, SharedString::from(format!("pic-wait|{mid}|{n}")));
+                                move || Pulse { id: id.clone(), bg }.into_any_element()
+                            })
+                            .with_fallback({
+                                let fg = p.muted_foreground;
+                                move || {
+                                    div()
+                                        .size_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(fg)
+                                        .child(icon("file-image").size(px(24.0)))
+                                        .into_any_element()
+                                }
+                            }),
+                    )
+                })
+                .when(shown != spoilers::Shown::Revealed, |el| {
+                    el.child(spoilers::picture_cover(&format!("{mid}|{n}"), &sid, shown == spoilers::Shown::Fading, p))
+                });
             grid = grid.child(enter(picture, SharedString::from(format!("pic-in|{mid}|{n}")), n, animate));
         }
         out = out.child(grid);
@@ -214,8 +237,16 @@ pub(crate) fn attachments_view(
     out.into_any_element()
 }
 
+/// The id a file's spoiler reveal is kept under: its media id, or its link
+/// for a file that has none.
+pub(crate) fn spoiler_id(file: &pb::Attachment) -> &str {
+    if file.id.is_empty() { &file.url } else { &file.id }
+}
+
 /// A file to save: its icon, name and size, and a download button.
 /// It lifts a pixel under the pointer, its badge tilting (`FileCard`).
+/// A spoiler's name is covered (and its icon plain, so its kind doesn't
+/// show) until the card is clicked, which only reveals it.
 fn file_card(
     id: &str,
     file: &pb::Attachment,
@@ -226,6 +257,47 @@ fn file_card(
     let (this, key, url, name, bytes) =
         (this.clone(), key.to_owned(), file.url.clone(), file.filename.clone(), file.size);
     let (hover_bg, hover_fg) = (p.muted, p.primary);
+    let (spoiler, sid) = (file.spoiler, spoiler_id(file).to_owned());
+    let covered = spoilers::file_shown(&sid, spoiler) == spoilers::Shown::Covered;
+    let name_line: AnyElement = if covered {
+        div()
+            .flex()
+            .text_sm()
+            .font_weight(FontWeight::BOLD)
+            .child(spoilers::covered_name(&file.filename, p))
+            .into_any_element()
+    } else {
+        div()
+            .text_sm()
+            .font_weight(FontWeight::BOLD)
+            .truncate()
+            .child(attachments::short_name(&file.filename, 40))
+            .into_any_element()
+    };
+    let button = div()
+        .id(SharedString::from(format!("save|{id}")))
+        .size(px(32.0))
+        .flex_none()
+        .rounded(crate::ui::theme::radius_lg())
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(p.muted_foreground)
+        .hover(move |s| s.bg(hover_bg).text_color(hover_fg));
+    // The web's download button: muted, the muted fill and the primary on hover.
+    let button = if covered {
+        button
+            .child(icon("eye").size(px(16.0)))
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.attachments.spoiler")).build(window, cx))
+    } else {
+        button
+            .child(icon("download").size(px(16.0)))
+            .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
+            .on_click(move |_, _, cx| {
+                let _ = this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
+            })
+    };
     div()
         .id(SharedString::from(format!("file|{id}")))
         .hover(|s| s.translate_y(px(-1.0)))
@@ -240,48 +312,29 @@ fn file_card(
         .border_1()
         .border_color(p.border)
         .shadow(crate::ui::polls::shadow_sm())
+        .when(covered, |el| {
+            el.cursor_pointer()
+                .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.attachments.spoiler")).build(window, cx))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    spoilers::reveal_file(&sid, cx);
+                })
+        })
         .child(
             div()
                 .id(SharedString::from(format!("file-badge|{id}")))
                 .flex_none()
                 .hover(|s| s.rotate(radians((-8.0f32).to_radians())).scale(1.06))
-                .child(badge(&file.filename, 40.0)),
+                .child(badge(if covered { "" } else { &file.filename }, 40.0)),
         )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::BOLD)
-                        .truncate()
-                        .child(attachments::short_name(&file.filename, 40)),
-                )
-                .child(div().text_xs().text_color(p.muted_foreground).child(attachments::format_bytes(file.size))),
-        )
-        // The web's download button: muted, the muted fill and the primary on hover.
-        .child(
-            div()
-                .id(SharedString::from(format!("save|{id}")))
-                .size(px(32.0))
-                .flex_none()
-                .rounded(crate::ui::theme::radius_lg())
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .text_color(p.muted_foreground)
-                .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
-                .child(icon("download").size(px(16.0)))
-                .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
-                .on_click(move |_, _, cx| {
-                    let _ =
-                        this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
-                }),
-        )
+        .child(div().flex_1().min_w_0().flex().flex_col().child(name_line).child(
+            div().text_xs().text_color(p.muted_foreground).child(if covered {
+                t("chat.files.spoilerBadge")
+            } else {
+                attachments::format_bytes(file.size)
+            }),
+        ))
+        .child(button)
 }
 
 impl FuwaApp {
@@ -358,6 +411,7 @@ impl FuwaApp {
                 preview: picture.then(|| path.clone()),
                 path: path.clone(),
                 state: Upload::Uploading,
+                spoiler: false,
             });
             self.upload_staged(id, path, cx);
         }
@@ -394,6 +448,20 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// Marks a staged file as a spoiler, or stops marking it.
+    fn toggle_spoiler(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(s) = self.files.staged.iter_mut().find(|s| s.id == id) {
+            s.spoiler = !s.spoiler;
+        }
+        cx.notify();
+    }
+
+    /// Whether files can be marked as spoilers where they'll go ("spoiler-files").
+    fn spoilers_here(&self) -> bool {
+        let Some((key, _, _)) = &self.files.place else { return false };
+        self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("spoiler-files")))
+    }
+
     fn remove_file(&mut self, id: u64, cx: &mut Context<Self>) {
         self.files.staged.retain(|s| s.id != id);
         cx.notify();
@@ -417,10 +485,12 @@ impl FuwaApp {
         if self.files.staged.iter().any(|s| matches!(s.state, Upload::Failed(_))) {
             return Err("Remove the files that didn't upload first.");
         }
+        // Marks go only to an instance that keeps them.
+        let marks = self.spoilers_here();
         Ok(std::mem::take(&mut self.files.staged)
             .into_iter()
             .filter_map(|s| match s.state {
-                Upload::Ready(file) => Some(file),
+                Upload::Ready(file) => Some(pb::Attachment { spoiler: s.spoiler && marks, ..file }),
                 _ => None,
             })
             .collect())
@@ -544,7 +614,24 @@ impl FuwaApp {
                     })
                     .child(failed.clone().unwrap_or_else(|| attachments::format_bytes(s.size))),
             );
+        // Marked as a spoiler: dimmed under a sheet, as others will first see it covered.
+        let marked = s.spoiler && self.spoilers_here();
+        if marked {
+            card = card.child(div().absolute().top_0().left_0().size_full().bg(if shown {
+                gpui_kit::hsla(0.0, 0.0, 0.0, 0.45)
+            } else {
+                alpha(p.muted, 0.5)
+            }));
+        }
         card = card.child(caption);
+        if marked {
+            card =
+                card.child(
+                    div().absolute().top(px(6.0)).left(px(6.0)).child(
+                        spoilers::spoiler_pill().px(px(8.0)).py(px(2.0)).text_size(px(10.4)).line_height(px(14.0)),
+                    ),
+                );
+        }
         // How it's going: uploads don't count their bytes here, so a bar
         // sweeps along the bottom until it's up (the web's fills).
         if uploading {
@@ -605,6 +692,19 @@ impl FuwaApp {
             .right(px(4.0))
             .flex()
             .gap(px(4.0))
+            .when(self.spoilers_here(), |el| {
+                let (name, on) = (s.name.clone(), s.spoiler);
+                let (bg, fg) = (p.primary, p.primary_foreground);
+                el.child(
+                    round("staged-spoiler", "eye-off", p.primary)
+                        .when(on, |el| el.bg(bg).text_color(fg).hover(move |s| s.text_color(fg)))
+                        .tooltip(move |window, cx| {
+                            let label = if on { "chat.files.unspoiler" } else { "chat.files.spoiler" };
+                            crate::ui::overlay::Tip::new(t_with(label, &[("name", Arg::Str(&name))])).build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_spoiler(id, cx))),
+                )
+            })
             .when(failed.is_some(), |el| {
                 let name = s.name.clone();
                 el.child(

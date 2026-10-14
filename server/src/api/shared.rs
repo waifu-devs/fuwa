@@ -591,6 +591,7 @@ fn their_text(send: &mut cpb::GuestSend) -> Result<()> {
             width: file.width,
             height: file.height,
             voice: file.voice.take(),
+            spoiler: file.spoiler,
             ..Default::default()
         };
     }
@@ -618,6 +619,7 @@ fn their_files(files: &[pb::Attachment]) -> Vec<pb::Attachment> {
                 width: pixels(file.width),
                 height: pixels(file.height),
                 voice,
+                spoiler: file.spoiler,
                 url: String::new(),
             })
         })
@@ -2519,6 +2521,7 @@ async fn take_from_elsewhere(
                 height: pixels(file.height),
                 id,
                 voice,
+                spoiler: file.spoiler,
             };
         }
         Ok::<_, Error>(())

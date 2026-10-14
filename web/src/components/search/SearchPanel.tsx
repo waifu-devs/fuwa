@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { clock } from "@/voice/player";
-import { ArrowRightIcon, HashIcon, HourglassIcon, PaperclipIcon, SearchXIcon, XIcon } from "lucide-react";
+import { ArrowRightIcon, EyeOffIcon, HashIcon, HourglassIcon, PaperclipIcon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SearchResult } from "@/gen/fuwa/v1/search_pb";
@@ -357,8 +357,11 @@ const ResultRow = memo(function ResultRow({
             <span className="mt-1 flex flex-wrap gap-1">
               {message.attachments.map((a) => (
                 <span key={a.id} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                  <PaperclipIcon className="size-3 shrink-0" />
-                  <span className="truncate">{a.voice ? t("chattools.search.voiceMessage", { duration: clock(a.voice.durationMs) }) : a.filename}</span>
+                  {a.spoiler ? <EyeOffIcon className="size-3 shrink-0" /> : <PaperclipIcon className="size-3 shrink-0" />}
+                  {/* A spoiler file's name stays covered here: it's uncovered in the message. */}
+                  <span className="truncate">
+                    {a.spoiler ? t("chat.files.spoilerBadge") : a.voice ? t("chattools.search.voiceMessage", { duration: clock(a.voice.durationMs) }) : a.filename}
+                  </span>
                 </span>
               ))}
             </span>

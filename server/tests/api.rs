@@ -10516,9 +10516,11 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
 
     // A reply's file goes with the thread when the message it's under goes.
+    // (This one is marked as a spoiler, which it keeps.)
     let parent = send(&mut c, &juan, &server.id, &general, "a thread for files").await.unwrap();
     let note = attach(&mut c, &instance, &juan, &server.id, b"in a thread".to_vec()).await;
-    c.messages
+    let reply = c
+        .messages
         .send_message(authed(
             &juan,
             pb::SendMessageRequest {
@@ -10528,13 +10530,32 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
                 attachments: vec![pb::Attachment {
                     url: note.clone(),
                     filename: "note.txt".into(),
+                    spoiler: true,
                     ..Default::default()
                 }],
                 ..Default::default()
             },
         ))
         .await
+        .unwrap()
+        .into_inner()
+        .message
         .unwrap();
+    assert!(reply.attachments[0].spoiler);
+    let kept = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                message_id: reply.id.clone(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(kept.message.unwrap().attachments[0].spoiler, "kept as sent");
     assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_011);
     c.messages
         .delete_message(authed(

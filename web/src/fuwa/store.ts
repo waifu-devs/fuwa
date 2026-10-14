@@ -62,8 +62,8 @@ export type PendingMessage = {
   inChannel?: boolean;
   /** A voice message on its way: how it looks until it's sent. */
   voice?: { durationMs: number; waveform: Uint8Array };
-  /** Files going sealed in an encrypted message: their names and sizes until it's sent. */
-  sealed?: { name: string; size: number }[];
+  /** Files going sealed in an encrypted message: their names and sizes (and which are spoilers) until it's sent. */
+  sealed?: { name: string; size: number; spoiler?: boolean }[];
 };
 
 /** A device in an encrypted conversation, as its group says. */

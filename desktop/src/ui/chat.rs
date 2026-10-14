@@ -675,7 +675,13 @@ impl FuwaApp {
                 .map(|e| (&e.url, &e.title, &e.description, &e.image_url, e.preview))
                 .for_each(|e| e.hash(&mut h));
             m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
-            m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
+            m.attachments
+                .iter()
+                .map(|a| {
+                    let shown = crate::ui::spoilers::file_shown(crate::ui::attachments::spoiler_id(a), a.spoiler);
+                    (&a.url, &a.filename, shown)
+                })
+                .for_each(|a| a.hash(&mut h));
             m.gif.as_ref().map(|g| (&g.url, g.width, g.height, g.provider)).hash(&mut h);
             (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
             user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
