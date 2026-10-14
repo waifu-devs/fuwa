@@ -4,14 +4,16 @@ import { dmEngine, DmError, SECURE_BROKEN, type Content } from "@/e2ee/engine";
 import { engine, onLeaveAccount } from "./sync";
 import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
-import { cleanName, MAX_FILE_BYTES, MAX_FILES, openFile, sealFile } from "@/files/sealed";
+import { cleanName, MAX_FILE_BYTES, MAX_FILES, gifAddress, openFile, sealFile, sniff } from "@/files/sealed";
 import { formatBytes } from "@/lib/format";
 import { i18n, inWords } from "@/i18n/i18n";
 import type { Loader } from "@/voice/player";
 import type { Clip } from "@/voice/recorder";
 import { MAX_VOICE_BYTES, readExactly } from "@/voice/fetch";
 import { open, seal } from "@/voice/seal";
+import type { GifProvider, MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { call, FuwaError, toFuwaError } from "./errors";
+import { noteSentGif } from "./gifs";
 import { store, updateDms, type PendingMessage } from "./store";
 
 /**
@@ -284,7 +286,15 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
  * Files waiting to go, by pending nonce, with which are marked as spoilers
  * and what each already uploaded, so a failed send can try again.
  */
-type OutgoingFiles = { files: File[]; spoilers: boolean[]; text: string; target?: ThreadTarget; uploaded: (FileRef | undefined)[] };
+type OutgoingFiles = {
+  files: File[];
+  spoilers: boolean[];
+  text: string;
+  target?: ThreadTarget;
+  uploaded: (FileRef | undefined)[];
+  /** A GIF from the picker: what it shows and its size, sent with the one file. */
+  gif?: { title: string; provider: GifProvider; width: number; height: number };
+};
 const outgoingFiles = new Map<string, OutgoingFiles>();
 
 /** A picture's size in pixels, so its place is kept while it opens; 0s for anything else. */
@@ -320,6 +330,46 @@ export async function sendDmFiles(key: string, id: string, files: File[], text: 
   await sendFiles(key, id, { files, spoilers, text, target, uploaded: [] });
 }
 
+/** The most a GIF fetched to be sealed may be: the most the instance ever stores (docs/gifs.md). */
+const MAX_GIF_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Fetches a GIF the picker gave (stored on this instance) so it can be sealed
+ * and sent like a file: the instance never learns which conversation it went
+ * to, and the other devices open it like any sealed file.
+ */
+async function fetchGif(key: string, gif: MessageGif): Promise<File> {
+  const cant = () => new Error(i18n().t("system.files.cantFetch"));
+  const url = gifAddress(engine(key).url, gif.url);
+  if (!url) throw cant();
+  const res = await fetch(url, { credentials: "omit", referrerPolicy: "no-referrer" });
+  if (!res.ok || !res.body) throw cant();
+  if (Number(res.headers.get("content-length") ?? 0) > MAX_GIF_BYTES) throw cant();
+  const bytes = await res.arrayBuffer();
+  const preview = sniff(new Uint8Array(bytes.slice(0, 64)));
+  if (!bytes.byteLength || bytes.byteLength > MAX_GIF_BYTES || preview?.kind !== "image") throw cant();
+  return new File([bytes], `gif.${preview.type.slice("image/".length)}`, { type: preview.type });
+}
+
+/**
+ * Sends a GIF from the picker in an encrypted conversation or secure channel:
+ * fetched from this instance, then sealed and sent as a file marked as a GIF.
+ * Answers once it's fetched; the rest shows as a pending message, with a
+ * retry if it fails.
+ */
+export async function sendDmGif(key: string, id: string, gif: MessageGif, target?: ThreadTarget) {
+  const file = await fetchGif(key, gif);
+  noteSentGif(key, gif);
+  void sendFiles(key, id, {
+    files: [file],
+    spoilers: [false],
+    text: "",
+    target,
+    uploaded: [],
+    gif: { title: gif.title.slice(0, 200), provider: gif.provider, width: Math.max(0, gif.width), height: Math.max(0, gif.height) },
+  });
+}
+
 async function sendFiles(key: string, id: string, out: OutgoingFiles) {
   const nonce = newNonce();
   outgoingFiles.set(nonce, out);
@@ -331,7 +381,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
       createdAt: Date.now(),
       failed: null,
       ...out.target,
-      sealed: out.files.map((f, n) => ({ name: cleanName(f.name), size: f.size, spoiler: !!out.spoilers[n] })),
+      sealed: out.files.map((f, n) => ({ name: cleanName(f.name), size: f.size, spoiler: !!out.spoilers[n], gif: !!out.gif })),
     },
   ]);
   const started = performance.now();
@@ -343,7 +393,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
     for (const [n, file] of out.files.entries()) {
       let ref = out.uploaded[n];
       if (!ref) {
-        const [sealed, size] = await Promise.all([said(sealFile(file)), measure(file)]);
+        const [sealed, size] = await Promise.all([said(sealFile(file)), out.gif?.width && out.gif.height ? out.gif : measure(file)]);
         const reserved = await dms.reserveUpload(id, sealed.bytes.length);
         await put(key, reserved.uploadUrl, sealed.bytes, cleanName(file.name));
         ref = {
@@ -358,6 +408,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
           height: size.height,
           fileSize: file.size,
           spoiler: !!out.spoilers[n],
+          ...(out.gif ? { gif: { title: out.gif.title, provider: out.gif.provider } } : {}),
         };
         out.uploaded[n] = ref;
         // This device already has it: no need to fetch it back to show it.

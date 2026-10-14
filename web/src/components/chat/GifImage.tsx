@@ -30,7 +30,7 @@ export function GifImage({
 }
 
 /** The first frame of the GIF at `src`, drawn once on a canvas. */
-function FirstFrame({ src, alt, className }: { src: string; alt: string; className?: string }) {
+export function FirstFrame({ src, alt, className }: { src: string; alt: string; className?: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const img = new Image();

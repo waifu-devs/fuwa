@@ -91,8 +91,7 @@ export const prepareUpload = (key: string, uploadUrl: string) =>
 /** Sends a GIF on its own; it shows once the server has it. */
 export const sendGif = (key: string, serverId: string, channelId: string, gif: MessageGif) =>
   Effect.gen(function* () {
-    reportUsage("gif.send");
-    rememberSent(accountKey(key, engine(key).userId), gif);
+    noteSentGif(key, gif);
     const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, gif }, { signal }));
     updateInstance(key, (i) => {
       const loaded = i.messages[channelId];
@@ -104,6 +103,12 @@ export const sendGif = (key: string, serverId: string, channelId: string, gif: M
       };
     });
   });
+
+/** Counts a GIF sent (anywhere) and keeps it with the ones sent lately on this device. */
+export function noteSentGif(key: string, gif: MessageGif) {
+  reportUsage("gif.send");
+  rememberSent(accountKey(key, engine(key).userId), gif);
+}
 
 // ───────────────────────── Saved ─────────────────────────
 

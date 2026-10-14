@@ -187,3 +187,15 @@ export function cleanName(name: string): string {
   const trimmed = kept.trim().replace(/^\.+/, "").trim();
   return trimmed || "file";
 }
+
+/** Where to fetch a GIF the picker gave: its /media/ path on this instance's own address, whatever host its link names. */
+export function gifAddress(base: string, url: string): string | null {
+  let path: string;
+  try {
+    path = new URL(url, "http://x").pathname;
+  } catch {
+    return null;
+  }
+  if (!/^\/media\/[0-9a-z]+$/i.test(path)) return null;
+  return `${base.replace(/\/+$/, "")}${path}`;
+}
