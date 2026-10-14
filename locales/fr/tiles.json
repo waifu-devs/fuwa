@@ -1,0 +1,61 @@
+{
+  "strip.label": "En ce moment",
+  "strip.options": "Options de la tuile",
+  "strip.hide": "Masquer celle-ci",
+  "strip.quiet": "Aucune tuile en direct sur ce serveur",
+  "strip.off": "Désactiver les tuiles en direct",
+  "strip.remove": "Retirer pour tout le monde",
+  "strip.removeFailed": "Impossible de retirer la tuile",
+  "menu.show": "Tuiles en direct",
+  "menu.server": "Tuiles pour tout le monde ici",
+  "menu.bigServer": {
+    "one": "Les salons vocaux sont désactivés par défaut sur les serveurs de {count} membre ou plus",
+    "other": "Les salons vocaux sont désactivés par défaut sur les serveurs de {count} membres ou plus"
+  },
+  "menu.everyone": "Tout le monde ici ne voit que ces types",
+  "menu.reset": "Revenir à la valeur par défaut",
+  "menu.failed": "Impossible de modifier les tuiles du serveur",
+  "kind.voice": "Salons vocaux",
+  "kind.poll": "Sondages",
+  "kind.thread": "Fils suivis",
+  "kind.shared": "Salons partagés",
+  "kind.app": "Depuis des apps",
+  "voice.title": {
+    "one": "{count} personne dans {channel}",
+    "other": "{count} personnes dans {channel}"
+  },
+  "voice.since": "En conversation depuis {time}",
+  "voice.video": "Caméras allumées",
+  "voice.screen": "Partage d’écran en cours",
+  "voice.join": "Rejoindre",
+  "poll.title": "Sondage dans #{channel}",
+  "poll.closesMinutes": {
+    "one": "Se termine dans {count} minute",
+    "other": "Se termine dans {count} minutes"
+  },
+  "poll.closesHours": {
+    "one": "Se termine dans {count} heure",
+    "other": "Se termine dans {count} heures"
+  },
+  "poll.noEnd": "Ouvert jusqu’à ce qu’on y mette fin",
+  "poll.voters": {
+    "one": "{count} vote",
+    "other": "{count} votes"
+  },
+  "poll.vote": "Voter",
+  "thread.title": "Un fil que tu suis",
+  "thread.unread": {
+    "one": "{count} nouvelle réponse",
+    "other": "{count} nouvelles réponses"
+  },
+  "thread.open": "Ouvrir",
+  "shared.title": "Ça bouge dans #{channel}",
+  "shared.text": {
+    "one": "{count} nouveau message de {servers} serveurs",
+    "other": "{count} nouveaux messages de {servers} serveurs"
+  },
+  "shared.open": "Rattraper",
+  "app.by": "Depuis {app}",
+  "app.live": "En direct",
+  "app.open": "Ouvrir"
+}

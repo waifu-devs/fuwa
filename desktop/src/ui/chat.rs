@@ -376,7 +376,7 @@ impl Draft {
         for Job { at, key, mut msg, emojis } in jobs {
             msg.shown = mention_links(
                 &timestamp_nodes(&crate::ui::text::hard_breaks(&crate::ui::spoilers::spoiler_nodes(
-                    &images_as_links(&msg.content),
+                    &images_as_links(&crate::core::math::mark(&msg.content)),
                     &msg.id,
                 ))),
                 &look.with(&emojis),

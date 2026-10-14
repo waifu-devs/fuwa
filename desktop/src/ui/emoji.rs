@@ -409,7 +409,9 @@ pub fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
         .plugin(crate::ui::timestamps::Plugin)
         .plugin(crate::ui::mentions::Plugin)
         .plugin(crate::ui::spoilers::Plugin)
-        .parser_revision(4)
+        .plugin(crate::ui::math::InlinePlugin)
+        .plugin(crate::ui::math::BlockPlugin)
+        .parser_revision(5)
 }
 
 #[cfg(test)]

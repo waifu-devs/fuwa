@@ -1,0 +1,24 @@
+{
+  "build.commit": "Gebaut aus Commit {commit}",
+  "update.updated": "fuwa wurde aktualisiert",
+  "update.reload": "Neu laden",
+  "update.later": "Später",
+  "update.laterHint": "Später: Diese Version weiter nutzen, bis du neu lädst",
+  "update.hasFeature": "{instance} hat {feature}. Aktualisiere fuwa, um es zu nutzen",
+  "update.hasFeatures": {
+    "one": "{instance} hat {feature} und {count} weitere Funktion. Aktualisiere fuwa, um sie zu nutzen",
+    "other": "{instance} hat {feature} und {count} weitere Funktionen. Aktualisiere fuwa, um sie zu nutzen"
+  },
+  "update.tooOld": "{instance} braucht ein neueres fuwa, damit alles funktioniert",
+  "update.anInstance": "Eine Instanz",
+  "update.somethingNew": "etwas Neues",
+  "announcement.until": "Bis {time}",
+  "announcement.close": "Ankündigung schließen",
+  "hosted.label": "Gehostet von Waifu Devs",
+  "hosted.who": "Die Leute, die fuwa entwickeln, betreiben diese Instanz.",
+  "hosted.checked": "{host} · dein Browser hat das Zertifikat geprüft",
+  "hosted.why": "Nur Instanzen unter unseren eigenen Adressen bekommen dieses Abzeichen. Die App richtet sich nur nach der Adresse, denn jeder Server könnte alles Mögliche über sich behaupten.",
+  "hosted.about": "Über fuwa",
+  "signInNotice.added": "{name} wurde am {date} als Anmeldemethode zu deinem Konto hinzugefügt. Warst du das nicht?",
+  "signInNotice.review": "Prüfen"
+}
