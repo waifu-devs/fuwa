@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
+import { filesIn } from "@/lib/pasted";
 import { comboLabel } from "@/lib/keybinds";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { usePrefs, type SendWith } from "@/lib/prefs";
@@ -600,7 +601,7 @@ function useBoxInput({
   }
 
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
-    const pasted = Array.from(e.clipboardData.files);
+    const pasted = filesIn(e.clipboardData);
     if (!pasted.length || !canAttach) return;
     e.preventDefault();
     addFiles(where.instanceKey, where.serverId, where.channelId, pasted);
