@@ -424,6 +424,9 @@ pub struct Prefs {
     /// Sends anonymous counts of errors, slow paths and feature use to your
     /// own instance, while its telemetry is on (see `reports.rs`).
     pub share_reports: bool,
+    /// Others see a typing line while you write a message (`core::typing`);
+    /// off, nothing says you're typing. The web's `sendTyping`.
+    pub send_typing: bool,
     /// The announcement closed on each instance, by its id, so it stays closed until a new one.
     pub closed_announcements: std::collections::BTreeMap<String, String>,
     /// Fetches and checks new versions of the app in the background, for
@@ -584,6 +587,7 @@ impl Default for Prefs {
             keybinds: Default::default(),
             custom_keybinds: Vec::new(),
             share_reports: true,
+            send_typing: true,
             closed_announcements: Default::default(),
             auto_update: true,
             shared_notes_closed: Default::default(),

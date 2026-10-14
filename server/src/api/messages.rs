@@ -1015,6 +1015,35 @@ async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<V
 }
 
 impl Api {
+    /// Tells the members with the channel on screen that `account` is typing
+    /// there (crate::typing): an event that isn't stored, like a voice state.
+    /// Nothing is checked about the thread but that it's named like an id:
+    /// apps show the line only under a thread they have open.
+    async fn send_typing_impl(&self, account: &Account, req: pb::SendTypingRequest) -> Result<pb::SendTypingResponse> {
+        if !req.thread_id.is_empty() && !crate::typing::id_like(&req.thread_id) {
+            return Err(Error::invalid("thread_id must be a message's id"));
+        }
+        let Seat { access, .. } = self.membership(account, &req.server_id).await?;
+        access.require_in(&req.channel_id, Permission::SendMessages)?;
+        let now = now_ms();
+        let place = format!("{}/{}/{}", req.server_id, req.channel_id, req.thread_id);
+        if crate::typing::pass(&place, &account.id, now) {
+            self.app.hub.publish([pb::Event {
+                id: new_id(),
+                server_id: req.server_id,
+                sequence: 0,
+                actor_id: account.id.clone(),
+                created_at: Some(timestamp(now)),
+                payload: Some(Payload::TypingStarted(pb::TypingStarted {
+                    channel_id: req.channel_id,
+                    thread_id: req.thread_id,
+                    user_id: account.id.clone(),
+                })),
+            }]);
+        }
+        Ok(pb::SendTypingResponse {})
+    }
+
     /// Sends a message as `account`: SendMessage, and an agent's answer to
     /// an interaction that came back from its endpoint (`endpoints.rs`).
     pub(crate) async fn send_as(
@@ -1729,6 +1758,19 @@ impl MessageService for Api {
                     })
                     .await?;
                 Ok(pb::HideLinkPreviewsResponse { message: Some(message) })
+            }
+            .await,
+        )
+    }
+
+    async fn send_typing(
+        &self,
+        request: Request<pb::SendTypingRequest>,
+    ) -> Result<Response<pb::SendTypingResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.send_typing_impl(&account, request.into_inner()).await
             }
             .await,
         )

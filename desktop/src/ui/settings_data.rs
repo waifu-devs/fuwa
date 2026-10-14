@@ -79,6 +79,8 @@ impl SettingsView {
         if let Some(activity) = self.activity_section(&key, p, window, cx) {
             page = page.child(motion::rise(div().child(activity), "privacy-activity", Duration::ZERO, 12.0));
         }
+        let typing = self.typing_section(p, window, cx);
+        page = page.child(motion::rise(div().child(typing), "privacy-typing", Duration::from_millis(40), 12.0));
         page = page.child(self.games_card(p, window, cx));
         page = page.child(self.export_card(&key, &place, p, window, cx));
         // Deleting.

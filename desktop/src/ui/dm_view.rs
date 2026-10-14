@@ -1664,11 +1664,23 @@ impl FuwaApp {
             .map(|el| self.mic_slide(el, cx))
             .children(tray)
             .child(row);
+        // Who's typing here: a secure channel's thread goes by its parent record's sequence.
+        let typing = match self.target() {
+            Some(Target::Secure { server, .. }) => {
+                let at = c.thread.as_ref().map_or(String::new(), |(parent, _)| parent.to_string());
+                Some((crate::core::typing::Place::channel(&c.key, &c.id, &at), Some(server)))
+            }
+            _ if thread => None,
+            Some(Target::Dm { .. }) => Some((crate::core::typing::Place::dm(&c.key, &c.id), None)),
+            _ => None,
+        };
+        let typing = self.typing_line(&place, typing, &p, window, cx);
         div()
             .flex_none()
             .relative()
             .px(px(16.0))
             .pb(px(12.0))
+            .children(typing)
             .children(time_panel)
             .child(self.shaken(card))
             .child(footer)

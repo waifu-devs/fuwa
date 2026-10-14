@@ -3,6 +3,8 @@
 //!
 //! Each signed-in app holds a lease (`update`): whether its person is away
 //! from it and what they're doing there. A person with no lease is offline.
+//! Agents are also online while something holds them there (`hold`): one of
+//! their event streams being open, or an endpoint that takes deliveries.
 //! What others see is worked out from that, their saved settings (status,
 //! "Show what I'm doing", servers they hid it from) and the instance's switch,
 //! and goes to the live streams (`watch`) of the people who share a server
@@ -23,6 +25,8 @@ use crate::pb;
 pub const LEASE: Duration = Duration::from_secs(150);
 /// How often apps are asked to update.
 pub const RENEW: Duration = Duration::from_secs(60);
+/// What an agent's working endpoint is called among its apps (`hold`).
+pub const ENDPOINT: &str = "endpoint";
 /// At most this many changes of one person go out per `WINDOW`.
 const BURST: usize = 5;
 const WINDOW: Duration = Duration::from_secs(20);
@@ -170,7 +174,8 @@ struct App {
     idle: bool,
     activities: Vec<pb::Activity>,
     updated: Instant,
-    expires: Instant,
+    /// `None`: held until released (`hold`), not leased.
+    expires: Option<Instant>,
 }
 
 impl Person {
@@ -450,16 +455,53 @@ impl Presence {
         settings: Option<pb::PresenceSettings>,
     ) -> bool {
         let now = Instant::now();
+        let app = App { kind: kind.to_string(), idle, activities, updated: now, expires: Some(now + LEASE) };
+        self.set_app(index, user_id, session, app, settings)
+    }
+
+    /// Keeps an agent online through `key` until `release`, as an app of
+    /// kind "agent" that never lapses: while one of its event streams is
+    /// open, or while its endpoint takes deliveries ([`ENDPOINT`]). Like
+    /// `update`, gives back false without `settings` for someone not known
+    /// here.
+    pub fn hold(&self, index: &Index, user_id: &str, key: &str, settings: Option<pb::PresenceSettings>) -> bool {
+        let now = Instant::now();
+        let app = App { kind: "agent".to_string(), idle: false, activities: Vec::new(), updated: now, expires: None };
+        self.set_app(index, user_id, key, app, settings)
+    }
+
+    /// What held an agent online (`hold`) no longer does.
+    pub fn release(&self, index: &Index, user_id: &str, key: &str) {
+        let now = Instant::now();
+        let mut inner = self.lock();
+        let Some(person) = inner.people.get_mut(user_id) else { return };
+        if person.apps.remove(key).is_some() {
+            inner.changed(index, user_id, now, false);
+        }
+    }
+
+    /// The agents held online through `key`.
+    pub fn held(&self, key: &str) -> HashSet<String> {
+        let inner = self.lock();
+        inner.people.iter().filter(|(_, p)| p.apps.contains_key(key)).map(|(id, _)| id.clone()).collect()
+    }
+
+    fn set_app(
+        &self,
+        index: &Index,
+        user_id: &str,
+        key: &str,
+        app: App,
+        settings: Option<pb::PresenceSettings>,
+    ) -> bool {
+        let now = app.updated;
         let mut inner = self.lock();
         if !inner.people.contains_key(user_id) {
             let Some(settings) = settings else { return false };
             inner.people.insert(user_id.to_string(), Person::new(user_id, settings, now));
         }
         let person = inner.people.get_mut(user_id).expect("just added");
-        person.apps.insert(
-            session.to_string(),
-            App { kind: kind.to_string(), idle, activities, updated: now, expires: now + LEASE },
-        );
+        person.apps.insert(key.to_string(), app);
         inner.changed(index, user_id, now, false);
         true
     }
@@ -731,7 +773,7 @@ impl Presence {
         let mut lapsed = Vec::new();
         for (user_id, person) in inner.people.iter_mut() {
             let before = person.apps.len();
-            person.apps.retain(|_, app| app.expires > now);
+            person.apps.retain(|_, app| app.expires.is_none_or(|expires| expires > now));
             if person.apps.len() != before {
                 lapsed.push(user_id.clone());
             }
@@ -1086,7 +1128,7 @@ mod tests {
         let presence = Presence::default();
         presence.update(&index, "ann", "t1", "web", false, vec![], Some(default_settings()));
         let mut bo = presence.watch(&index, "bo", Some(default_settings()));
-        presence.lock().people.get_mut("ann").unwrap().apps.get_mut("t1").unwrap().expires = Instant::now();
+        presence.lock().people.get_mut("ann").unwrap().apps.get_mut("t1").unwrap().expires = Some(Instant::now());
         presence.lock().people.get_mut("ann").unwrap().touched = Instant::now() - LEASE;
         presence.tick(&index);
         assert_eq!(drain(&mut bo.rx)[0].status, pb::PresenceStatus::Offline as i32);
@@ -1101,6 +1143,31 @@ mod tests {
         presence.joined(&index, "cy", "s1");
         assert!(drain(&mut cy.rx).iter().any(|p| p.user_id == "bo"));
         assert!(drain(&mut bo.rx).iter().any(|p| p.user_id == "cy"));
+    }
+
+    #[test]
+    fn held_agents_stay_online_until_released() {
+        let index = index();
+        let presence = Presence::default();
+        let mut bo = presence.watch(&index, "bo", Some(default_settings()));
+        assert!(!presence.hold(&index, "ann", "stream:1", None));
+        assert!(presence.hold(&index, "ann", "stream:1", Some(default_settings())));
+        assert!(presence.hold(&index, "ann", ENDPOINT, None));
+        let seen = drain(&mut bo.rx);
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].status, pb::PresenceStatus::Online as i32);
+        assert_eq!(seen[0].apps, ["agent"]);
+        assert_eq!(presence.held(ENDPOINT), HashSet::from(["ann".to_string()]));
+        // Nothing lapses, however long it's held.
+        presence.lock().people.get_mut("ann").unwrap().touched = Instant::now() - LEASE;
+        presence.tick(&index);
+        assert!(drain(&mut bo.rx).is_empty());
+        // Online while anything still holds them.
+        presence.release(&index, "ann", "stream:1");
+        assert!(drain(&mut bo.rx).is_empty());
+        presence.release(&index, "ann", ENDPOINT);
+        assert_eq!(drain(&mut bo.rx)[0].status, pb::PresenceStatus::Offline as i32);
+        assert!(presence.held(ENDPOINT).is_empty());
     }
 
     #[test]
@@ -1140,7 +1207,14 @@ mod tests {
         presence.update(&index, "ann", "t1", "web", true, vec![], None);
         presence.update(&index, "ann", "t2", "desktop", false, vec![playing("Celeste")], None);
         presence.update(&index, "ann", "t2", "desktop", false, vec![], None);
-        presence.lock().people.get_mut("ann").unwrap().apps.values_mut().for_each(|app| app.expires = Instant::now());
+        presence
+            .lock()
+            .people
+            .get_mut("ann")
+            .unwrap()
+            .apps
+            .values_mut()
+            .for_each(|app| app.expires = Some(Instant::now()));
         presence.tick(&index);
         assert!(drain(&mut bo.rx).is_empty(), "an invisible person's comings and goings never show");
         // Hidden in the only shared server: activity changes send nothing either.

@@ -168,6 +168,7 @@ fn may_change_rules(payload: &Payload) -> bool {
             | Payload::CardDeleted(_)
             | Payload::GachaBannersUpdated(_)
             | Payload::GachaPulled(_)
+            | Payload::TypingStarted(_)
     )
 }
 

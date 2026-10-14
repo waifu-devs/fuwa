@@ -234,6 +234,9 @@ pub struct Msg {
     pub mine: bool,
     pub pending: bool,
     pub failed: Option<String>,
+    /// Still sending: the nonce it went with. Sent from here and taken by
+    /// the server: the nonce of the pending message it took the place of, so
+    /// it moves on as that same row (0 for everything else).
     pub nonce: u64,
     pub unreadable: bool,
     /// Not a person: "APP" for what a webhook posted, "BOT" for AutoMod.
@@ -283,6 +286,15 @@ pub struct Msg {
 impl Row {
     fn id(&self) -> String {
         self.id_str().to_owned()
+    }
+
+    /// What its animations go by: a message you sent keeps its pending copy's,
+    /// so taking that copy's place doesn't start its rise over.
+    fn motion_id(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Row::Msg(m) if !m.pending && m.nonce != 0 => format!("p{}", m.nonce).into(),
+            _ => self.id_str().into(),
+        }
     }
 
     pub(crate) fn id_str(&self) -> &str {
@@ -364,7 +376,7 @@ impl Draft {
         for Job { at, key, mut msg, emojis } in jobs {
             msg.shown = mention_links(
                 &timestamp_nodes(&crate::ui::text::hard_breaks(&crate::ui::spoilers::spoiler_nodes(
-                    &images_as_links(&msg.content),
+                    &images_as_links(&crate::core::math::mark(&msg.content)),
                     &msg.id,
                 ))),
                 &look.with(&emojis),
@@ -495,15 +507,20 @@ impl FuwaApp {
         let can_start = threads_here && i.access(&server).has_in(&channel, pb::Permission::CreateThreads);
         let can_reply = threads_here && i.access(&server).has_in(&channel, pb::Permission::SendMessages);
         // In a thread: the message it's under comes first, then its replies.
-        let parent = thread.and_then(|id| {
+        let under = thread.and_then(|id| {
             i.thread_parents.get(id).or_else(|| i.messages.get(&channel)?.items.iter().find(|m| m.id == id))
         });
+        // A card's comments: its body shows above them, in the card's own panel (`ui/board.rs`).
+        let card = here.is_some_and(|c| c.r#type == pb::ChannelType::Board as i32);
+        let parent = under.filter(|_| !card);
         let divider = |rows: &mut Vec<Row>| {
-            let count = parent.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
+            let count = under.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
+            let words = if card { "chattools.board.commentsHeading" } else { "chat.threads.replies" };
             rows.push(Row::Divider {
                 text: match count {
+                    0 if card => t("chattools.board.commentsStart"),
                     0 => t("chat.threads.noReplies"),
-                    n => crate::core::i18n::t_with("chat.threads.replies", &[("count", Arg::Num(i64::from(n)))]),
+                    n => crate::core::i18n::t_with(words, &[("count", Arg::Num(i64::from(n)))]),
                 },
             });
             if loaded.has_more {
@@ -689,7 +706,8 @@ impl FuwaApp {
             (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
-            (pinned, can_pin).hash(&mut h);
+            let landed = if m.author_id == me { crate::core::store::landed_from(i, &m.id) } else { 0 };
+            (pinned, can_pin, landed).hash(&mut h);
             crate::ui::spoilers::revealed_in(&m.id).hash(&mut h);
             if let Some(r) = &reactions {
                 r.digest(&mut h);
@@ -738,7 +756,8 @@ impl FuwaApp {
                         mine: m.author_id == me,
                         pending: false,
                         failed: None,
-                        nonce: 0,
+                        // The pending message it took the place of, if it was sent from here.
+                        nonce: landed,
                         unreadable: false,
                         badge: *badge,
                         embeds: m.embeds.clone(),
@@ -902,7 +921,9 @@ impl FuwaApp {
             if len > list.len && first == list.first {
                 let added = len - list.len;
                 let now = Instant::now();
-                for r in &rows[list.len.saturating_sub(1)..] {
+                // Only the rows after the ones already there: the one that was last stays as it is
+                // (a message of yours there would rise and glow a second time).
+                for r in &rows[list.len.min(rows.len())..] {
                     if matches!(r, Row::Msg(_) | Row::Note { .. } | Row::Line(_) | Row::Join(_) | Row::AutoMod(_))
                         && !self.fresh.contains_key(&r.id())
                     {
@@ -946,6 +967,19 @@ impl FuwaApp {
             } else {
                 self.scroller.update(cx, |s, cx| s.reset(len, cx));
             }
+        }
+        // A message you sent that took its pending copy's place is as fresh as that copy was.
+        let landed: Vec<(String, Instant)> = rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Msg(m) if !m.pending && m.nonce != 0 && !self.fresh.contains_key(&m.id) => {
+                    self.fresh.get(&format!("p{}", m.nonce)).map(|at| (m.id.clone(), *at))
+                }
+                _ => None,
+            })
+            .collect();
+        if !landed.is_empty() {
+            Rc::make_mut(&mut self.fresh).extend(landed);
         }
         self.list.target = target;
         self.list.len = len;
@@ -999,6 +1033,9 @@ impl FuwaApp {
             )
             .into_any_element();
         };
+        if channel.r#type == pb::ChannelType::Board as i32 {
+            return self.board_view(key, server, &channel, window, cx);
+        }
         let secure = channel.r#type == pb::ChannelType::Secure as i32;
         let header = if secure {
             self.secure_header(key, server, &channel, &p, cx)
@@ -1462,11 +1499,21 @@ impl FuwaApp {
         if let Some(gate) = &gate {
             self.tick_gate(gate, cx);
         }
+        let typing = match self.target() {
+            Some(Target::Channel { key, server, channel }) => {
+                Some((crate::core::typing::Place::channel(&key, &channel, ""), Some(server)))
+            }
+            _ => None,
+        };
+        // Under the pickers, which open over it.
+        let tag = typing.as_ref().map_or(String::new(), |(place, _)| place.room.clone());
+        let typing = self.typing_line(&tag, typing, &p, window, cx);
         div()
             .flex_none()
             .relative()
             .px(px(16.0))
             .pb(px(12.0))
+            .children(typing)
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, None, &p, cx)))
             .when_some(mentions_going, |el, (picker, t)| el.child(self.picker_list(picker, Some(t), &p, cx)))
             .children(commands_list)
@@ -1726,8 +1773,13 @@ pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, window: &mut Wi
         _ => el,
     };
     let el = if is_fresh {
-        motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 12.0)
-            .into_any_element()
+        motion::rise(
+            div().child(el),
+            SharedString::from(format!("rise|{}|{ix}", row.motion_id())),
+            Duration::ZERO,
+            12.0,
+        )
+        .into_any_element()
     } else {
         el
     };

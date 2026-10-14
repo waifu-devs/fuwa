@@ -1,0 +1,9 @@
+{
+  "name": "Русский",
+  "english": "Russian",
+  "dir": "ltr",
+  "plural": "one-few-many-other-slavic",
+  "reviewed": false,
+  "group": " ",
+  "decimal": ","
+}

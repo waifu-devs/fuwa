@@ -80,8 +80,8 @@
   "composer.send": "Enviar",
   "composer.alsoSend": "Enviar también a #{channel}",
   "composer.hintCommand": "{keys} para ejecutar /{command} · {esc} para volver a escribir",
-  "composer.hint": "{send} para enviar · {newLine} para una nueva línea · Puedes usar Markdown",
-  "composer.hintCommands": "{send} para enviar · {newLine} para una nueva línea · Puedes usar Markdown · / para comandos",
+  "composer.hint": "{send} para enviar · {newLine} para una nueva línea · Puedes usar Markdown y $matemáticas$",
+  "composer.hintCommands": "{send} para enviar · {newLine} para una nueva línea · Puedes usar Markdown y $matemáticas$ · / para comandos",
   "composer.slowExempt": "Puedes gestionar los mensajes aquí, así que el modo lento no te frena",
   "composer.slowOthers": "El modo lento está activo para los demás: {duration}",
   "composer.slowCooling": "Modo lento · puedes volver a enviar en {time}",
@@ -292,5 +292,10 @@
   "secure.dialog.resetAbout": "Si el cifrado del canal deja de funcionar para todos, reinícialo. Los mensajes ya leídos se quedan en los dispositivos que los leyeron.",
   "secure.resetAsk": "¿Reiniciar para todos?",
   "secure.reset": "Reiniciar el cifrado",
-  "threads.jumpTooFar": "Ese mensaje es demasiado antiguo para ir a él"
+  "threads.jumpTooFar": "Ese mensaje es demasiado antiguo para ir a él",
+  "typing.one": "{name} está escribiendo",
+  "typing.two": "{first} y {second} están escribiendo",
+  "typing.three": "{first}, {second} y {third} están escribiendo",
+  "typing.several": "Varias personas están escribiendo",
+  "typing.someone": "Alguien"
 }

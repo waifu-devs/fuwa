@@ -11919,6 +11919,93 @@ async fn live_streams_send_whole_messages_only_in_focus() {
     instance.stop().await;
 }
 
+/// Someone typing reaches the live connections with that channel in focus,
+/// once per burst, and never moves a head; nobody hears of typing in a
+/// channel they can't see.
+#[tokio::test]
+async fn typing_reaches_only_who_has_the_channel_open() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    use pb::event::Payload;
+    use pb::open_response::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let mut live = pb::live_service_client::LiveServiceClient::new(instance.channel().await);
+    let (ann, ann_user, _) = sign_up(&mut c, "ann").await;
+    let (bo, _, _) = sign_up(&mut c, "bo").await;
+    let server = create_server(&mut c, &ann, "Games", true).await;
+    join(&mut c, &bo, &server.id).await;
+    let a = new_channel(&mut c, &ann, &server.id, "a", pb::ChannelType::Text).await;
+    let b = new_channel(&mut c, &ann, &server.id, "b", pb::ChannelType::Text).await;
+    let staff = new_channel(&mut c, &ann, &server.id, "staff", pb::ChannelType::Text).await;
+    let quiet = new_channel(&mut c, &ann, &server.id, "quiet", pb::ChannelType::Text).await;
+    set_permissions(&mut c, &ann, &server.id, &staff.id, vec![overwrite(&server.id, T::Role, &[], &[P::ViewChannels])])
+        .await
+        .unwrap();
+    set_permissions(&mut c, &ann, &server.id, &quiet.id, vec![overwrite(&server.id, T::Role, &[], &[P::SendMessages])])
+        .await
+        .unwrap();
+    let typing = |token: &str, channel: &str, thread: &str| {
+        let mut messages = c.messages.clone();
+        let req = pb::SendTypingRequest {
+            server_id: server.id.clone(),
+            channel_id: channel.to_string(),
+            thread_id: thread.to_string(),
+        };
+        let token = token.to_string();
+        async move { messages.send_typing(authed(&token, req)).await.map(|_| ()) }
+    };
+
+    let open = pb::OpenRequest {
+        servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+        focus: Some(pb::Focus { channel_ids: vec![a.id.clone()], ..Default::default() }),
+        ..Default::default()
+    };
+    let mut stream = live.open(authed(&bo, open)).await.unwrap().into_inner();
+    assert!(matches!(next_live(&mut stream).await, Item::ConnectionId(_)));
+    assert!(matches!(next_live(&mut stream).await, Item::Events(r) if r.ready.is_some()));
+
+    // Bo has a open: typing in b (out of focus) and staff (hidden from bo)
+    // never reaches bo, and the second signal in a is folded into the first.
+    // A thread is a place of its own.
+    typing(&ann, &b.id, "").await.unwrap();
+    typing(&ann, &staff.id, "").await.unwrap();
+    typing(&ann, &a.id, "").await.unwrap();
+    typing(&ann, &a.id, "").await.unwrap();
+    typing(&ann, &a.id, "01THREAD").await.unwrap();
+    let mut seen = Vec::new();
+    while let Ok(item) = tokio::time::timeout(Duration::from_secs(3), next_live(&mut stream)).await {
+        match item {
+            Item::Events(r) => {
+                let Some(event) = r.event else { continue };
+                let Some(Payload::TypingStarted(t)) = event.payload else { continue };
+                assert_eq!(event.sequence, 0, "typing isn't in the log");
+                assert_eq!((t.user_id.as_str(), event.actor_id.as_str()), (ann_user.id.as_str(), ann_user.id.as_str()));
+                seen.push(format!("{}/{}", t.channel_id, t.thread_id));
+            }
+            Item::Heads(heads) => panic!("typing moved heads: {heads:?}"),
+            _ => {}
+        }
+    }
+    assert_eq!(seen, [format!("{}/", a.id), format!("{}/01THREAD", a.id)]);
+
+    // Typing takes Send Messages, a channel they can see, and a thread named like an id.
+    assert_eq!(typing(&bo, &quiet.id, "").await.unwrap_err().code(), Code::PermissionDenied);
+    assert!(typing(&bo, &staff.id, "").await.is_err());
+    assert_eq!(typing(&bo, &a.id, "not/an id").await.unwrap_err().code(), Code::InvalidArgument);
+    // Nothing of it was stored.
+    let events = c
+        .events
+        .list_events(authed(&bo, pb::ListEventsRequest { server_id: server.id.clone(), after_sequence: 0, limit: 500 }))
+        .await
+        .unwrap()
+        .into_inner()
+        .events;
+    assert!(!events.iter().any(|e| matches!(e.payload, Some(Payload::TypingStarted(_)))));
+    instance.stop().await;
+}
+
 /// On a live stream, presence in a large server comes only for the people in
 /// focus; smaller servers' members come as always.
 #[tokio::test]

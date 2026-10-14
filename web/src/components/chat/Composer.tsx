@@ -11,6 +11,8 @@ import { useAccess } from "@/fuwa/hooks";
 import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/chat/ComposerFiles";
 import { addFiles, takeFiles, useStaged, type Staged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
+import { sentFrom, typed } from "@/fuwa/typing";
+import { TypingLine, useServerNames } from "@/components/chat/TypingLine";
 import { accountKey } from "@/fuwa/saved";
 import { draftKey as toDraftKey, getDraft, setDraft } from "@/lib/drafts";
 import { MentionPicker, useMentionPicker, type MentionPickerState } from "@/components/chat/MentionPicker";
@@ -178,6 +180,8 @@ export function Composer({
   const catalog = useCatalog(instanceKey, serverId, channel);
   const staged = useStaged(channelId);
   const where = { instanceKey, serverId, channelId };
+  const typing = { serverId, channelId, threadId: thread?.id };
+  const nameOf = useServerNames(instanceKey, serverId);
 
   const { insert, replaceSelection } = useCaretEdit(box, text, setText);
 
@@ -219,6 +223,7 @@ export function Composer({
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+      <TypingLine instanceKey={instanceKey} target={typing} nameOf={nameOf} />
       <AnimatePresence mode="popLayout" initial={false}>
         {blocked ?? (
           <motion.div
@@ -242,7 +247,11 @@ export function Composer({
           data-composer
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            // Only typing says so, never a draft coming back.
+            if (e.target.value) typed(instanceKey, typing);
+          }}
           onSelect={picker.onSelect}
           onKeyDown={(e) => {
             menu.onKeyDown(e);
@@ -442,6 +451,7 @@ function useSender({
     if (cooling || uploading || brokenFile) return shake();
     const files = takeFiles(channelId);
     setText("");
+    sentFrom(instanceKey, { serverId, channelId, threadId: thread?.id });
     void plane.start({
       x: [0, 28, -18, 0],
       y: [0, -14, 8, 0],

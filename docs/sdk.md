@@ -196,6 +196,27 @@ agent.on("reactionUpdated", (payload) => {
   `reactionUpdated` and `reactionsCleared` events say what changes (`me` is
   never set in events: compare `userId`).
 
+### Typing
+
+```ts
+agent.command("ask", (ctx) => ctx.typingWhile(async () => ctx.reply(await think(ctx.rest))));
+agent.on("typingStarted", (payload) => {
+  if (payload.userId !== agent.me.id) console.log(payload.userId, "is typing in", payload.channelId);
+});
+```
+
+- `agent.typing(serverId, channelId, threadId?)` shows the agent as typing
+  to the people who have the channel (or the thread) open, for 10 seconds
+  or until its next message there ([docs/typing.md](typing.md)).
+  `agent.typingWhile(serverId, channelId, work)` keeps it up while `work`
+  runs and resolves with its result; `ctx.typing()` and
+  `ctx.typingWhile(work)` do the same where `ctx.reply` posts. A typing
+  signal that fails never fails the work. Needs Send Messages there, and an
+  instance with the `typing` feature.
+- Others typing come as `typingStarted` events (the agent's own too), with
+  `channelId`, `threadId` (empty in the channel itself) and `userId`. They
+  aren't stored: none come while catching up. Endpoints don't get them.
+
 ### Reports and Mod View
 
 `agent.report(message, ModReportReason.SPAM, "note")` reports a message to

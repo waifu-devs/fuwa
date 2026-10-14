@@ -199,6 +199,11 @@ export type InstanceState = {
   /** Per channel, only for channels someone opened; a thread's replies under `threadKey` of the message it's under. */
   messages: Record<string, ChannelMessages>;
   pending: Record<string, PendingMessage[]>;
+  /**
+   * Messages of yours the server took, by id: the pending message each took
+   * the place of, so the list carries on its rise rather than starting over.
+   */
+  landed: Record<string, Landed>;
   /** Per channel: messages from others that arrived while it wasn't open. */
   unread: Record<string, number>;
   /** The messages threads opened here are under, by id, with their summaries. */
@@ -287,6 +292,7 @@ export function emptyInstance(key: string, url: string, account = ""): InstanceS
     users: {},
     messages: {},
     pending: {},
+    landed: {},
     unread: {},
     threadParents: {},
     followed: {},
@@ -378,6 +384,30 @@ export function upsertMessage(items: Message[], message: Message): Message[] {
     return items.map((m, i) => (i === at ? keepMyVote(m, next) : m));
   }
   return [...items.slice(0, at), message, ...items.slice(at)];
+}
+
+/** Which pending message a message of yours took the place of, and when that one showed up. */
+export type Landed = { nonce: string; createdAt: number };
+
+/** How many sent messages `landed` remembers. */
+const LANDED = 32;
+
+/**
+ * A message you sent made it: its pending copy at `at` (a channel, or a
+ * thread's key) goes, and the message remembers which one it was.
+ */
+export function land(i: InstanceState, at: string, nonce: string, messageId: string): InstanceState {
+  const list = i.pending[at] ?? [];
+  const was = list.find((p) => p.nonce === nonce);
+  const pending = was ? { ...i.pending, [at]: list.filter((p) => p !== was) } : i.pending;
+  if (!was || i.landed[messageId]) return pending === i.pending ? i : { ...i, pending };
+  const kept = Object.entries(i.landed).slice(-(LANDED - 1));
+  return { ...i, pending, landed: { ...Object.fromEntries(kept), [messageId]: { nonce, createdAt: was.createdAt } } };
+}
+
+/** The pending message of yours at `at` that `message` is the server's copy of: the first still sending with the same words and files. */
+function pendingFor(i: InstanceState, at: string, message: Message): PendingMessage | undefined {
+  return i.pending[at]?.find((p) => !p.failed && p.content === message.content && (p.files?.length ?? 0) === message.attachments.length);
 }
 
 /**
@@ -590,6 +620,12 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       const loaded = i.messages[message.channelId];
       const users = withSharedAuthors(i.users, [message]);
       let next = users === i.users ? i : { ...i, users };
+      if (p.case === "messageCreated" && message.authorId === i.me?.id) {
+        // Heard of before the send itself came back: it takes its pending copy's place now.
+        const at = message.threadId ? threadKey(message.threadId) : message.channelId;
+        const sent = pendingFor(next, at, message);
+        if (sent) next = land(next, at, sent.nonce, message.id);
+      }
       if (message.threadId) {
         const key = threadKey(message.threadId);
         const replies = next.messages[key];

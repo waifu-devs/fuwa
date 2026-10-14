@@ -351,25 +351,27 @@ function Reveal({
         {shown && (
           <div className="flex flex-col gap-4">
             <DialogHeader title={t("chattools.economy.gacha.revealTitle", { banner: banner.name })} description={t("chattools.economy.gacha.revealAbout", { count: shown.results.length })} />
-            {art && (
-              // The pack shakes, bursts, and makes way for what was in it.
-              <motion.img
-                key={shown.id}
-                src={art}
-                alt=""
-                aria-hidden
-                draggable={false}
-                initial={{ scale: 0.9, rotate: 0, opacity: 1, height: 112 }}
-                animate={{ rotate: [0, -10, 10, -8, 8, 0], scale: [0.9, 1, 1, 1.15, 1.3, 0], opacity: [1, 1, 1, 1, 0.8, 0], height: [112, 112, 112, 112, 112, 0] }}
-                transition={{ duration: 0.9, ease: "easeIn" }}
-                className="mx-auto w-28 object-contain"
-              />
-            )}
-            <ul className={cn("grid gap-2", shown.results.length > 1 ? "grid-cols-2 sm:grid-cols-5" : "mx-auto w-48 grid-cols-1")}>
-              {shown.results.map((r, n) => (
-                <Drop key={`${shown.id}-${n}`} instanceKey={instanceKey} result={r} index={n} after={art ? 0.75 : 0} banner={banner} currencies={currencies} name={r.listingId ? r.prizeName || name(r.listingId) : r.prizeName} roles={roles} items={items} />
-              ))}
-            </ul>
+            <div className="relative">
+              {art && (
+                // The pack shakes and bursts over the cards, which then flip in.
+                <motion.img
+                  key={shown.id}
+                  src={art}
+                  alt=""
+                  aria-hidden
+                  draggable={false}
+                  initial={{ scale: 0.9, rotate: 0, opacity: 1 }}
+                  animate={{ rotate: [0, -10, 10, -8, 8, 0], scale: [0.9, 1, 1, 1.15, 1.4, 1.8], opacity: [1, 1, 1, 1, 0.7, 0] }}
+                  transition={{ duration: 0.9, ease: "easeIn" }}
+                  className="pointer-events-none absolute inset-x-0 top-1/2 z-10 mx-auto h-36 max-h-full -translate-y-1/2 object-contain"
+                />
+              )}
+              <ul className={cn("grid gap-2", shown.results.length > 1 ? "grid-cols-2 sm:grid-cols-5" : "mx-auto w-48 grid-cols-1")}>
+                {shown.results.map((r, n) => (
+                  <Drop key={`${shown.id}-${n}`} instanceKey={instanceKey} result={r} index={n} after={art ? 0.75 : 0} banner={banner} currencies={currencies} name={r.listingId ? r.prizeName || name(r.listingId) : r.prizeName} roles={roles} items={items} />
+                ))}
+              </ul>
+            </div>
             <div className="flex justify-end gap-2">
               {again && (
                 <Button type="button" variant="outline" className="rounded-xl" onClick={again}>

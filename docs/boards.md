@@ -142,14 +142,22 @@ archived list), `BoardCard`, `CardPanel` (fields, the body shown with
 `MessageList` and `Composer` on the card's thread) and
 `BoardSettingsDialog` (columns and labels).
 
-Desktop (to do): `core/board.rs` mirrors `lib/board.ts` and
-`fuwa/board.ts`; `ui/board.rs` draws it as a cached view building only the
-cards in sight, each column a `widgets::inner_scroll`, the card panel and
-menus `.occlude()`d. Today it knows the permission and the channel's icon.
+Desktop: `core/board.rs` mirrors `lib/board.ts` and `fuwa/board.ts` (the
+same `between`, events applied to the boards open in `InstanceState`, and
+the calls, a move or edit shown at once and put back if refused);
+`ui/board.rs` draws the board where the message list would be, each column
+a `widgets::inner_scroll`, cards dragged with GPUI's drag and drop (the
+upper or lower half of a card says above or below it) and moved, archived
+or deleted from their right-click menu. The card panel's comments are the
+thread panel's rows and reply box on the card's thread (`threads.rs`), and
+its description is edited with the composer's files (`attachments.rs`),
+spoiler marks included. Column, people, label and filter pickers are
+context menus (`MenuOf::Board`). Board settings (columns and labels) are
+web only for now.
 
 ## Later
 
-Desktop; a body editor with the composer's @ and emoji pickers; search over
+Board settings on desktop; a body editor with the composer's @ and emoji pickers; search over
 titles; the Smart filter on edits; assignment notifications; right-click
 menus on cards (`docs/context-menus.md`); archiving after some days in a
 done column; webhooks that make cards; templates, checklists, a "due soon"

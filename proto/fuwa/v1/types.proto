@@ -1486,14 +1486,31 @@ message Event {
     CardUpdated card_updated = 51;
     // A card was deleted, with its body (MessageDeleted) and comments.
     CardDeleted card_deleted = 52;
+    // Not stored either: someone is typing (MessageService.SendTyping).
+    // Only to connections with the channel in focus, or that asked for
+    // every message; never replayed.
+    TypingStarted typing_started = 53;
     // The server's gacha banners changed (docs/economy.md): all of them, as
     // they are now.
-    GachaBannersUpdated gacha_banners_updated = 53;
+    GachaBannersUpdated gacha_banners_updated = 54;
     // Someone pulled on a banner. Only they and members with
     // MANAGE_ECONOMY get it, so agents can hand out what a custom prize
     // promises.
-    GachaPulled gacha_pulled = 54;
+    GachaPulled gacha_pulled = 55;
   }
+}
+
+// Someone started typing in a channel, or in a thread's reply box, or is
+// still typing. Apps show them as typing until a message from them arrives
+// there or 10 seconds pass without another one of these. It says nothing of
+// what they type.
+message TypingStarted {
+  string channel_id = 1;
+  // The thread's id (its parent message's) when they're typing a reply in
+  // it; empty in the channel itself.
+  string thread_id = 2;
+  // Who's typing, the same as the event's `actor_id`.
+  string user_id = 3;
 }
 
 // Someone joined a voice channel, moved to another, or muted or deafened.

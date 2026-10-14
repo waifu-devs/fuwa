@@ -397,6 +397,7 @@ function SecureComposer({
       dropTo={channel.name}
       locked={canSend || broken ? "" : t("chat.secure.noPermission")}
       action={broken ? reset : undefined}
+      typing={{ serverId, channelId: id }}
     />
   );
 }

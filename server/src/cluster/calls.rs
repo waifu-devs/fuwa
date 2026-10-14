@@ -421,6 +421,8 @@ impl App {
         }
         let give_up = crate::api::ENDPOINT_GIVE_UP_AFTER.as_millis() as i64;
         let disabled = self.node()?.report_agent_delivery(agent_id, epoch, error, give_up).await?;
+        // Whether it works decides whether the agent shows online.
+        self.endpoint_reports.notify_one();
         if disabled && !error.is_empty() {
             self.agent_endpoint_changed(agent_id);
         }

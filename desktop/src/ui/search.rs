@@ -1057,7 +1057,7 @@ impl FuwaApp {
             hits_as_markdown(&crate::ui::mentions::mention_links(
                 &crate::ui::timestamps::timestamp_nodes(&crate::ui::text::hard_breaks(
                     &crate::ui::spoilers::spoiler_nodes(
-                        &crate::ui::text::images_as_links(&marked),
+                        &crate::ui::text::images_as_links(&crate::core::math::mark(&marked)),
                         &format!("search-{}", message.id),
                     ),
                 )),
@@ -1317,7 +1317,7 @@ fn hits_as_markdown(text: &str) -> String {
 
 /// Chat's Markdown plugins and the search matches.
 fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
-    crate::ui::emoji::markdown_extensions().plugin(HitPlugin).parser_revision(4)
+    crate::ui::emoji::markdown_extensions().plugin(HitPlugin).parser_revision(5)
 }
 
 /// A match in a result: `mark.search-hit`, the primary at 26% behind the text as it was.

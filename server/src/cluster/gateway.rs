@@ -656,12 +656,38 @@ impl Gateway {
         }
     }
 
+    fn presence_client(&self) -> pb::presence_service_client::PresenceServiceClient<Keyed> {
+        let channel = tonic::service::interceptor::InterceptedService::new(
+            self.directory_channel.clone(),
+            WithKey(self.key.clone()),
+        );
+        pb::presence_service_client::PresenceServiceClient::new(channel)
+    }
+
     fn live_client(&self) -> pb::live_service_client::LiveServiceClient<Keyed> {
         let channel = tonic::service::interceptor::InterceptedService::new(
             self.directory_channel.clone(),
             WithKey(self.key.clone()),
         );
         pb::live_service_client::LiveServiceClient::new(channel).max_decoding_message_size(MAX_EVENT)
+    }
+}
+
+/// Keeps an agent online where presence is kept (the directory) while its
+/// stream is open here, by renewing a lease as an app would, until `stop`.
+/// Once it stops, the lease runs out by itself.
+async fn keep_agent_online(gateway: Arc<Gateway>, metadata: MetadataMap, stop: CancellationToken) {
+    let mut every = tokio::time::interval(crate::presence::RENEW);
+    every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => return,
+            _ = every.tick() => {
+                let update = pb::UpdatePresenceRequest { app: "agent".into(), ..Default::default() };
+                // One missed is made up at the next tick, well inside the lease.
+                let _ = gateway.presence_client().update_presence(forward_metadata(&metadata, update)).await;
+            }
+        }
     }
 }
 
@@ -919,7 +945,8 @@ impl EventService for Events {
         if cursors.len() > MAX_SERVERS || (cursors.is_empty() && !follow_new) {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
-        let account_id = ride_out(gateway.config.cluster.ride_out, || gateway.caller(&metadata)).await?;
+        let account = ride_out(gateway.config.cluster.ride_out, || gateway.caller_account(&metadata)).await?;
+        let account_id = account.id;
         for cursor in &mut cursors {
             cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
@@ -938,8 +965,14 @@ impl EventService for Events {
 
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
         let shutdown = gateway.shutdown();
+        // An agent with a stream open is online, for as long as it's open.
+        let online = shutdown.child_token();
+        if account.kind == pb::AccountKind::Agent as i32 {
+            tokio::spawn(keep_agent_online(gateway.clone(), metadata.clone(), online.clone()));
+        }
         tokio::spawn(async move {
             let _ticket = ticket;
+            let _online = online.drop_guard();
             for event in gone {
                 if tx.send(Ok(event)).await.is_err() {
                     return;

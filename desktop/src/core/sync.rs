@@ -25,6 +25,7 @@ use crate::core::notifications;
 use crate::core::reports;
 use crate::core::store::{self, Connection, InstanceState, Outcome};
 use crate::core::threads;
+use crate::core::typing;
 use crate::core::{Area, Core, Notice};
 use crate::pb;
 use crate::rpc;
@@ -639,6 +640,23 @@ fn take_events(
 fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex<Follow>>) {
     use pb::event::Payload;
     let sid = event.server_id.clone();
+    // Someone typing: sequence 0, never replayed, so it moves no cursor, waits
+    // for no snapshot and is nothing unread; it lives outside the store.
+    match &event.payload {
+        Some(Payload::TypingStarted(t)) => {
+            core.shared.typing_started(typing::Place::channel(key, &t.channel_id, &t.thread_id), &t.user_id);
+            return;
+        }
+        // A message from someone typing ends their line there.
+        Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) => {
+            core.shared.typing_stopped(&typing::Place::channel(key, &m.channel_id, &m.thread_id), &m.author_id);
+        }
+        Some(Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(r) })) => {
+            // Sealed: which thread it's in can't be told, so it ends their line anywhere in the channel.
+            core.shared.typing_stopped_in(key, &r.channel_id, &r.sender_id);
+        }
+        _ => {}
+    }
     {
         let mut s = state.lock();
         if event.sequence > 0 {

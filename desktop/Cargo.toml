@@ -60,6 +60,13 @@ open = "5"
 parking_lot = "0.12"
 prost = "0.14"
 prost-types = "0.14"
+# Formulas in messages (ui/math.rs): RaTeX, KaTeX in Rust with KaTeX's fonts
+# built in, laid out and painted on the CPU; png reads what it paints.
+png = "0.17"
+ratex-layout = "0.1.14"
+ratex-parser = "0.1.14"
+ratex-render = { version = "0.1.14", features = ["embed-fonts"] }
+ratex-types = "0.1.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ring = "0.17"

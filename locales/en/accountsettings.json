@@ -352,6 +352,8 @@
   "privacy.activityHint": "Games and apps the desktop app sees, shown to people who share a server with you. Nothing is kept: it's gone when you stop.",
   "privacy.activityOff": "{instance} doesn't show what people are doing. Your status still shows.",
   "privacy.saveFailed": "Couldn't save that: {error}",
+  "privacy.typing": "Show when I'm typing",
+  "privacy.typingHint": "Others see a typing line while you write a message. Turn it off and nobody does; you still see theirs.",
   "privacy.shareHere": "Share my activity here",
   "privacy.shareIn": "Share my activity in {server}",
   "signIn.yours": "How you sign in",

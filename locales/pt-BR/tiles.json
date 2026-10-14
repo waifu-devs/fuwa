@@ -1,0 +1,61 @@
+{
+  "strip.label": "Acontecendo agora",
+  "strip.options": "Opções do bloco",
+  "strip.hide": "Ocultar este",
+  "strip.quiet": "Nenhum bloco ao vivo neste servidor",
+  "strip.off": "Desativar blocos ao vivo",
+  "strip.remove": "Remover para todos",
+  "strip.removeFailed": "Não foi possível remover o bloco",
+  "menu.show": "Blocos ao vivo",
+  "menu.server": "Blocos para todos aqui",
+  "menu.bigServer": {
+    "one": "Salas de voz começam desativadas em servidores com {count} membro ou mais",
+    "other": "Salas de voz começam desativadas em servidores com {count} membros ou mais"
+  },
+  "menu.everyone": "Todos aqui veem só estes tipos",
+  "menu.reset": "Voltar ao padrão",
+  "menu.failed": "Não foi possível alterar os blocos do servidor",
+  "kind.voice": "Salas de voz",
+  "kind.poll": "Enquetes",
+  "kind.thread": "Tópicos seguidos",
+  "kind.shared": "Canais compartilhados",
+  "kind.app": "De apps",
+  "voice.title": {
+    "one": "{count} pessoa em {channel}",
+    "other": "{count} pessoas em {channel}"
+  },
+  "voice.since": "Conversando desde {time}",
+  "voice.video": "Câmeras ligadas",
+  "voice.screen": "Compartilhando a tela",
+  "voice.join": "Entrar",
+  "poll.title": "Enquete em #{channel}",
+  "poll.closesMinutes": {
+    "one": "Encerra em {count} minuto",
+    "other": "Encerra em {count} minutos"
+  },
+  "poll.closesHours": {
+    "one": "Encerra em {count} hora",
+    "other": "Encerra em {count} horas"
+  },
+  "poll.noEnd": "Aberta até ser encerrada",
+  "poll.voters": {
+    "one": "{count} voto",
+    "other": "{count} votos"
+  },
+  "poll.vote": "Votar",
+  "thread.title": "Um tópico que você segue",
+  "thread.unread": {
+    "one": "{count} resposta nova",
+    "other": "{count} respostas novas"
+  },
+  "thread.open": "Abrir",
+  "shared.title": "Movimentado em #{channel}",
+  "shared.text": {
+    "one": "{count} mensagem nova de {servers} servidores",
+    "other": "{count} mensagens novas de {servers} servidores"
+  },
+  "shared.open": "Ver o que perdeu",
+  "app.by": "De {app}",
+  "app.live": "Ao vivo",
+  "app.open": "Abrir"
+}

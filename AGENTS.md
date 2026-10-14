@@ -95,6 +95,12 @@
     150 seconds), people's saved choices (node.db's `presence_settings`) and
     the live streams of people who share a server (`Index::neighbours`),
     at most 5 changes per 20 seconds each, the rest merged by `tick`.
+    Agents are also held online (`Presence::hold`, an app that never lapses)
+    while an event stream of theirs is open (`Api::agent_online` in `events`;
+    a split instance's gateway renews a lease on the directory instead,
+    `keep_agent_online`) and while their endpoint works (`spawn_endpoint_presence`
+    in `app.rs`, from node.db's `working_agent_endpoints`, looked at again
+    when an endpoint changes or a delivery is reported).
     `api/presence.rs` is `PresenceService`; joins call `Presence::joined`
     where the index learns of them. Activities are user content: checked
     and capped in `check_activities`, pictures through `picture_link`, and
@@ -105,6 +111,19 @@
     is `desktop/src/core/presence/people.rs` (the stream, put in at most
     every 400 ms, and idle after 10 minutes without input) and
     `desktop/src/ui/presence.rs`.
+  - `typing.rs`: typing indicators (docs/typing.md). `MessageService.SendTyping`
+    publishes a `TypingStarted` event with sequence 0 (never stored, scoped by
+    channel, only to live connections with the channel in focus or agents
+    asking for everything: `Interest::take` drops it elsewhere, without a
+    head); `DirectMessageService.SendConversationTyping` sends `DmTyping` to
+    the others in a conversation that the typist could write to
+    (`may_message`). `typing::pass` folds signals to one per person and place
+    every 3 seconds, in memory. Nothing typed travels, so secure channels
+    and DMs have it too. Apps send at most every 6 seconds and show someone
+    for 10, unless the person turned off `sendTyping`. Web: `lib/typing.ts`
+    (pure), `fuwa/typing.ts` (its own small store) and
+    `components/chat/TypingLine.tsx`; desktop: `core/typing.rs` and
+    `ui/typing.rs`.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all
@@ -231,7 +250,10 @@
     deleting its body, so `threads::after_delete` calls `boards::forget_card`.
     Events `BoardUpdated`, `CardUpdated`, `CardDeleted`. Web:
     `fuwa/board.ts`, `lib/board.ts`, `hooks/use-card-drag.ts` and
-    `components/board/`.
+    `components/board/`. Desktop: `core/board.rs` (the same `between`,
+    events, and the calls, shown at once) and `ui/board.rs` (the board in
+    place of the message list; a card's comments are drawn by the thread
+    panel's `thread_rows` and `reply_box`).
     Polls (`api/polls.rs`): a message can carry a poll (`Message.poll`),
     kept in the server file's `polls` (question, answers and the tally, which
     every vote rewrites, so votes at once clash and run again and the counts
@@ -995,6 +1017,16 @@
     `components/Spoiler.tsx` until the reader reveals it; `hideSpoilers`
     blanks them in plain-text places (system notifications). Link previews
     skip links inside them. Desktop: the same in its Markdown.
+  - Math: `$inline$`, `$$display$$` and ```math / ```latex blocks in block
+    Markdown. `lib/math.ts` decides on the source which dollars are math
+    (prices like "$5 and $10" stay text) and makes each formula a code span
+    starting with a private-use mark, so the other plugins leave it alone;
+    `remarkMath` turns those into elements `components/Math.tsx` draws with
+    KaTeX (`trust` off, sizes and expansions capped, its own chunk and fonts,
+    loaded once a formula is on screen). Formulas that define commands
+    (`\def`, `\newcommand`...) aren't drawn. Desktop: `core/math.rs` is the
+    same rules, case for case, and `ui/math.rs` paints formulas with RaTeX
+    (KaTeX in Rust, its fonts built in) into pictures in the line.
   - Masked links (a Markdown link whose words aren't its address, and an
     app embed's title link): `lib/links.ts` marks them (`remarkMaskedLinks`)
     and `components/LeavingDialog.tsx` asks before opening one, showing the

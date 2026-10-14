@@ -342,6 +342,8 @@ pub struct FuwaApp {
     /// Searching the server on screen: the header's field and the results beside the chat.
     pub search: crate::ui::search::Search,
     pub threads: crate::ui::threads::Threads,
+    /// The board on screen: the card open, filters, what's being typed (`ui/board.rs`).
+    pub board: crate::ui::board::BoardUi,
     pub friends: crate::ui::friends::Friends,
     /// Profile cards and the moderation dialog.
     pub people: crate::ui::profile_card::People,
@@ -444,6 +446,7 @@ impl FuwaApp {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let search = crate::ui::search::Search::new(window, cx);
         let (threads, thread_subs) = crate::ui::threads::Threads::new(window, cx);
+        let (board, board_subs) = crate::ui::board::BoardUi::new(window, cx);
         let (friends, friend_subs) = crate::ui::friends::Friends::new(window, cx);
         let people = crate::ui::profile_card::People::new(window, cx);
         let report = crate::ui::report::Reporting::new(window, cx);
@@ -464,6 +467,7 @@ impl FuwaApp {
                     InputEvent::Change => {
                         this.update_picker(cx);
                         this.update_commands(cx);
+                        this.typed_in_composer(cx);
                         cx.notify()
                     }
                     InputEvent::Focus | InputEvent::Blur => cx.notify(),
@@ -524,6 +528,7 @@ impl FuwaApp {
         // and Escape, Up to edit your last message, Escape to stop editing.
         let weak = cx.entity().downgrade();
         subscriptions.extend(thread_subs);
+        subscriptions.extend(board_subs);
         subscriptions.extend(friend_subs);
         subscriptions.extend(home_subs);
         subscriptions.extend(gif_subs);
@@ -724,6 +729,7 @@ impl FuwaApp {
             composing: Default::default(),
             search,
             threads,
+            board,
             friends,
             people,
             report,
@@ -1048,8 +1054,11 @@ impl FuwaApp {
                         | crate::pb::ChannelType::Secure)
                 )
             };
-            last.and_then(|id| channels.iter().filter(text).find(|c| &c.id == id))
+            // A board opens where the messages would be (`ui/board.rs`), but isn't where a server starts.
+            let board = |c: &&crate::pb::Channel| c.r#type == crate::pb::ChannelType::Board as i32;
+            last.and_then(|id| channels.iter().filter(|c| text(c) || board(c)).find(|c| &c.id == id))
                 .or_else(|| channels.iter().find(text))
+                .or_else(|| channels.iter().find(board))
                 .map(|c| c.id.clone())
         })
     }
@@ -1119,6 +1128,7 @@ impl FuwaApp {
             self.menu = None;
         }
         self.threads_after_move(cx);
+        self.board_after_move(cx);
         let focus = target.as_ref().map(|t| match t {
             Target::Channel { key, channel, .. } | Target::Secure { key, channel, .. } => Focus {
                 instance: key.clone(),
@@ -1182,7 +1192,13 @@ impl FuwaApp {
                     });
                 }
                 let id = format!("{key}|{channel}");
-                if !loaded && self.requested.insert(id.clone()) {
+                // A board reads its cards itself (`ui/board.rs`); its messages are their bodies and comments.
+                let board = self.core.shared.read(|s| {
+                    s.instance(&key)
+                        .and_then(|i| i.channel(&server, &channel))
+                        .is_some_and(|c| c.r#type == crate::pb::ChannelType::Board as i32)
+                });
+                if !loaded && !board && self.requested.insert(id.clone()) {
                     let core = self.core.clone();
                     self.run(
                         cx,

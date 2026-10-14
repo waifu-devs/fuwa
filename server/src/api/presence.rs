@@ -25,7 +25,7 @@ type WatchStream = Pin<Box<dyn Stream<Item = Result<pb::WatchPresenceResponse, S
 
 impl Api {
     /// Someone's saved settings, if they aren't known to `presence` yet.
-    async fn presence_settings_if_new(&self, account_id: &str) -> Result<Option<pb::PresenceSettings>> {
+    pub(super) async fn presence_settings_if_new(&self, account_id: &str) -> Result<Option<pb::PresenceSettings>> {
         if self.app.presence.knows(account_id) {
             return Ok(None);
         }
@@ -135,6 +135,41 @@ impl Api {
             followed.await;
         });
         Ok(rx)
+    }
+}
+
+/// Keeps an agent online while one of its event streams is open, where
+/// presence is kept with the stream (a single process; a split instance's
+/// gateway renews a lease for it instead). Let go when dropped.
+pub(super) struct AgentOnline {
+    app: std::sync::Arc<crate::app::App>,
+    account_id: String,
+    key: String,
+}
+
+impl Drop for AgentOnline {
+    fn drop(&mut self) {
+        self.app.presence.release(&self.app.index, &self.account_id, &self.key);
+    }
+}
+
+impl Api {
+    /// Holds `account` online for as long as what this gives back is kept, if
+    /// it's an agent and presence is kept here.
+    pub(super) async fn agent_online(&self, account: &crate::node::Account) -> Result<Option<AgentOnline>> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        if account.kind != pb::AccountKind::Agent || self.app.node().is_err() {
+            return Ok(None);
+        }
+        let key = format!("stream:{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let (index, presence) = (&self.app.index, &self.app.presence);
+        let settings = self.presence_settings_if_new(&account.id).await?;
+        // Forgotten between the check and the hold: load them for real.
+        if !presence.hold(index, &account.id, &key, settings) {
+            let saved = self.app.node()?.presence_settings(&account.id).await?;
+            presence.hold(index, &account.id, &key, Some(saved));
+        }
+        Ok(Some(AgentOnline { app: self.app.clone(), account_id: account.id.clone(), key }))
     }
 }
 

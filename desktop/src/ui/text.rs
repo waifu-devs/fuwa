@@ -262,17 +262,21 @@ pub fn open_link(url: &str, cx: &mut gpui_kit::App) {
     }
 }
 
-/// Markdown whose links open only when they're safe, for anything people wrote.
+/// Markdown whose links open only when they're safe, for anything people
+/// wrote, with its formulas drawn (`ui/math.rs`).
 pub fn markdown(
     id: impl Into<gpui_kit::ElementId>,
     source: impl Into<gpui_kit::SharedString>,
 ) -> gpui_kit::component::text::TextView {
     let source: gpui_kit::SharedString = source.into();
+    let source = if source.contains('$') { crate::core::math::mark(&source).into() } else { source };
     let written = source.clone();
-    gpui_kit::component::text::TextView::markdown(id, source).on_link_click(move |url, _, window, cx| {
-        let masked = crate::core::links::masked_in(&written, url);
-        open_written(url, masked, window, cx)
-    })
+    gpui_kit::component::text::TextView::markdown(id, source)
+        .markdown_extensions(crate::ui::math::extensions())
+        .on_link_click(move |url, _, window, cx| {
+            let masked = crate::core::links::masked_in(&written, url);
+            open_written(url, masked, window, cx)
+        })
 }
 
 /// Markdown whose every link counts as masked: an app's card title, whose

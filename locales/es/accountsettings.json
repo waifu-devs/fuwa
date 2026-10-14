@@ -305,6 +305,8 @@
   "privacy.activityHint": "Los juegos y apps que ve la app de escritorio, mostrados a quienes comparten un servidor contigo. No se guarda nada: desaparece cuando dejas de usarlos.",
   "privacy.activityOff": "{instance} no muestra lo que está haciendo la gente. Tu estado se sigue mostrando.",
   "privacy.saveFailed": "No se pudo guardar: {error}",
+  "privacy.typing": "Mostrar cuando estoy escribiendo",
+  "privacy.typingHint": "Los demás ven una línea de escritura mientras escribes un mensaje. Desactívalo y nadie la ve; tú sigues viendo la suya.",
   "privacy.shareHere": "Compartir mi actividad aquí",
   "privacy.shareIn": "Compartir mi actividad en {server}",
   "signIn.yours": "Cómo inicias sesión",

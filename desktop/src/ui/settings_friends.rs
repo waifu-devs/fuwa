@@ -295,6 +295,48 @@ impl SettingsView {
         Some(self.found_mark("activity-sharing", div().child(card), p))
     }
 
+    /// "Show when I'm typing", beside "Show what I'm doing": whether others
+    /// see a typing line while you write (`core::typing`). An app setting,
+    /// synced as the web's `sendTyping`, so it holds on every instance;
+    /// theirs still show to you either way.
+    pub(crate) fn typing_section(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.core.prefs_now().send_typing;
+        let card = div().rounded(radius_3xl()).border_1().border_color(p.border).bg(p.card).p(px(20.0)).child(
+            div()
+                .flex()
+                .items_start()
+                .gap(px(16.0))
+                .child(
+                    div()
+                        .size(px(48.0))
+                        .flex_none()
+                        .rounded(radius_2xl())
+                        .bg(alpha(p.primary, 0.15))
+                        .text_color(p.primary)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon("keyboard").size(px(24.0))),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().font_weight(FontWeight::EXTRA_BOLD).child(t("accountsettings.privacy.typing")))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(p.muted_foreground)
+                                .child(t("accountsettings.privacy.typingHint")),
+                        ),
+                )
+                .child(div().mt(px(4.0)).child(switch("send-typing", on, false, p, window, cx, |this, on, cx| {
+                    this.set(cx, |pr| pr.send_typing = on)
+                }))),
+        );
+        self.found_mark("typing-indicator", div().child(card), p)
+    }
+
     /// Turns sharing on or off, everywhere or in one server. The page shows it
     /// at once, and reads the instance's word again if saving fails.
     pub(crate) fn save_presence(&mut self, key: &str, on: bool, server: Option<String>, cx: &mut Context<Self>) {

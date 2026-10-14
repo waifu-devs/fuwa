@@ -1,0 +1,61 @@
+{
+  "strip.label": "In corso ora",
+  "strip.options": "Opzioni del riquadro",
+  "strip.hide": "Nascondi questo",
+  "strip.quiet": "Nessun riquadro live in questo server",
+  "strip.off": "Disattiva i riquadri live",
+  "strip.remove": "Rimuovi per tutti",
+  "strip.removeFailed": "Impossibile rimuovere il riquadro",
+  "menu.show": "Riquadri live",
+  "menu.server": "Riquadri per tutti qui",
+  "menu.bigServer": {
+    "one": "Le stanze vocali sono disattivate di base nei server con {count} membro o più",
+    "other": "Le stanze vocali sono disattivate di base nei server con {count} membri o più"
+  },
+  "menu.everyone": "Tutti qui vedono solo questi tipi",
+  "menu.reset": "Ripristina l'impostazione predefinita",
+  "menu.failed": "Impossibile cambiare i riquadri del server",
+  "kind.voice": "Stanze vocali",
+  "kind.poll": "Sondaggi",
+  "kind.thread": "Thread seguiti",
+  "kind.shared": "Canali condivisi",
+  "kind.app": "Dalle app",
+  "voice.title": {
+    "one": "{count} persona in {channel}",
+    "other": "{count} persone in {channel}"
+  },
+  "voice.since": "In chiamata dalle {time}",
+  "voice.video": "Videocamere accese",
+  "voice.screen": "Condivisione schermo in corso",
+  "voice.join": "Entra",
+  "poll.title": "Sondaggio in #{channel}",
+  "poll.closesMinutes": {
+    "one": "Si chiude tra {count} minuto",
+    "other": "Si chiude tra {count} minuti"
+  },
+  "poll.closesHours": {
+    "one": "Si chiude tra {count} ora",
+    "other": "Si chiude tra {count} ore"
+  },
+  "poll.noEnd": "Aperto finché non viene chiuso",
+  "poll.voters": {
+    "one": "{count} voto",
+    "other": "{count} voti"
+  },
+  "poll.vote": "Vota",
+  "thread.title": "Un thread che segui",
+  "thread.unread": {
+    "one": "{count} nuova risposta",
+    "other": "{count} nuove risposte"
+  },
+  "thread.open": "Apri",
+  "shared.title": "Movimentato in #{channel}",
+  "shared.text": {
+    "one": "{count} nuovo messaggio da {servers} server",
+    "other": "{count} nuovi messaggi da {servers} server"
+  },
+  "shared.open": "Recupera",
+  "app.by": "Da {app}",
+  "app.live": "Live",
+  "app.open": "Apri"
+}

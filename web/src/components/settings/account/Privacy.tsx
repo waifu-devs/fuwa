@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, KeyboardIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { deleteAccount, exportData, getTwoFactor, run } from "@/fuwa/actions";
@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { T, useI18n } from "@/i18n/react";
 import { formatBytes } from "@/lib/format";
+import { setPrefs, usePrefs } from "@/lib/prefs";
 import { Switch } from "@/components/ui/switch";
 import { savePresenceSettings, usePresenceSettings } from "@/fuwa/presence";
 import { engine } from "@/fuwa/sync";
@@ -38,6 +39,7 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
   return (
     <div className="flex flex-col gap-8">
       <ActivitySharing instanceKey={instanceKey} where={where} />
+      <TypingSharing />
       <LayoutGroup>
         <Export instanceKey={instanceKey} where={where} />
 
@@ -332,6 +334,37 @@ function DeleteForm({
  * the games and apps your desktop app picks up, and in which servers. Off
  * until you turn it on; your status dot shows either way.
  */
+/** Whether others see you typing: an app setting, so it's the same on every instance and travels with the others. */
+function TypingSharing() {
+  const { t } = useI18n();
+  const on = usePrefs((p) => p.sendTyping);
+  return (
+    <motion.section
+      data-setting="typing"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...SPRING, delay: 0.03 }}
+      className="rounded-3xl border bg-card p-5"
+    >
+      <div className="flex items-start gap-4">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary">
+          <KeyboardIcon className="size-6" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-extrabold">{t("accountsettings.privacy.typing")}</p>
+          <p className="text-sm text-muted-foreground">{t("accountsettings.privacy.typingHint")}</p>
+        </div>
+        <Switch
+          className="mt-1 shrink-0"
+          checked={on}
+          aria-label={t("accountsettings.privacy.typing")}
+          onCheckedChange={(next) => setPrefs({ sendTyping: next })}
+        />
+      </div>
+    </motion.section>
+  );
+}
+
 function ActivitySharing({ instanceKey, where }: { instanceKey: string; where: string }) {
   const { t } = useI18n();
   const inst = useInstance(instanceKey);

@@ -1,0 +1,9 @@
+{
+  "name": "Deutsch",
+  "english": "German",
+  "dir": "ltr",
+  "plural": "one-other",
+  "reviewed": false,
+  "group": ".",
+  "decimal": ","
+}
