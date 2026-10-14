@@ -96,7 +96,7 @@ fn paint(tex: &str, mode: Mode, size: f32, color: Rgba, scale: f32) -> Option<Pa
     }
     pixels.truncate(info.buffer_size());
     // GPUI's pictures are BGRA.
-    for px in pixels.chunks_exact_mut(4) {
+    for px in pixels.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
     let buffer = image::RgbaImage::from_raw(info.width, info.height, pixels)?;
