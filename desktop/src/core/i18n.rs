@@ -145,7 +145,7 @@ pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
             return code.to_string();
         }
         // Another country's variant beats English: "pt-PT" gets "pt-BR".
-        if let Some(code) = available.iter().find(|c| c.split('-').next().is_some_and(|b| b.eq_ignore_ascii_case(base))) {
+        if let Some(code) = available.iter().find(|c| c.split('-').next() == Some(base)) {
             return code.to_string();
         }
     }
