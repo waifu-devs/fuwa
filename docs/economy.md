@@ -98,6 +98,65 @@ Manager changes send the whole shop as `ShopUpdated`; a purchase sends the
 listing (`ShopListingUpdated`) to everyone, `BalanceUpdated` to the buyer,
 and `PurchaseMade` to the buyer and members with Manage Economy.
 
+## Gacha banners
+
+A server can also give things out by chance. A **gacha banner**
+(`GachaBanner`) is something members pull on for a price in one currency;
+each pull draws one prize. Listings marked **gacha-only**
+(`ShopListing.gacha_only`) can't be bought: apps show them with the banners
+they drop from, and they come only from banners that have them as prizes.
+Apps check the `gacha` feature.
+
+A banner has:
+
+- **A name, description and price**: one pull's price, and optionally a
+  **multi-pull** (2 to 100 pulls at once) with its own price, or the
+  single price times the count.
+- **Rarity tiers**, rarest first (1 to 10): each with an id the banner's
+  maker picks, a name, an optional color and a **rate**, in millionths,
+  the rates adding up to exactly 100%.
+- **Prizes** (1 to 100), each in a tier with a **weight**: a shop listing
+  (a role, a profile item or a custom listing), or an amount of a
+  currency. A prize's chance is its tier's rate shared by weight with the
+  tier's other prizes; the server fills it in (`GachaPrize.chance`) so
+  every app shows members the same numbers.
+- **Pity** (optional): after so many pulls in a row without a prize from
+  the pity tier or a rarer one, the next draw comes only from those tiers.
+- **Duplicates**: when someone draws a role or profile item they already
+  have, `KEEP` gives nothing more, `REFUND` gives an amount of a currency
+  instead, and `SKIP_OWNED` never draws it for them (the other prizes share
+  its chance). Custom listings and currency are never duplicates.
+- **Limits**: how many pulls one member may make (`max_pulls`), and when
+  the banner opens and closes. Only available banners can be pulled on.
+
+A pull (`Pull`) is one write: it checks the price the app showed, pays
+(one ledger entry, `GACHA`), then draws each prize. A draw rolls first for
+the tier, among the tiers that have something that can drop, then for the
+prize in it, among the prizes that can drop: listings that are available
+and in stock, roles that moderate or manage nothing, and not what the
+puller owns when the banner skips owned prizes. What can't drop gives its
+chance to the rest, so stock is always respected; when nothing can drop the
+pull is refused and nothing is paid. The rolls come from the operating
+system's random number generator, without bias, never from a seed.
+
+What's won is handed out like a purchase: a role or profile item is the
+puller's, a custom listing's stock goes down and its `sold` up (agents with
+Manage Economy hand it out, told by `GachaPulled`), and currency prizes and
+refunds are `GACHA` ledger entries above zero. Every pull is kept in the
+server file's `gacha_pulls`, with each draw's tier, prize, outcome, whether
+pity made it, and both rolls with the totals they were drawn below, so
+anyone can check a draw against the rates. Members read their own
+(`ListGachaPulls`); Manage Economy reads everyone's. Each member's pull
+count and pity count are in `gacha_progress`; changing a banner's pity
+starts everyone's pity count again.
+
+Banners go to every member (`ListGachaBanners`, `GachaBannersUpdated`),
+like the shop, with their own progress. Deleting a listing takes it off
+every banner; deleting a currency deletes the banners priced in it and
+the prizes and refunds in it. Deleting a banner keeps its pulls in the log.
+Managing banners takes Manage Economy, and a role prize Manage Roles and a
+rank above the role, as listing it would.
+
 ## Moving currency
 
 - **Transfers** (`Transfer`): a member sends some of a transferable
@@ -145,7 +204,12 @@ Both apps show, where the server has currencies:
   buy (owned ones marked), the person's history, and Send for transferable
   currencies.
 - **Server settings > Economy** (Manage Economy): currencies with their
-  icon, description, transfer switch and earn rules; the shop's listings.
+  icon, description, transfer switch and earn rules; the shop's listings
+  (and whether each is gacha-only); and the gacha banners, with their
+  tiers, prizes, rates, pity and duplicates.
+- **Banners** in the Shop: each open banner with its price, its drop
+  rates (every tier and prize, with its chance), the member's pity count,
+  and Pull buttons that show what dropped.
 - **Server settings > Finances** (Manage Economy): the finance page, with
   the whole ledger.
 - **Give currency** (Grant Currency): on members' profile cards and

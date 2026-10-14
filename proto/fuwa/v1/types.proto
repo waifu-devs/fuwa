@@ -1486,6 +1486,13 @@ message Event {
     CardUpdated card_updated = 51;
     // A card was deleted, with its body (MessageDeleted) and comments.
     CardDeleted card_deleted = 52;
+    // The server's gacha banners changed (docs/economy.md): all of them, as
+    // they are now.
+    GachaBannersUpdated gacha_banners_updated = 53;
+    // Someone pulled on a banner. Only they and members with
+    // MANAGE_ECONOMY get it, so agents can hand out what a custom prize
+    // promises.
+    GachaPulled gacha_pulled = 54;
   }
 }
 
@@ -1985,6 +1992,9 @@ message ShopListing {
   // Members see and buy only listings that are available; managers see all.
   bool available = 12;
   google.protobuf.Timestamp created_at = 13;
+  // Won only from gacha banners that have it as a prize, never bought:
+  // apps show it with the banners it drops from instead of a Buy button.
+  bool gacha_only = 14;
 }
 
 // How much of one currency someone has.
@@ -2012,6 +2022,9 @@ enum LedgerKind {
   LEDGER_KIND_TRANSFER = 3;
   // Spent on `listing_id` (below zero).
   LEDGER_KIND_PURCHASE = 4;
+  // Gacha (`banner_id`): spent on pulls (below zero), or won as a currency
+  // prize or given back for a duplicate (above zero, `note` says which).
+  LEDGER_KIND_GACHA = 5;
 }
 
 // One change to someone's balance.
@@ -2032,6 +2045,8 @@ message LedgerEntry {
   // A grant's reason or a transfer's note, up to 200 characters.
   string note = 12;
   google.protobuf.Timestamp created_at = 13;
+  // GACHA: the banner.
+  string banner_id = 14;
 }
 
 message CurrenciesUpdated {
@@ -2060,6 +2075,166 @@ message WalletsChanged {
 message PurchaseMade {
   LedgerEntry entry = 1;
   ShopListing listing = 2;
+}
+
+// A gacha banner (docs/economy.md): members pay to pull on it, and each
+// pull draws one prize. A pull first draws a tier by its rate, then a prize
+// in that tier by its weight; prizes that can't drop right now (sold out,
+// unavailable, or already owned when the banner skips owned ones) are left
+// out and the rest share their chance.
+message GachaBanner {
+  string id = 1;
+  string server_id = 2;
+  // 1 to 60 characters.
+  string name = 3;
+  // Up to 500 characters.
+  string description = 4;
+  // What a pull costs, 1 to 1,000,000,000,000, in this currency.
+  string currency_id = 5;
+  int64 pull_price = 6;
+  // How many pulls a multi-pull makes at once: 0 for none, or 2 to 100...
+  int32 multi_pull = 7;
+  // ...for this price in all; 0 for `multi_pull` times `pull_price`.
+  int64 multi_pull_price = 8;
+  // The rarity tiers, rarest first: 1 to 10, their rates adding up to
+  // 1,000,000 (100%).
+  repeated GachaTier tiers = 9;
+  // What can drop: 1 to 100, each in one of the tiers. Every tier with a
+  // rate above zero needs at least one.
+  repeated GachaPrize prizes = 10;
+  // Pity: after this many pulls in a row without a prize from
+  // `pity_tier_id` or a rarer tier, the next one is from one of them. 0 for
+  // no pity; at most 10,000.
+  int32 pity_pulls = 11;
+  string pity_tier_id = 12;
+  // What happens when someone draws a role or profile item they have.
+  GachaDuplicates duplicates = 13;
+  // REFUND: what they get back instead, 1 to 1,000,000,000.
+  string refund_currency_id = 14;
+  int64 refund_amount = 15;
+  // The most pulls one member may make on it; 0 for no limit.
+  int32 max_pulls = 16;
+  // When pulls open and close; unset for always.
+  google.protobuf.Timestamp starts_at = 17;
+  google.protobuf.Timestamp ends_at = 18;
+  // Members see and pull only on available banners; managers see all.
+  bool available = 19;
+  // Lower first.
+  int32 position = 20;
+  google.protobuf.Timestamp created_at = 21;
+}
+
+// A banner's rarity tier.
+message GachaTier {
+  // Chosen by whoever makes the banner: 1 to 32 characters, unique in it.
+  // Prizes and pity name tiers by it, and pulls keep it.
+  string id = 1;
+  // 1 to 32 characters ("Legendary").
+  string name = 2;
+  // 0xRRGGBB. Unset lets apps pick one.
+  optional int32 color = 3;
+  // The chance a pull lands in this tier, in millionths: 0 to 1,000,000.
+  int32 rate = 4;
+}
+
+// Something a banner can drop: one of the shop's listings, or an amount of
+// a currency.
+message GachaPrize {
+  // Empty for a new prize; the server makes one.
+  string id = 1;
+  string tier_id = 2;
+  // A listing (a role, a profile item or a custom listing)...
+  string listing_id = 3;
+  // ...or an amount of a currency, 1 to 1,000,000,000.
+  string currency_id = 4;
+  int64 amount = 5;
+  // Its share of its tier, against the other prizes there: 1 to 1,000,000.
+  int32 weight = 6;
+  // Filled in by the server: the chance one pull draws it, in millionths,
+  // when every prize can drop.
+  int32 chance = 7;
+}
+
+enum GachaDuplicates {
+  // Like KEEP.
+  GACHA_DUPLICATES_UNSPECIFIED = 0;
+  // The pull counts and nothing more is given.
+  GACHA_DUPLICATES_KEEP = 1;
+  // They get the banner's refund instead.
+  GACHA_DUPLICATES_REFUND = 2;
+  // Roles and profile items they have never drop for them: the other
+  // prizes share their chance.
+  GACHA_DUPLICATES_SKIP_OWNED = 3;
+}
+
+// One member's pulls on a banner.
+message GachaProgress {
+  string banner_id = 1;
+  // Every pull they made on it.
+  int32 pulls = 2;
+  // Pulls since their last prize from the pity tier or a rarer one.
+  int32 since_pity = 3;
+}
+
+// One pull or multi-pull, kept for good as the banner's audit log.
+message GachaPull {
+  string id = 1;
+  string banner_id = 2;
+  // The banner's name then.
+  string banner_name = 3;
+  string user_id = 4;
+  // What it cost, in which currency, and the ledger entry that paid it.
+  string currency_id = 5;
+  int64 cost = 6;
+  string ledger_id = 7;
+  // One per draw, in order.
+  repeated GachaResult results = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+enum GachaOutcome {
+  GACHA_OUTCOME_UNSPECIFIED = 0;
+  // They got the prize: a role, a profile item, a custom listing (handed
+  // out like a purchase) or currency.
+  GACHA_OUTCOME_WON = 1;
+  // A role or profile item they had already: nothing more given (KEEP).
+  GACHA_OUTCOME_DUPLICATE = 2;
+  // A role or profile item they had already: the banner's refund instead.
+  GACHA_OUTCOME_REFUNDED = 3;
+}
+
+// One draw, with the rolls that made it, so anyone can check it against
+// the rates.
+message GachaResult {
+  string tier_id = 1;
+  // The tier's and prize's names then (a listing's, or "100 Coins").
+  string tier_name = 2;
+  string prize_id = 3;
+  string prize_name = 4;
+  string listing_id = 5;
+  // A currency prize, or the refund for a duplicate.
+  string currency_id = 6;
+  int64 amount = 7;
+  GachaOutcome outcome = 8;
+  // Pity made this draw: only the pity tier and rarer ones could come up.
+  bool guaranteed = 9;
+  // The rolls, drawn by the server: the tier roll below the total of the
+  // rates that could come up, and the prize roll below the total of the
+  // weights that could drop in that tier.
+  int64 tier_roll = 10;
+  int64 tier_total = 11;
+  int64 prize_roll = 12;
+  int64 prize_total = 13;
+}
+
+message GachaBannersUpdated {
+  repeated GachaBanner banners = 1;
+}
+
+message GachaPulled {
+  GachaPull pull = 1;
+  // The puller's progress on the banner after it.
+  GachaProgress progress = 2;
 }
 
 // A board's column (CHANNEL_TYPE_BOARD), in order on the board.

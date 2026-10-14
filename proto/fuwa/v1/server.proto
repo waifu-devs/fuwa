@@ -379,6 +379,10 @@ enum AuditAction {
   // name in role_name); the changes are the currency and the amount, and
   // the reason is the grant's.
   AUDIT_ACTION_CURRENCY_GRANT = 70;
+  // Gacha banners: the target is the banner, and the change names it.
+  AUDIT_ACTION_GACHA_BANNER_CREATE = 71;
+  AUDIT_ACTION_GACHA_BANNER_UPDATE = 72;
+  AUDIT_ACTION_GACHA_BANNER_DELETE = 73;
 }
 
 // One thing someone did with a moderator's or manager's permission.
