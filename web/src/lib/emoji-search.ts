@@ -146,3 +146,56 @@ export function searchCatalog(query: string, catalog: Catalog, groups: StandardG
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
   return ranked.slice(0, limit).map((r) => r.choice);
 }
+
+// ───────────────────────── In encrypted messages ─────────────────────────
+
+/**
+ * A server emoji as an encrypted message carries it (direct messages and
+ * secure channels, `DirectMessageText.emojis`): what drawing it takes. Only
+ * the sender vouches for it, so the instance never checks these.
+ */
+export type CarriedEmoji = Pick<Emoji, "id" | "serverId" | "name" | "url" | "animated">;
+
+/** Most emoji one encrypted message carries, as the protocol says. */
+export const MAX_CARRIED = 50;
+
+const EMOJI_ID = /^[0-9A-Za-z]{10,32}$/;
+const NAME = /^[A-Za-z0-9_]{2,32}$/;
+
+/**
+ * The emoji as kept, if it can be drawn: a well-formed id and name, and a
+ * picture under /media/ on one of `origins` (the conversation's instance),
+ * so nobody's message makes this app load from anywhere else. Else null.
+ */
+export function carriedEmoji(e: CarriedEmoji | undefined, origins: ReadonlySet<string>): CarriedEmoji | null {
+  if (!e || !EMOJI_ID.test(e.id) || !NAME.test(e.name)) return null;
+  let url: URL;
+  try {
+    url = new URL(e.url);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || !origins.has(url.origin) || !url.pathname.startsWith("/media/")) return null;
+  return { id: e.id, serverId: e.serverId, name: e.name, url: url.href, animated: !!e.animated };
+}
+
+/** Of the emoji a text carries, the ones it writes as tokens and that can be drawn, once each and at most 50. */
+export function keptEmojis(list: readonly CarriedEmoji[] | undefined, content: string, origins: ReadonlySet<string>): CarriedEmoji[] {
+  if (!list?.length || !content.includes("<")) return [];
+  const used = new Set([...content.matchAll(EMOJI_TOKEN)].map((m) => m[3]!));
+  const out: CarriedEmoji[] = [];
+  for (const e of list) {
+    if (out.length >= MAX_CARRIED) break;
+    if (!used.has(e.id) || out.some((o) => o.id === e.id)) continue;
+    const kept = carriedEmoji(e, origins);
+    if (kept) out.push(kept);
+  }
+  return out;
+}
+
+/** The emoji to send along with an encrypted text: every server's of yours that it writes as a token, at most 50. */
+export function emojisToCarry(emojis: Record<string, Emoji[]> | undefined, content: string): CarriedEmoji[] {
+  return outsideEmojis(emojis, "", content)
+    .slice(0, MAX_CARRIED)
+    .map((e) => ({ id: e.id, serverId: e.serverId, name: e.name, url: e.url, animated: e.animated }));
+}

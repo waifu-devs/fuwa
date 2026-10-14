@@ -51,8 +51,8 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 | danger | Report message (someone else's ordinary message, where the instance has Mod View; not in secure channels or channels shared from another server; opens the report dialog) · Delete message (yours, or with Manage Messages): asks in the message's toolbar |
 
 A message in a direct message or secure channel (`dm_message`): target | the
-same react section, standard emoji only, and See who reacted from this
-device's own tally | Reply in thread / Open thread (secure channels) · Edit
+same react section, offering standard emoji and the emoji of every server
+you're in, and See who reacted from this device's own tally | Reply in thread / Open thread (secure channels) · Edit
 message (yours) · Copy text | Pin message / Unpin message (where pins work) |
 Delete message (yours, or with Manage Messages in a secure channel: asks in
 the toolbar). These lines have no ID of their own, so there's no Copy ID.

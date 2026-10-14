@@ -17,6 +17,7 @@ import {
   SendHorizontalIcon,
   ShieldAlertIcon,
   ShieldOffIcon,
+  SmileIcon,
   SmilePlusIcon,
   Trash2Icon,
   UserRoundXIcon,
@@ -53,12 +54,13 @@ import { TypingLine, useConversationNames, useServerNames } from "@/components/c
 import type { FuwaError } from "@/fuwa/errors";
 import { doneDmJump, loadDmPins, pinDm, requestDmJump, useDmJump, useDmPins } from "@/fuwa/pins";
 import { DmPinsButton, PinMark } from "@/components/chat/Pins";
-import { AddReactionTool, NO_CATALOG, QuickReactions, quickReactions, ReactionRow, ReactionsDialog } from "@/components/chat/Reactions";
+import { AddReactionTool, QuickReactions, quickReactions, ReactionRow, ReactionsDialog } from "@/components/chat/Reactions";
 import { useContextMenu } from "@/components/ContextMenu";
 import { dmMessageMenu } from "@/components/menus/dm-message";
-import type { PickedEmoji } from "@/components/EmojiPicker";
-import { reactInConversation } from "@/fuwa/reactions";
-import { reactedWith, type DmReaction, type ReactionLike } from "@/lib/reactions";
+import { EmojiPicker, type PickedEmoji } from "@/components/EmojiPicker";
+import { reactInConversation, type ReactEmoji } from "@/fuwa/reactions";
+import { reactedWith, type DmPick, type DmReaction, type ReactionLike } from "@/lib/reactions";
+import { emojisToCarry, encodeEmoji, useCatalog, type Catalog, type CarriedEmoji } from "@/lib/emoji-catalog";
 import { instanceHas } from "@/lib/compat";
 import { sendsMessage } from "@/components/chat/send-keys";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -364,6 +366,7 @@ export function EncryptedMessages({
   threads,
   pins,
   reacting,
+  serverId = "",
 }: {
   instanceKey: string;
   id: string;
@@ -387,7 +390,10 @@ export function EncryptedMessages({
   pins?: PinHooks;
   /** Reactions show on its messages (the instance has them), and whether you may add them. */
   reacting?: Reacting;
+  /** A secure channel's server, whose emoji the pickers offer first; "" in a direct message. */
+  serverId?: string;
 }) {
+  const catalog = useCatalog(instanceKey, serverId);
   const stored = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
   const tally = useFuwa((s) => s.instances[instanceKey]?.dms.reactions[id]);
   const items = stored && (lines ?? stored);
@@ -443,15 +449,15 @@ export function EncryptedMessages({
       edit: setEditing,
       cancelEdit: () => setEditing(null),
       save: async (seq, text) => {
-        await editDm(instanceKey, id, seq, text);
+        await editDm(instanceKey, id, seq, encodeEmoji(text, catalog));
         setEditing(null);
       },
       remove: (seq) => deleteDm(instanceKey, id, seq),
-      react: (seq, emoji, on) => void reactInConversation(instanceKey, id, seq, emoji, on).catch((err: Error) => toast(err.message)),
+      react: (seq, pick, on) => void reactInConversation(instanceKey, id, seq, pick, on).catch((err: Error) => toast(err.message)),
       reactors: (reaction) => ((reaction as DmReaction).userIds ?? []).map((u) => userOf(u)).filter((u): u is User => !!u),
       who: (reaction) => (reaction as DmReaction).userIds?.map((u) => (u === me.id ? t("chattools.reactions.you") : (memberOf?.(u)?.nickname || displayName(userOf(u))))) ?? [],
     }),
-    [instanceKey, id, me.id, t, memberOf, userOf],
+    [instanceKey, id, me.id, t, memberOf, userOf, catalog],
   );
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -553,6 +559,7 @@ export function EncryptedMessages({
                 return (
                   <PendingDm
                     key={row.key}
+                    instanceKey={instanceKey}
                     pending={row.pending}
                     first={row.first}
                     me={me}
@@ -585,6 +592,7 @@ export function EncryptedMessages({
                   onPin={pins && !item.deleted ? pins.toggle : undefined}
                   reactions={reacting && !item.deleted ? (tally?.[item.seq] ?? NO_REACTIONS) : undefined}
                   canReact={!!reacting?.canAdd}
+                  catalog={catalog}
                 />
               );
             })}
@@ -689,8 +697,8 @@ type DmActions = {
   cancelEdit: () => void;
   save: (seq: number, text: string) => Promise<void>;
   remove: (seq: number) => Promise<void>;
-  /** Reacts to a line with a standard emoji, or takes your reaction off. */
-  react: (seq: number, emoji: string, on: boolean) => void;
+  /** Reacts to a line with a standard emoji or a server's, or takes your reaction off. */
+  react: (seq: number, pick: DmPick, on: boolean) => void;
   /** Who reacted with an emoji, by name ("You" for yourself), from this device's tally. */
   who: (reaction: ReactionLike) => string[];
   /** Everyone who reacted with an emoji, from this device's tally, for the dialog. */
@@ -712,6 +720,19 @@ export type ThreadHooks = {
   kept: (item: Item) => boolean;
 };
 
+/** A server emoji as a reaction carries it. */
+const carried = (e: CarriedEmoji): CarriedEmoji => ({ id: e.id, serverId: e.serverId, name: e.name, url: e.url, animated: e.animated });
+
+/** A reaction's emoji as sent: a standard one, or a server's (as your servers have it, else as the reaction carried it). */
+function dmPick(r: ReactEmoji, catalog: Catalog): DmPick {
+  if (!r.emojiId) return { emoji: r.emoji };
+  const known = catalog.byId.get(r.emojiId)?.emoji;
+  return {
+    emoji: "",
+    custom: known ? carried(known) : { id: r.emojiId, serverId: "", name: r.emojiName ?? "", url: r.emojiUrl ?? "", animated: !!r.animated },
+  };
+}
+
 const DmRow = memo(function DmRow({
   item,
   first,
@@ -731,6 +752,7 @@ const DmRow = memo(function DmRow({
   onPin,
   reactions,
   canReact,
+  catalog,
 }: {
   item: Item;
   first: boolean;
@@ -751,6 +773,8 @@ const DmRow = memo(function DmRow({
   /** Its reactions as this device tallied them; undefined where reactions don't show. */
   reactions?: DmReaction[];
   canReact: boolean;
+  /** Every server emoji you can react with here: yours, from any server you're in. */
+  catalog: Catalog;
 }) {
   const [picking, setPicking] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -769,10 +793,10 @@ const DmRow = memo(function DmRow({
               ? {
                   quick: (close) => (
                     <QuickReactions
-                      choices={quickReactions(null)}
+                      choices={quickReactions([...catalog.byId.values()].map((c) => c.emoji))}
                       reactions={reactions}
                       canAdd={canReact}
-                      onToggle={(emoji, on) => actions.react(item.seq, emoji.emoji, on)}
+                      onToggle={(emoji, on) => actions.react(item.seq, dmPick(emoji, catalog), on)}
                       close={close}
                     />
                   ),
@@ -784,13 +808,14 @@ const DmRow = memo(function DmRow({
         }),
   );
   const pick = (picked: PickedEmoji) => {
-    // Standard emoji only: nobody outside the conversation could draw a server's.
-    if (picked.custom) return;
-    if (!reactedWith(reactions, { emoji: picked.text, emojiId: "" })) actions.react(item.seq, picked.text, true);
+    // A server's emoji goes with the reaction, so everyone in the conversation can draw it.
+    const custom = picked.custom && carried(picked.custom.emoji);
+    if (!reactedWith(reactions, { emoji: custom ? "" : picked.text, emojiId: custom?.id ?? "" }))
+      actions.react(item.seq, custom ? { emoji: "", custom } : { emoji: picked.text }, true);
   };
   const reactTool =
     reactions && canReact ? (
-      <AddReactionTool catalog={NO_CATALOG} open={picking} onOpenChange={setPicking} onPick={pick}>
+      <AddReactionTool catalog={catalog} open={picking} onOpenChange={setPicking} onPick={pick}>
         <ToolButton label={t("chattools.reactions.add")} onClick={() => {}}>
           <SmilePlusIcon />
         </ToolButton>
@@ -813,8 +838,8 @@ const DmRow = memo(function DmRow({
           <ReactionRow
             reactions={reactions}
             canAdd={canReact}
-            catalog={NO_CATALOG}
-            onToggle={(r, on) => actions.react(item.seq, r.emoji, on)}
+            catalog={catalog}
+            onToggle={(r, on) => actions.react(item.seq, dmPick(r, catalog), on)}
             onPick={pick}
             who={actions.who}
           />
@@ -870,7 +895,7 @@ function DmRowBody({
   if (editing) return <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />;
   return (
     <>
-      {(item.content || !item.files) && <MessageBody content={item.content} display={display} />}
+      {(item.content || !item.files) && <MessageBody content={item.content} emojis={item.emojis} display={display} />}
       {item.editedAt > 0 && (
         <span className="text-[0.7rem] text-muted-foreground" title={formatFull(new Date(item.editedAt))}>
           {" "}
@@ -1074,12 +1099,14 @@ function SystemLine({ item, text, animate }: { item: Item; text: string; animate
 }
 
 function PendingDm({
+  instanceKey,
   pending,
   first,
   me,
   onRetry,
   onDismiss,
 }: {
+  instanceKey: string;
   pending: PendingMessage;
   first: boolean;
   me: User;
@@ -1088,6 +1115,9 @@ function PendingDm({
 }) {
   const display = usePrefs((p) => p.messageDisplay);
   const { t } = useI18n();
+  // Drawn with the emoji it's taking along.
+  const servers = useFuwa((s) => s.instances[instanceKey]?.emojis);
+  const emojis = useMemo(() => emojisToCarry(servers, pending.content), [servers, pending.content]);
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -1100,7 +1130,7 @@ function PendingDm({
         {pending.voice ? (
           <VoiceMessage id={`pending:${pending.nonce}`} durationMs={pending.voice.durationMs} waveform={pending.voice.waveform} load={null} pending />
         ) : (
-          pending.content && <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
+          pending.content && <MessageBody content={pending.content} emojis={emojis} display={display} className={cn(pending.failed && "text-destructive")} />
         )}
         {pending.sealed && <PendingFiles files={pending.sealed} />}
         {pending.failed && (
@@ -1175,7 +1205,10 @@ function ComposerBox({
   const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);
   const { t } = useI18n();
-  const serverNames = useServerNames(instanceKey, "serverId" in typing ? typing.serverId : "");
+  const serverId = "serverId" in typing ? typing.serverId : "";
+  const serverNames = useServerNames(instanceKey, serverId);
+  // Every server's emoji you're in, written :name: and sent as their tokens with the emoji along.
+  const catalog = useCatalog(instanceKey, serverId);
   const conversationNames = useConversationNames(instanceKey, id);
   const nameOf = "conversationId" in typing ? conversationNames : serverNames;
 
@@ -1196,8 +1229,8 @@ function ComposerBox({
   }, [text]);
 
   const picked = usePicked(draft);
-  const content = text.trim();
-  const tooLong = text.length > MAX_DM;
+  const content = encodeEmoji(text.trim(), catalog);
+  const tooLong = content.length > MAX_DM;
   const ready = (!!content || picked.length > 0) && !tooLong && status === "ready";
 
   function send() {
@@ -1277,10 +1310,27 @@ function ComposerBox({
               className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"
             />
             <AnimatePresence>
-              {text.length > MAX_DM - 500 && <CharsLeft key="left" left={MAX_DM - text.length} />}
+              {content.length > MAX_DM - 500 && <CharsLeft key="left" left={MAX_DM - content.length} />}
             </AnimatePresence>
             {files && <EncryptedAttach draft={draft} disabled={status !== "ready"} />}
             <TimestampPicker onPick={(token) => insertAtCaret(box, write, token)} />
+            <EmojiPicker
+              catalog={catalog}
+              closeOnPick={false}
+              onPick={(emoji) => insertAtCaret(box, write, emoji.text.startsWith("<") ? `:${emoji.name}:` : emoji.text)}
+            >
+              {(open) => (
+                <motion.button
+                  type="button"
+                  aria-label={t("chat.composer.emoji")}
+                  whileHover={{ scale: 1.12, rotate: -10 }}
+                  whileTap={{ scale: 0.85 }}
+                  className={cn("mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-primary", open && "bg-primary/10 text-primary")}
+                >
+                  <SmileIcon className="size-[18px]" />
+                </motion.button>
+              )}
+            </EmojiPicker>
             {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}

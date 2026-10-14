@@ -315,6 +315,31 @@ is `web/src/files/sealed.ts`, `web/src/e2ee/files.ts` and
 `web/src/components/dm/SealedFiles.tsx`; the desktop app says a message has
 files and leaves opening them to the web app for now.
 
+## Server emoji
+
+People can write and react with the custom emoji of any server they're in,
+in direct messages and secure channels alike, whether or not the others are
+in that server. The instance can't read these messages, so it can't check
+and keep the emoji they use the way it does in a channel
+(`SendMessageRequest.emojis`): the sender's device carries each one the text
+writes as a token (`<:name:id>`) inside the encryption
+(`DirectMessageText.emojis`, `DirectMessageEdit.emojis`, and
+`DirectMessageReaction.custom` for a reaction): its id, server, name, picture
+link and whether it moves, at most 50. They go wherever the text goes:
+signed in secure channels, shared history and the backup
+(`BackupItem.emojis`).
+
+Only the sender vouches for these, so every device that opens one keeps an
+emoji only when its id and name are well formed, the text writes it, and its
+picture is under `/media/` on the conversation's own instance; anything else
+shows as its `:name:`. That way nobody's message makes an app load a picture
+from anywhere else, and the instance learns nothing new: it serves emoji
+pictures to anyone with the link, as it always has, and never sees which
+were used. A sender could give an emoji of theirs another name or another
+picture on the same instance; that changes only how their own message looks.
+The web app's side is `web/src/e2ee/emojis.ts` (checks in
+`lib/emoji-search.ts`); the desktop's is `desktop/src/core/emoji.rs`.
+
 ## Calls
 
 Calls in direct messages are end-to-end encrypted with the same groups: each

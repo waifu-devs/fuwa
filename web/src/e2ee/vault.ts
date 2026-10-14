@@ -12,6 +12,8 @@
  */
 
 import { i18n } from "@/i18n/i18n";
+import type { CarriedEmoji } from "@/lib/emoji-search";
+import type { DmReactionRef } from "@/lib/reactions";
 
 const DB = "fuwa-e2ee";
 const VERSION = 2;
@@ -92,8 +94,10 @@ export type Item = {
   voice?: Voice;
   /** Files a text carries (its content is then their caption, maybe empty). */
   files?: FileRef[];
-  /** A reaction: the record of the message it's to, the emoji, and whether it takes the sender's off. */
-  reaction?: { target: number; emoji: string; removed: boolean };
+  /** A reaction: the record of the message it's to, the emoji (or a server's, `custom`), and whether it takes the sender's off. */
+  reaction?: DmReactionRef;
+  /** Server emoji a text writes, as its sender's device carried them (checked: see emoji-search.ts's keptEmojis). */
+  emojis?: CarriedEmoji[];
 };
 
 /** A file inside an encrypted message, sealed in chunks: what fetching, opening and showing it takes. */

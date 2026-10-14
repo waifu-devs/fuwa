@@ -134,11 +134,31 @@ test("reactions to lines that aren't messages, or are gone, or aren't one emoji,
 
 test("your reaction in a direct message shows before it's sent, and goes back", () => {
   const before = tallyDm([line(1, "b"), reaction(2, "b", 1, "👍")], "a")[1]!;
-  const on = toggledDm(before, "👍", "a", true);
+  const on = toggledDm(before, { emoji: "👍" }, "a", true);
   assert.deepEqual(on.map((r) => [r.count, r.me, r.userIds]), [[2, true, ["b", "a"]]]);
-  const off = toggledDm(on, "👍", "a", false);
+  const off = toggledDm(on, { emoji: "👍" }, "a", false);
   assert.deepEqual(off.map((r) => [r.count, r.me, r.userIds]), [[1, false, ["b"]]]);
-  assert.deepEqual(toggledDm([], "🔥", "a", true).map((r) => [r.emoji, r.userIds]), [["🔥", ["a"]]]);
+  assert.deepEqual(toggledDm([], { emoji: "🔥" }, "a", true).map((r) => [r.emoji, r.userIds]), [["🔥", ["a"]]]);
+});
+
+const blob = { id: "E1aaaaaaaaaa", serverId: "S1", name: "blobcat", url: "https://chat.example/media/M1", animated: true };
+const customReaction = (seq: number, senderId: string, target: number, removed = false, name = "blobcat"): TallyLine =>
+  line(seq, senderId, "reaction", { reaction: { target, emoji: "", removed, custom: { ...blob, name } } });
+
+test("a server emoji's reactions in a direct message are tallied by its id", () => {
+  const lines = [line(1, "a"), customReaction(2, "b", 1), customReaction(3, "a", 1, false, "renamed"), reaction(4, "a", 1, "👍"), customReaction(5, "b", 1, true), customReaction(6, "b", 1)];
+  const tally = tallyDm(lines, "a");
+  assert.deepEqual(
+    tally[1]!.map((r) => [r.emoji, r.emojiId, r.emojiName, r.emojiUrl, r.animated, r.count, r.me, r.userIds]),
+    [
+      ["", "E1aaaaaaaaaa", "renamed", "https://chat.example/media/M1", true, 2, true, ["a", "b"]],
+      ["👍", "", "", undefined, false, 1, true, ["a"]],
+    ],
+  );
+  const off = toggledDm(tally[1]!, { emoji: "", custom: blob }, "a", false);
+  assert.deepEqual(off.map((r) => [r.emojiId || r.emoji, r.count, r.me, r.userIds]), [["E1aaaaaaaaaa", 1, false, ["b"]], ["👍", 1, true, ["a"]]]);
+  const fresh = toggledDm([], { emoji: "", custom: blob }, "a", true);
+  assert.deepEqual(fresh.map((r) => [r.emojiId, r.emojiName, r.count, r.userIds]), [["E1aaaaaaaaaa", "blobcat", 1, ["a"]]]);
 });
 
 test("who reacted reads as a short list", () => {

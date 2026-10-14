@@ -145,7 +145,7 @@ function SecureThreadStart({
       {parent ? (
         <div className="message-row first flex gap-3 px-4">
           <MessageLine display={display} first author={author} member={member} date={new Date(parent.at)} instanceKey={instanceKey}>
-            <MessageBody content={lineText(parent)} display={display} />
+            <MessageBody content={lineText(parent)} emojis={parent.emojis} display={display} />
           </MessageLine>
         </div>
       ) : (
@@ -248,6 +248,7 @@ export function SecureThreadPanel({
       <EncryptedMessages
         key={parent}
         instanceKey={instanceKey}
+        serverId={serverId}
         id={id}
         me={me}
         userOf={userOf}

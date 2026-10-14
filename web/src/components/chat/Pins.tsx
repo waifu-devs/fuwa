@@ -420,7 +420,7 @@ function DmPinsList({
             ) : item.kind === "voice" ? (
               <span className="text-muted-foreground italic">{t("chattools.pins.voice")}</span>
             ) : item.content ? (
-              <MessageBody content={item.content} display="cozy" />
+              <MessageBody content={item.content} emojis={item.emojis} display="cozy" />
             ) : (
               <span className="text-muted-foreground italic">{t("chattools.pins.files")}</span>
             );

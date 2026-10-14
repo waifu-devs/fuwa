@@ -1,6 +1,7 @@
 import { Code } from "@connectrpc/connect";
 import { Effect } from "effect";
 import { dmEngine, DmError, SECURE_BROKEN, type Content } from "@/e2ee/engine";
+import { emojisFor } from "@/e2ee/emojis";
 import { engine, onLeaveAccount } from "./sync";
 import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
@@ -75,7 +76,7 @@ export async function sendDm(key: string, id: string, text: string, target?: Thr
   const nonce = newNonce();
   setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null, ...target }]);
   try {
-    await ready(key).send(id, { text, ...target });
+    await ready(key).send(id, { text, emojis: emojisFor(key, text), ...target });
     setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
     updateDms(key, (d) => (d.blocked[id] ? { ...d, blocked: { ...d.blocked, [id]: "" } } : d));
   } catch (err) {
@@ -101,7 +102,8 @@ export const markSecureThreadRead = (key: string, id: string, parent: number, se
   dmEngine(key)?.markThreadRead(id, parent, seq).catch(() => {});
 
 /** New text for one of your messages, sent encrypted like a message. */
-export const editDm = (key: string, id: string, seq: number, text: string) => ready(key).send(id, { edit: seq, text } satisfies Content);
+export const editDm = (key: string, id: string, seq: number, text: string) =>
+  ready(key).send(id, { edit: seq, text, emojis: emojisFor(key, text) } satisfies Content);
 
 export const deleteDm = (key: string, id: string, seq: number) => ready(key).remove(id, seq);
 
@@ -366,7 +368,7 @@ async function sendFiles(key: string, id: string, out: OutgoingFiles) {
       refs.push(ref);
     }
     try {
-      await dms.send(id, { text: out.text, files: refs, ...out.target });
+      await dms.send(id, { text: out.text, files: refs, emojis: emojisFor(key, out.text), ...out.target });
     } catch (err) {
       // Swept (it waited over a day) or otherwise gone: upload them anew next time.
       const code = err instanceof DmError ? null : toFuwaError(err).code;

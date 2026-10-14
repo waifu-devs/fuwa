@@ -496,6 +496,13 @@ message DirectMessageText {
   // Files sent with it (up to 10), each sealed on the sender's device: their
   // names, kinds and keys travel only in here. The text may be empty then.
   repeated SealedFile files = 5;
+  // Server emoji the content writes as tokens (<:name:id>), up to 50, each
+  // with its id, server, name, picture and whether it moves, so every device
+  // draws them whether or not its person is in that server. Only the sender
+  // vouches for them: apps keep ones the content uses, with a picture under
+  // /media/ on the conversation's own instance, and show the rest as their
+  // names. The instance only serves the pictures, as it does for any emoji.
+  repeated Emoji emojis = 6;
 }
 
 // Locks or unlocks the thread under a secure channel's message. Devices take
@@ -510,6 +517,9 @@ message ThreadChange {
 message DirectMessageEdit {
   int64 sequence = 1;
   string content = 2;
+  // The new text's server emoji, as in DirectMessageText; they replace the
+  // ones the message had.
+  repeated Emoji emojis = 3;
 }
 
 // The sender reacting to a message with an emoji, or taking their reaction
@@ -519,10 +529,15 @@ message DirectMessageEdit {
 message DirectMessageReaction {
   // The record of the message reacted to.
   int64 sequence = 1;
-  // A standard emoji, as its characters (up to 32 bytes).
+  // A standard emoji, as its characters (up to 32 bytes); empty for a
+  // server emoji.
   string emoji = 2;
   // True takes the sender's reaction off.
   bool removed = 3;
+  // A server emoji instead of a standard one, carried as in
+  // DirectMessageText.emojis (checked the same way). Reactions with it are
+  // tallied by its id. Older apps skip these, as `emoji` is empty.
+  Emoji custom = 4;
 }
 
 // A voice message: Ogg Opus, sealed as a SealedFile. What it sounds like
@@ -694,6 +709,8 @@ message BackupItem {
   // took the sender's reaction off. Its signed form, in a secure channel,
   // is in `signed`.
   DirectMessageReaction reaction = 21;
+  // A text's server emoji (DirectMessageText.emojis), as of its latest edit.
+  repeated Emoji emojis = 22;
 }
 
 enum BackupItemKind {

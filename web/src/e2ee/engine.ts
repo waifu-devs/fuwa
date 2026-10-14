@@ -24,6 +24,7 @@ import {
   type ConversationRecord,
   type DirectMessageContent,
   type DirectMessageEvent,
+  type DirectMessageReaction,
   type SharedHistory,
   type WatchResponse,
 } from "@/gen/fuwa/v1/dm_pb";
@@ -36,6 +37,7 @@ import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
 import { i18n, type Key } from "@/i18n/i18n";
+import type { CarriedEmoji } from "@/lib/emoji-search";
 import { reportError } from "@/lib/reports";
 import { isOneEmoji, tallyDm } from "@/lib/reactions";
 import { BackupSync } from "./backup";
@@ -43,6 +45,7 @@ import * as history from "./history";
 import * as win from "./lines";
 import * as threads from "./threads";
 import * as vault from "./vault";
+import { customField, emojisField, instanceOrigins, toEmojis } from "./emojis";
 import { filesOf, toSealedFiles } from "./files";
 import { toVoiceMessage, voiceLength, voiceOf } from "./voice";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
@@ -192,20 +195,28 @@ const ref = (m: WasmMember): vault.DeviceRef => ({ userId: m.userId, deviceId: m
 
 /** The plaintext of a message: what only the conversation's devices see. */
 export type Content =
-  | { text: string; replyTo?: number; thread?: number; inChannel?: boolean; files?: vault.FileRef[] }
-  | { edit: number; text: string }
+  | { text: string; replyTo?: number; thread?: number; inChannel?: boolean; files?: vault.FileRef[]; emojis?: CarriedEmoji[] }
+  | { edit: number; text: string; emojis?: CarriedEmoji[] }
   | { lock: number; locked: boolean }
   | { voice: vault.Voice; replyTo?: number }
-  | { react: number; emoji: string; removed: boolean };
+  | { react: number; emoji: string; custom?: CarriedEmoji; removed: boolean };
 
 function contentOf(content: Content): DirectMessageContent {
   const body: DirectMessageContent["body"] =
     "voice" in content
       ? { case: "voice", value: toVoiceMessage(content.voice, content.replyTo) }
       : "react" in content
-        ? { case: "reaction", value: create(DirectMessageReactionSchema, { sequence: BigInt(content.react), emoji: content.emoji, removed: content.removed }) }
+        ? {
+            case: "reaction",
+            value: create(DirectMessageReactionSchema, {
+              sequence: BigInt(content.react),
+              emoji: content.custom ? "" : content.emoji,
+              removed: content.removed,
+              custom: content.custom ? toEmojis([content.custom])[0] : undefined,
+            }),
+          }
         : "edit" in content
-        ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
+        ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text, emojis: toEmojis(content.emojis) }) }
         : "lock" in content
           ? { case: "thread", value: create(ThreadChangeSchema, { parentSequence: BigInt(content.lock), locked: content.locked }) }
           : {
@@ -216,6 +227,7 @@ function contentOf(content: Content): DirectMessageContent {
                 threadSequence: BigInt(content.thread ?? 0),
                 inChannel: !!content.inChannel,
                 files: toSealedFiles(content.files),
+                emojis: toEmojis(content.emojis),
               }),
             };
   return create(DirectMessageContentSchema, { body });
@@ -231,6 +243,14 @@ function filesField(list: Parameters<typeof filesOf>[0]): Pick<vault.Item, "file
 function threadFields(text: { threadSequence: bigint; inChannel: boolean }): Pick<vault.Item, "thread" | "inChannel"> {
   const thread = Number(text.threadSequence);
   return thread > 0 ? { thread, inChannel: text.inChannel } : {};
+}
+
+/** A reaction as kept: one standard emoji, or a server emoji that can be drawn here; null for anything else. */
+function reactionOf(r: DirectMessageReaction, origins: ReadonlySet<string>): vault.Item["reaction"] | null {
+  const target = Number(r.sequence);
+  const custom = customField(r.custom, origins);
+  if (custom) return { target, emoji: "", removed: r.removed, custom };
+  return isOneEmoji(r.emoji) ? { target, emoji: r.emoji, removed: r.removed } : null;
 }
 
 /**
@@ -896,6 +916,7 @@ export class DmEngine {
     }
     const body = content.body;
     if (body.case === "text") {
+      const text = body.value.content.slice(0, MAX_DM);
       put(
         item(this.vaultKey, c.id, {
           seq,
@@ -903,10 +924,11 @@ export class DmEngine {
           kind: "text",
           senderId,
           deviceId,
-          content: body.value.content.slice(0, MAX_DM),
+          content: text,
           replyTo: Number(body.value.replyToSequence),
           ...(c.channel ? threadFields(body.value) : {}),
           ...filesField(body.value.files),
+          ...emojisField(body.value.emojis, text, instanceOrigins(this.key)),
           signed,
         }),
       );
@@ -942,14 +964,14 @@ export class DmEngine {
     } else if (body.case === "edit") {
       const target = known.get(Number(body.value.sequence));
       if (target?.kind === "text" && target.senderId === senderId && !target.deleted) {
-        put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at, editSigned: signed });
+        const text = body.value.content.slice(0, MAX_DM);
+        put({ ...target, content: text, emojis: emojisField(body.value.emojis, text, instanceOrigins(this.key)).emojis, editedAt: at, editSigned: signed });
       }
     } else if (body.case === "reaction" && (!c.channel || signed)) {
       // Kept as a line of its own, never shown: each device tallies them (lib/reactions.ts), the latest per sender and emoji winning.
       const target = Number(body.value.sequence);
-      if (target > 0 && target < seq && isOneEmoji(body.value.emoji)) {
-        put(item(this.vaultKey, c.id, { seq, at, kind: "reaction", senderId, deviceId, reaction: { target, emoji: body.value.emoji, removed: body.value.removed }, signed }));
-      }
+      const reaction = reactionOf(body.value, instanceOrigins(this.key));
+      if (target > 0 && target < seq && reaction) put(item(this.vaultKey, c.id, { seq, at, kind: "reaction", senderId, deviceId, reaction, signed }));
     }
     // Anything else is from a newer app: there's nothing to show for it here.
   }
@@ -1027,6 +1049,7 @@ export class DmEngine {
       const body = o.payload.content!.body;
       if (body.case === "text") {
         if (known.has(seq)) continue;
+        const text = body.value.content.slice(0, MAX_DM);
         put(
           item(this.vaultKey, c.id, {
             seq,
@@ -1034,10 +1057,11 @@ export class DmEngine {
             kind: "text",
             senderId,
             deviceId,
-            content: body.value.content.slice(0, MAX_DM),
+            content: text,
             replyTo: Number(body.value.replyToSequence),
             ...threadFields(body.value),
             ...filesField(body.value.files),
+            ...emojisField(body.value.emojis, text, instanceOrigins(this.key)),
             signed: o.signed,
             sharedBy: by,
           }),
@@ -1061,7 +1085,8 @@ export class DmEngine {
         // Checked like a text: its own record, from that device. Tallied with the rest; one to a message this
         // device doesn't have counts for nothing.
         const target = Number(body.value.sequence);
-        if (known.has(seq) || !(target > 0 && target < seq) || !isOneEmoji(body.value.emoji)) continue;
+        const reaction = reactionOf(body.value, instanceOrigins(this.key));
+        if (known.has(seq) || !(target > 0 && target < seq) || !reaction) continue;
         put(
           item(this.vaultKey, c.id, {
             seq,
@@ -1069,7 +1094,7 @@ export class DmEngine {
             kind: "reaction",
             senderId,
             deviceId,
-            reaction: { target, emoji: body.value.emoji, removed: body.value.removed },
+            reaction,
             signed: o.signed,
             sharedBy: by,
           }),
@@ -1077,7 +1102,8 @@ export class DmEngine {
       } else if (body.case === "edit") {
         const target = known.get(seq);
         if (target?.sharedBy && target.kind === "text" && target.senderId === senderId && !target.deleted) {
-          put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: Number(o.payload.sentAtMs), editSigned: o.signed });
+          const text = body.value.content.slice(0, MAX_DM);
+          put({ ...target, content: text, emojis: emojisField(body.value.emojis, text, instanceOrigins(this.key)).emojis, editedAt: Number(o.payload.sentAtMs), editSigned: o.signed });
         }
       }
     }
