@@ -363,6 +363,34 @@ tools! {
     "delete_shop_listing" => economy_service_client::EconomyServiceClient.delete_shop_listing(DeleteShopListingRequest), Destroys,
         "Take a listing down",
         "Deletes a listing; what was bought stays with its buyers. Needs Manage Economy.";
+    "list_gacha_banners" => economy_service_client::EconomyServiceClient.list_gacha_banners(ListGachaBannersRequest), Reads,
+        "List gacha banners",
+        "The server's gacha banners in order: price, multi-pull, rarity tiers with their rates (in millionths), \
+         prizes with their weights and each one's chance, pity, what duplicates do, and when each is open; \
+         and this agent's pulls and pity count on each.";
+    "pull_gacha" => economy_service_client::EconomyServiceClient.pull(PullRequest), Writes,
+        "Pull on a gacha banner",
+        "Pulls once (count 1) or the banner's multi-pull with this agent's own balance, and says what dropped.";
+    "list_gacha_pulls" => economy_service_client::EconomyServiceClient.list_gacha_pulls(ListGachaPullsRequest), Reads,
+        "List gacha pulls",
+        "Pulls with every draw and its rolls, newest first: this agent's, a member's, or everyone's (user_id \
+         \"*\") with Manage Economy. Filter by banner; page with before_id.";
+    "create_gacha_banner" => economy_service_client::EconomyServiceClient.create_gacha_banner(CreateGachaBannerRequest), Writes,
+        "Create a gacha banner",
+        "Adds a banner: name, currency and pull price, an optional multi-pull (size and price), rarity tiers \
+         rarest first with ids you choose and rates in millionths adding up to 1000000, prizes (a shop \
+         listing_id, or a currency_id and amount) each in a tier with a weight, optional pity (pity_pulls and \
+         pity_tier_id), duplicates (KEEP, REFUND with refund_currency_id and refund_amount, or SKIP_OWNED), \
+         max_pulls per member, starts_at and ends_at, and available. Mark listings gacha_only with \
+         update_shop_listing so they can't be bought. Needs Manage Economy (and Manage Roles for role prizes).";
+    "update_gacha_banner" => economy_service_client::EconomyServiceClient.update_gacha_banner(UpdateGachaBannerRequest), Writes,
+        "Change a gacha banner",
+        "Replaces a banner with the one given, as list_gacha_banners has it with your changes (keep prize ids \
+         to keep them). Needs Manage Economy.";
+    "delete_gacha_banner" => economy_service_client::EconomyServiceClient.delete_gacha_banner(DeleteGachaBannerRequest), Destroys,
+        "Delete a gacha banner",
+        "Deletes a banner; its pulls stay in the log and what was won stays with its winners. Needs Manage \
+         Economy.";
 
     // Boards (docs/boards.md). Comments are send_message with the card's id as thread_id.
     "get_board" => board_service_client::BoardServiceClient.get_board(GetBoardRequest), Reads,

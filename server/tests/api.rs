@@ -12728,6 +12728,245 @@ async fn economy_currencies_earning_shop_and_grants() {
     instance.stop().await;
 }
 
+async fn pull(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    banner_id: &str,
+    count: i32,
+    price: i64,
+) -> Result<pb::PullResponse, Code> {
+    let request =
+        pb::PullRequest { server_id: server_id.into(), banner_id: banner_id.into(), count, expected_price: price };
+    c.economy.pull(authed(token, request)).await.map(|r| r.into_inner()).map_err(|s| s.code())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gacha_banners_pulls_pity_and_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let sid = create_server(&mut c, &juan, "Arcade", true).await.id;
+    join(&mut c, &rin, &sid).await;
+    join(&mut c, &mika, &sid).await;
+    let make = |name: &str| pb::CreateCurrencyRequest {
+        server_id: sid.clone(),
+        currency: Some(pb::CurrencyChange { name: Some(name.into()), ..Default::default() }),
+    };
+    let gems = c.economy.create_currency(authed(&juan, make("Gems"))).await.unwrap().into_inner().currency.unwrap();
+    let dust = c.economy.create_currency(authed(&juan, make("Dust"))).await.unwrap().into_inner().currency.unwrap();
+    let give = |user_id: &str, amount: i64| pb::GrantRequest {
+        server_id: sid.clone(),
+        currency_id: gems.id.clone(),
+        user_id: user_id.into(),
+        amount,
+        ..Default::default()
+    };
+    let rin_id = rin_user.id.clone();
+    grant(&mut c, &juan, give(&rin_id, 1000)).await.unwrap();
+
+    // The prizes: a role only won here, and a custom listing with one left.
+    let vip = create_role(&mut c, &juan, &sid, "Star", &[pb::Permission::AttachFiles]).await.unwrap();
+    let listing = |kind: pb::ShopListingKind, target: &str, name: &str, stock: Option<i64>| pb::NewShopListing {
+        currency_id: gems.id.clone(),
+        kind: kind as i32,
+        target_id: target.into(),
+        name: name.into(),
+        price: 500,
+        stock,
+        available: true,
+        gacha_only: true,
+        ..Default::default()
+    };
+    let star = list_item(&mut c, &juan, &sid, listing(pb::ShopListingKind::Role, &vip.id, "", None)).await.unwrap();
+    assert!(star.gacha_only);
+    let plush =
+        list_item(&mut c, &juan, &sid, listing(pb::ShopListingKind::Custom, "", "Plush", Some(1))).await.unwrap();
+    // Gacha-only listings can't be bought.
+    assert_eq!(buy(&mut c, &rin, &sid, &star, 500).await.unwrap_err(), Code::FailedPrecondition);
+
+    let tier = |id: &str, rate: i32| pb::GachaTier { id: id.into(), name: id.to_uppercase(), color: None, rate };
+    let item = |tier: &str, listing_id: &str| pb::GachaPrize {
+        tier_id: tier.into(),
+        listing_id: listing_id.into(),
+        weight: 1,
+        ..Default::default()
+    };
+    let banner = pb::GachaBanner {
+        name: "Starlight".into(),
+        currency_id: gems.id.clone(),
+        pull_price: 10,
+        multi_pull: 10,
+        multi_pull_price: 90,
+        tiers: vec![tier("ssr", 0), tier("sr", 0), tier("r", 1_000_000)],
+        prizes: vec![
+            item("ssr", &star.id),
+            item("sr", &plush.id),
+            pb::GachaPrize {
+                tier_id: "r".into(),
+                currency_id: dust.id.clone(),
+                amount: 5,
+                weight: 1,
+                ..Default::default()
+            },
+        ],
+        pity_pulls: 3,
+        pity_tier_id: "ssr".into(),
+        duplicates: pb::GachaDuplicates::Refund as i32,
+        refund_currency_id: dust.id.clone(),
+        refund_amount: 50,
+        available: true,
+        ..Default::default()
+    };
+    let create =
+        |banner: pb::GachaBanner| pb::CreateGachaBannerRequest { server_id: sid.clone(), banner: Some(banner) };
+    // Only Manage Economy makes banners, and they're checked.
+    let refused = c.economy.create_gacha_banner(authed(&rin, create(banner.clone()))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let short = pb::GachaBanner { tiers: vec![tier("ssr", 0), tier("sr", 0), tier("r", 999_999)], ..banner.clone() };
+    let refused = c.economy.create_gacha_banner(authed(&juan, create(short))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let empty_tier = pb::GachaBanner {
+        tiers: vec![tier("ssr", 500_000), tier("sr", 0), tier("r", 500_000)],
+        prizes: banner.prizes[1..].to_vec(),
+        ..banner.clone()
+    };
+    let refused = c.economy.create_gacha_banner(authed(&juan, create(empty_tier))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let made = c
+        .economy
+        .create_gacha_banner(authed(&juan, create(banner.clone())))
+        .await
+        .unwrap()
+        .into_inner()
+        .banner
+        .unwrap();
+    assert!(made.prizes.iter().all(|p| !p.id.is_empty()));
+    assert_eq!(made.prizes.iter().map(|p| p.chance).collect::<Vec<_>>(), vec![0, 0, 1_000_000]);
+    let listed = c
+        .economy
+        .list_gacha_banners(authed(&rin, pb::ListGachaBannersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.banners, vec![made.clone()]);
+
+    // Ordinary pulls land on the only tier with a rate; the third is pity's.
+    let price_changed = pull(&mut c, &rin, &sid, &made.id, 1, 9).await;
+    assert_eq!(price_changed.unwrap_err(), Code::FailedPrecondition);
+    assert_eq!(pull(&mut c, &rin, &sid, &made.id, 2, 20).await.unwrap_err(), Code::InvalidArgument);
+    for n in 1..=2 {
+        let pulled = pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap();
+        let result = &pulled.pull.as_ref().unwrap().results[0];
+        assert_eq!((result.tier_id.as_str(), result.amount, result.guaranteed), ("r", 5, false));
+        assert_eq!((result.tier_total, result.prize_total), (1_000_000, 1));
+        assert!((0..1_000_000).contains(&result.tier_roll));
+        assert_eq!(pulled.progress.unwrap().since_pity, n);
+    }
+    // Pity: no tier at its rarity has a rate, so the guarantee can't help.
+    let pulled = pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap();
+    assert!(!pulled.pull.unwrap().results[0].guaranteed);
+
+    // With a rate on the role, pity reaches it, then a duplicate is refunded.
+    let rated = pb::GachaBanner {
+        tiers: vec![tier("ssr", 1), tier("sr", 1), tier("r", 999_998)],
+        prizes: made.prizes.clone(),
+        ..made.clone()
+    };
+    let request = pb::UpdateGachaBannerRequest { server_id: sid.clone(), banner: Some(rated.clone()) };
+    c.economy.update_gacha_banner(authed(&juan, request)).await.unwrap();
+    let pulled = pull(&mut c, &rin, &sid, &made.id, 10, 90).await.unwrap();
+    let results = pulled.pull.as_ref().unwrap().results.clone();
+    assert_eq!(results.len(), 10);
+    // Three pulls without one: the first draw is pity's, and so is every
+    // third after it, which draws the role again.
+    assert!(results[0].guaranteed);
+    assert_eq!(results[0].tier_id, "ssr");
+    assert_eq!(results[0].outcome(), pb::GachaOutcome::Won);
+    assert_eq!(results[0].prize_name, "Star");
+    assert!(results[3].guaranteed);
+    assert_eq!((results[3].outcome(), results[3].amount), (pb::GachaOutcome::Refunded, 50));
+    let wallet_now = wallet(&mut c, &rin, &sid, "").await.unwrap();
+    let gems_left = wallet_now.balances.iter().find(|b| b.currency_id == gems.id).unwrap().amount;
+    assert_eq!(gems_left, 1000 - 30 - 90);
+    // Every pull is in the log, with its rolls; others' only with Manage Economy.
+    let log = |user_id: &str| pb::ListGachaPullsRequest {
+        server_id: sid.clone(),
+        user_id: user_id.into(),
+        ..Default::default()
+    };
+    let mine = c.economy.list_gacha_pulls(authed(&rin, log(""))).await.unwrap().into_inner();
+    assert_eq!(mine.pulls.len(), 4);
+    assert_eq!(mine.pulls[0].results.len(), 10);
+    let refused = c.economy.list_gacha_pulls(authed(&mika, log("*"))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let all = c.economy.list_gacha_pulls(authed(&juan, log("*"))).await.unwrap().into_inner();
+    assert_eq!(all.pulls.len(), 4);
+    // The role is theirs.
+    let member = c
+        .servers
+        .list_members(authed(&rin, pb::ListMembersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members
+        .into_iter()
+        .find(|m| m.user.as_ref().is_some_and(|u| u.id == rin_id))
+        .unwrap();
+    assert!(member.role_ids.contains(&vip.id));
+
+    // Only SSR left to draw: a duplicate gives the refund.
+    let only_star =
+        pb::GachaBanner { tiers: vec![tier("ssr", 1_000_000), tier("sr", 0), tier("r", 0)], ..rated.clone() };
+    let request = pb::UpdateGachaBannerRequest { server_id: sid.clone(), banner: Some(only_star.clone()) };
+    c.economy.update_gacha_banner(authed(&juan, request)).await.unwrap();
+    let pulled = pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap();
+    let result = &pulled.pull.as_ref().unwrap().results[0];
+    assert_eq!(
+        (result.outcome(), result.amount, result.currency_id.as_str()),
+        (pb::GachaOutcome::Refunded, 50, dust.id.as_str())
+    );
+    // Skipping what they own leaves nothing that can drop for them.
+    let skip = pb::GachaBanner { duplicates: pb::GachaDuplicates::SkipOwned as i32, ..only_star.clone() };
+    let request = pb::UpdateGachaBannerRequest { server_id: sid.clone(), banner: Some(skip) };
+    c.economy.update_gacha_banner(authed(&juan, request)).await.unwrap();
+    assert_eq!(pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap_err(), Code::FailedPrecondition);
+
+    // Stock: the plush drops once, then its tier is out.
+    let plushy = pb::GachaBanner {
+        tiers: vec![tier("ssr", 0), tier("sr", 1_000_000), tier("r", 0)],
+        duplicates: pb::GachaDuplicates::Keep as i32,
+        ..only_star
+    };
+    let request = pb::UpdateGachaBannerRequest { server_id: sid.clone(), banner: Some(plushy) };
+    c.economy.update_gacha_banner(authed(&juan, request)).await.unwrap();
+    let pulled = pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap();
+    assert_eq!(pulled.pull.unwrap().results[0].listing_id, plush.id);
+    assert_eq!(pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap_err(), Code::FailedPrecondition);
+
+    // Not enough to pay: nothing happens.
+    assert_eq!(pull(&mut c, &mika, &sid, &made.id, 1, 10).await.unwrap_err(), Code::FailedPrecondition);
+    // Deleting a listing takes its prizes; deleting the banner keeps the log.
+    let request = pb::DeleteShopListingRequest { server_id: sid.clone(), listing_id: plush.id.clone() };
+    c.economy.delete_shop_listing(authed(&juan, request)).await.unwrap();
+    let listed = c
+        .economy
+        .list_gacha_banners(authed(&rin, pb::ListGachaBannersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.banners[0].prizes.len(), 2);
+    assert_eq!(listed.progress[0].pulls, 15);
+    let request = pb::DeleteGachaBannerRequest { server_id: sid.clone(), banner_id: made.id.clone() };
+    c.economy.delete_gacha_banner(authed(&juan, request)).await.unwrap();
+    let mine = c.economy.list_gacha_pulls(authed(&rin, log(""))).await.unwrap().into_inner();
+    assert_eq!(mine.pulls.len(), 6);
+    instance.stop().await;
+}
+
 async fn board(c: &mut Clients, token: &str, server_id: &str, channel_id: &str) -> pb::GetBoardResponse {
     let request = pb::GetBoardRequest { server_id: server_id.into(), channel_id: channel_id.into() };
     c.boards.get_board(authed(token, request)).await.unwrap().into_inner()

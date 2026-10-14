@@ -473,6 +473,24 @@ pub fn event(e: &pb::Event) -> Value {
                 "currency_id": p.entry.as_ref().map(|e| e.currency_id.as_str()),
             }),
         ),
+        // Gacha: list_gacha_banners has the banners.
+        Some(Payload::GachaBannersUpdated(_)) => ("gacha_banners_updated", json!({})),
+        // The puller, and agents with Manage Economy, which may hand out
+        // what a custom prize promises.
+        Some(Payload::GachaPulled(p)) => (
+            "gacha_pulled",
+            json!({
+                "user_id": p.pull.as_ref().map(|p| p.user_id.as_str()),
+                "banner_id": p.pull.as_ref().map(|p| p.banner_id.as_str()),
+                "pull_id": p.pull.as_ref().map(|p| p.id.as_str()),
+                "prizes": p.pull.as_ref().map(|p| p.results.iter().map(|r| json!({
+                    "name": r.prize_name,
+                    "tier": r.tier_name,
+                    "listing_id": r.listing_id,
+                    "outcome": pb::GachaOutcome::try_from(r.outcome).map(|o| o.as_str_name()).unwrap_or_default(),
+                })).collect::<Vec<_>>()),
+            }),
+        ),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

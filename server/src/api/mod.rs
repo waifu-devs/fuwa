@@ -15,6 +15,7 @@ mod emoji;
 mod endpoints;
 mod events;
 mod friends;
+mod gacha;
 mod gifs;
 mod invites;
 mod join;
