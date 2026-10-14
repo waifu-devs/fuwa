@@ -743,6 +743,25 @@ impl FuwaApp {
             .core
             .shared
             .read(|s| s.instance(&key).and_then(|i| i.channel(&server, &channel).map(|c| c.name.clone())))?;
+        let heading = t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))]);
+        Some(
+            self.drop_sheet(heading, t("chat.files.dropNote"), p, window, cx, |this, paths, cx| {
+                this.add_files(paths, cx)
+            }),
+        )
+    }
+
+    /// The sheet over the window while files are dragged over it, saying where
+    /// they'll go (`heading`); `take` gets the ones dropped anywhere.
+    pub(crate) fn drop_sheet(
+        &self,
+        heading: String,
+        note: String,
+        p: &Palette,
+        window: &Window,
+        cx: &mut Context<Self>,
+        take: impl Fn(&mut Self, Vec<PathBuf>, &mut Context<Self>) + 'static,
+    ) -> AnyElement {
         let size = window.viewport_size();
         let sheet = div()
             .flex()
@@ -797,33 +816,31 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(p.foreground)
                     .text_center()
-                    .child(t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))])),
+                    .child(heading),
             )
-            .child(div().text_sm().text_color(p.muted_foreground).text_center().child(t("chat.files.dropNote")));
+            .child(div().text_sm().text_color(p.muted_foreground).text_center().child(note));
         let shade = alpha(p.background, 0.6);
-        Some(
-            gpui_kit::deferred(
-                gpui_kit::anchored().position(gpui_kit::point(px(0.0), px(0.0))).child(
-                    div()
-                        .id("drop-overlay")
-                        .w(size.width)
-                        .h(size.height)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .p(px(24.0))
-                        .opacity(0.0)
-                        .drag_over::<ExternalPaths>(move |s, _, _, _| s.opacity(1.0).bg(shade))
-                        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                            cx.stop_propagation();
-                            this.add_files(paths.paths().to_vec(), cx)
-                        }))
-                        .child(sheet),
-                ),
-            )
-            .with_priority(2)
-            .into_any_element(),
+        gpui_kit::deferred(
+            gpui_kit::anchored().position(gpui_kit::point(px(0.0), px(0.0))).child(
+                div()
+                    .id("drop-overlay")
+                    .w(size.width)
+                    .h(size.height)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .p(px(24.0))
+                    .opacity(0.0)
+                    .drag_over::<ExternalPaths>(move |s, _, _, _| s.opacity(1.0).bg(shade))
+                    .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
+                        cx.stop_propagation();
+                        take(this, paths.paths().to_vec(), cx)
+                    }))
+                    .child(sheet),
+            ),
         )
+        .with_priority(2)
+        .into_any_element()
     }
 
     /// Tints the composer while files are dragged over it (the overlay takes the drop).

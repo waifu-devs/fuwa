@@ -428,6 +428,7 @@ impl FuwaApp {
                 action,
                 files: can_attach,
                 thread: None,
+                drop_to: Some(t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&channel.name))])),
             },
             window,
             cx,

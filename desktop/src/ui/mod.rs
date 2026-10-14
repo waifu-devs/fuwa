@@ -55,6 +55,7 @@ mod notify;
 mod onboarding;
 pub(crate) mod overlay;
 mod panel;
+mod paste;
 pub mod perf;
 mod pins;
 mod png;
