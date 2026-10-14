@@ -1,4 +1,5 @@
 {
+  "look.omarchy": "Igual que tu tema de Omarchy, {theme}, y cambia con él.",
   "profileItems.chooseEffect": "Elige un archivo de efecto",
   "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto.",
   "profileItems.cantSaveTemplate": "No se pudo guardar la plantilla.",

@@ -47,6 +47,7 @@ pub mod live_tiles;
 pub mod mod_view;
 pub mod moderation;
 pub mod notifications;
+pub mod omarchy;
 pub mod onboarding;
 pub mod permissions;
 pub mod pictures;

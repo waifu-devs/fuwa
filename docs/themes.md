@@ -106,6 +106,18 @@ waifu-devs/site), seeds and radius:
 Sakura is the default on a light system, Yoru on a dark one. People can
 follow the system with a light and a dark pick.
 
+## Omarchy
+
+On Linux computers running [Omarchy](https://omarchy.org), the desktop app
+offers one more theme, `omarchy`, after the built-in ones: Omarchy's theme in
+use (`~/.local/state/omarchy/current/theme`, or `~/.config/omarchy/current/theme`
+on older versions), read from its `colors.toml` (`alacritty.toml` for themes
+without one). `background` and `foreground` are its own, `primary` its
+`accent`, `card` its `lighter_background`, `border` its `muted`, `destructive`
+its `red`; the rest is mixed from those. The app looks at that folder every
+two seconds, so switching themes in Omarchy switches fuwa too. It's this
+computer's alone: the pick isn't synced, and elsewhere the theme isn't shown.
+
 ## Custom themes
 
 Made in Settings, Themes: from any theme, with its colors, corners and

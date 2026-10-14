@@ -177,14 +177,19 @@ fn font_value(f: &FontPick) -> Option<Value> {
     })
 }
 
+/// A picked theme's id; Omarchy's is this computer's own, so it isn't sent.
+fn theme_id_value(id: &str) -> Option<Value> {
+    (id != crate::core::omarchy::ID).then(|| str_value(id))
+}
+
 /// One setting's value as the document holds it; None when it can't be sent.
 pub fn value(p: &Prefs, name: &str) -> Option<Value> {
     Some(match name {
         "customThemes" => Value::Array(p.custom_themes.iter().map(theme_value).collect()),
-        "theme" => str_value(&p.theme),
+        "theme" => theme_id_value(&p.theme)?,
         "followSystem" => json!(p.follow_system),
-        "lightTheme" => str_value(&p.light_theme),
-        "darkTheme" => str_value(&p.dark_theme),
+        "lightTheme" => theme_id_value(&p.light_theme)?,
+        "darkTheme" => theme_id_value(&p.dark_theme)?,
         "backdrop" => backdrop_value(&p.backdrop),
         "density" => str_value(match p.spacing {
             Spacing::Compact => "compact",
