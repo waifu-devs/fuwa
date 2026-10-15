@@ -150,7 +150,7 @@ impl FuwaApp {
     pub(crate) fn send_gate(&self) -> Option<Gate> {
         let Some(Target::Channel { key, server, channel }) = self.target() else { return None };
         // Read before the store is (its lock isn't taken twice).
-        let can_attach = self.can_attach();
+        let can_attach = self.can_attach(crate::ui::attachments::Tray::Channel);
         self.core.shared.read(|s| {
             let i = s.instance(&key)?;
             let c = i.channel(&server, &channel)?;
@@ -252,7 +252,7 @@ impl FuwaApp {
         if gate.as_ref().is_some_and(Gate::timed_out) {
             return true;
         }
-        let files = self.files_state();
+        let files = self.files_state(crate::ui::attachments::Tray::Channel);
         if gate.as_ref().is_some_and(Gate::cooling) || files.uploading || files.broken {
             self.shake(cx);
             return true;

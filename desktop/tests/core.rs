@@ -634,7 +634,7 @@ fn two_people_talk_in_a_server_and_in_private() {
     let reply = |core: &Arc<Core>, text: &'static str, also: bool| {
         let (c, key, sid, cid) = (core.clone(), key.clone(), server.id.clone(), general.clone());
         let target = threads::ThreadTarget { thread_id: parent.clone(), also_to_channel: also };
-        wait(core, async move { c.send_reply(&key, &sid, &cid, text, target).await })
+        wait(core, async move { c.send_reply(&key, &sid, &cid, text, Vec::new(), target).await })
     };
     let summary = |s: &Store| {
         s.instance(&key)
@@ -645,6 +645,18 @@ fn two_people_talk_in_a_server_and_in_private() {
     };
     reply(&bob, "on it", false).unwrap();
     until(&alice, "the thread's count", |s| summary(s).is_some_and(|t| t.reply_count == 1));
+    // A reply can carry files too: Bob answers with a picture alone.
+    {
+        let (c, key, sid, cid, picture) =
+            (bob.clone(), key.clone(), server.id.clone(), general.clone(), picture.clone());
+        let target = threads::ThreadTarget { thread_id: parent.clone(), also_to_channel: false };
+        wait(&bob, async move {
+            let shot = c.upload_attachment(&key, &sid, &picture).await?;
+            c.send_reply(&key, &sid, &cid, "", vec![shot], target).await
+        })
+        .unwrap();
+    }
+    until(&alice, "the thread's count, picture too", |s| summary(s).is_some_and(|t| t.reply_count == 2));
     assert!(
         alice.shared.read(|s| !s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "on it"))
     );
@@ -661,6 +673,8 @@ fn two_people_talk_in_a_server_and_in_private() {
         let i = s.instance(&key).unwrap();
         assert_eq!(i.thread_parents[&parent].content, "files!");
         assert_eq!(i.messages[&threads::thread_key(&parent)].items[0].content, "on it");
+        let shot = &i.messages[&threads::thread_key(&parent)].items[1];
+        assert_eq!((shot.content.as_str(), shot.attachments[0].filename.as_str()), ("", "tiny.png"));
         assert_eq!(threads::follows(i, &server.id, &parent), Some(true));
     });
     reply(&bob, "everyone, look", true).unwrap();
@@ -691,7 +705,7 @@ fn two_people_talk_in_a_server_and_in_private() {
         let listed = wait(&alice, async move { core.list_threads(&key, &sid, &cid, "", false, "").await }).unwrap();
         assert_eq!(
             listed.threads.iter().find(|t| t.id == parent).and_then(|t| t.thread.as_ref()).unwrap().reply_count,
-            2
+            3
         );
     }
     {
@@ -795,7 +809,8 @@ fn two_people_talk_in_a_server_and_in_private() {
     let alice = Core::start(Paths::under(home_a.path())).unwrap();
     // Until it's opened, only its last message is in memory.
     until(&alice, "the conversation's last message", |s| {
-        s.instance(&key).unwrap().dms.items.get(&conversation).is_some_and(|items| items.len() == 1)
+        // The instance comes back from disk a moment after the app starts.
+        s.instance(&key).and_then(|i| i.dms.items.get(&conversation)).is_some_and(|items| items.len() == 1)
     });
     alice.set_focus(Some(Focus { instance: key.clone(), channel: conversation.clone(), thread: None }));
     said(&alice, "got it");

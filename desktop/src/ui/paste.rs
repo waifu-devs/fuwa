@@ -14,6 +14,7 @@ use gpui_kit::{App, ClipboardEntry, ClipboardItem, Context, ImageFormat, Window}
 use crate::core::attachments;
 use crate::core::sealed_files::Outgoing;
 use crate::ui::app::FuwaApp;
+use crate::ui::attachments::Tray;
 
 /// What a paste carries that goes with the message as a file.
 #[derive(Debug, Clone, PartialEq)]
@@ -143,12 +144,13 @@ impl FuwaApp {
         }
     }
 
-    /// Pasting into a channel's box (or a card's description): the files join `add_files`.
+    /// Pasting into a channel's or a thread's box (or a card's description): the files join `add_files`.
     pub(crate) fn paste_to_channel(
         &self,
+        tray: Tray,
         cx: &mut Context<Self>,
     ) -> impl Fn(&ClipboardItem, &mut Window, &mut App) -> bool + 'static {
-        self.paste_hook(cx, |this, files, cx| this.add_pasted(files, cx))
+        self.paste_hook(cx, move |this, files, cx| this.add_pasted(tray, files, cx))
     }
 
     /// Pasting into an encrypted box: the files join the ones picked in `place`, to be sealed.
@@ -160,7 +162,7 @@ impl FuwaApp {
         self.paste_hook(cx, move |this, files, cx| this.add_pasted_sealed(place.clone(), files, cx))
     }
 
-    fn add_pasted(&mut self, files: Vec<Pasted>, cx: &mut Context<Self>) {
+    fn add_pasted(&mut self, tray: Tray, files: Vec<Pasted>, cx: &mut Context<Self>) {
         let saved = cx.background_executor().spawn(async move {
             files
                 .into_iter()
@@ -172,7 +174,7 @@ impl FuwaApp {
         });
         cx.spawn(async move |this, cx| {
             let paths = saved.await;
-            let _ = this.update(cx, |this, cx| this.add_files(paths, cx));
+            let _ = this.update(cx, |this, cx| this.add_files(tray, paths, cx));
         })
         .detach();
     }

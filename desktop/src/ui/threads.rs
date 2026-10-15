@@ -21,6 +21,7 @@ use crate::core::store::InstanceState;
 use crate::core::threads::{self, ThreadTarget};
 use crate::pb;
 use crate::ui::app::FuwaApp;
+use crate::ui::attachments::Tray;
 use crate::ui::chat::{Built, Row};
 use crate::ui::motion;
 use crate::ui::text::ms_of;
@@ -342,16 +343,23 @@ impl FuwaApp {
         }
         let Some(open) = self.threads.open.clone() else { return };
         let text = self.threads.reply.read(cx).value().trim().to_owned();
-        if text.is_empty() || self.thread_blocked().is_some() {
+        if (text.is_empty() && !self.has_files(Tray::Thread)) || self.thread_blocked().is_some() {
             return;
         }
+        let files = match self.take_files(Tray::Thread) {
+            Ok(files) => files,
+            Err(why) => {
+                self.toast("paperclip", "Not sent yet".into(), why.into(), None, None, cx);
+                return;
+            }
+        };
         self.threads.reply.update(cx, |state, cx| state.set_value("", window, cx));
         let text = self.encode_mentions(&text);
         let target = ThreadTarget { thread_id: open.id.clone(), also_to_channel: self.threads.also };
         let core = self.core.clone();
         self.run(
             cx,
-            async move { core.send_reply(&open.key, &open.server, &open.channel, &text, target).await },
+            async move { core.send_reply(&open.key, &open.server, &open.channel, &text, files, target).await },
             |this, _, cx| {
                 this.sync_thread(cx);
                 cx.notify();
@@ -863,8 +871,17 @@ impl FuwaApp {
         });
         let focused = self.threads.reply.read(cx).focus_handle(cx).is_focused(window);
         let typed = !self.threads.reply.read(cx).value().trim().is_empty();
+        let files = self.files_state(Tray::Thread);
+        let can_send = (typed || files.any) && !files.uploading && !files.broken;
         let ring = motion::follow("thread-reply-ring", if focused { 1.0 } else { 0.0 }, window, cx);
-        let ready = motion::follow("thread-reply-send", if typed { 1.0 } else { 0.0 }, window, cx);
+        let ready = motion::follow("thread-reply-send", if can_send { 1.0 } else { 0.0 }, window, cx);
+        // Files go with replies as with messages: the paperclip, pasting and dropping.
+        let attach = self.can_attach(Tray::Thread);
+        let mut reply = Textarea::new(&self.threads.reply).appearance(false).text_size(px(15.2)).line_height(px(24.0));
+        if attach {
+            reply = reply.on_paste(self.paste_to_channel(Tray::Thread, cx));
+        }
+        let tray = self.file_tray(Tray::Thread, &p, cx);
         let also = self.threads.also;
         let typing = self
             .threads
@@ -885,9 +902,9 @@ impl FuwaApp {
             .gap(px(4.0))
             .child(
                 div()
+                    .id("thread-composer-box")
                     .flex()
-                    .items_end()
-                    .gap(px(8.0))
+                    .flex_col()
                     .px(px(12.0))
                     .py(px(8.0))
                     .rounded(crate::ui::theme::radius_2xl())
@@ -910,24 +927,31 @@ impl FuwaApp {
                             inset: false,
                         },
                     ])
-                    .child(div().flex_1().min_w_0().ml(px(-10.0)).my(px(-2.0)).child(
-                        Textarea::new(&self.threads.reply).appearance(false).text_size(px(15.2)).line_height(px(24.0)),
-                    ))
+                    .map(|el| self.droppable(Tray::Thread, el, &p, cx))
+                    .children(tray)
                     .child(
                         div()
-                            .id("thread-send")
-                            .size(px(36.0))
-                            .mb(px(2.0))
-                            .flex_none()
-                            .rounded(crate::ui::theme::radius_xl())
                             .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(alpha(p.primary, ready))
-                            .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, window, cx| this.send_reply(window, cx)))
-                            .child(icon("send-horizontal").size(px(18.0))),
+                            .items_end()
+                            .gap(px(8.0))
+                            .when(attach, |el| el.child(self.attach_button(Tray::Thread, &p, cx)))
+                            .child(div().flex_1().min_w_0().ml(px(-10.0)).my(px(-2.0)).child(reply))
+                            .child(
+                                div()
+                                    .id("thread-send")
+                                    .size(px(36.0))
+                                    .mb(px(2.0))
+                                    .flex_none()
+                                    .rounded(crate::ui::theme::radius_xl())
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(alpha(p.primary, ready))
+                                    .text_color(mix(p.muted_foreground, p.primary_foreground, ready))
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, window, cx| this.send_reply(window, cx)))
+                                    .child(icon("send-horizontal").size(px(18.0))),
+                            ),
                     ),
             )
             .when_some(channel, |el, name| {
