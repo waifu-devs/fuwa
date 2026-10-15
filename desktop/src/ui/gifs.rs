@@ -192,9 +192,9 @@ impl FuwaApp {
     /// it goes sealed like a file.
     pub(crate) fn gif_place(&self) -> Option<GifPlace> {
         match self.target()? {
-            Target::Channel { key, server, channel } => {
-                self.can_attach().then_some(GifPlace::Channel { key, server, channel })
-            }
+            Target::Channel { key, server, channel } => self
+                .can_attach(crate::ui::attachments::Tray::Channel)
+                .then_some(GifPlace::Channel { key, server, channel }),
             Target::Dm { key, conversation } => Some(GifPlace::Sealed { key, id: conversation }),
             Target::Secure { key, server, channel } => {
                 let may = self.core.shared.read(|s| {

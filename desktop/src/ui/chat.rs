@@ -1345,7 +1345,7 @@ impl FuwaApp {
         // A picked command takes the box's place, with its options as fields.
         let command = self.command_form_here();
         let gate = self.send_gate();
-        let files = self.files_state();
+        let files = self.files_state(crate::ui::attachments::Tray::Channel);
         let length = self.composer.read(cx).value().chars().count();
         let typed = !self.composer.read(cx).value().trim().is_empty();
         let cooling = gate.as_ref().is_some_and(|g| g.cooling());
@@ -1365,7 +1365,7 @@ impl FuwaApp {
         let emoji_panel = self.emoji_panel(&p, window, cx);
         let gif_panel = self.gif_panel(&p, window, cx);
         let time_panel = self.time_picker_leaving(&p, window, cx);
-        let tray = self.file_tray(&p, cx);
+        let tray = self.file_tray(crate::ui::attachments::Tray::Channel, &p, cx);
         let recording = !command && self.recording_here();
         let gif_button = (!command && !recording).then(|| self.gif_button(&p, cx)).flatten();
         // The microphone takes the send button's place while nothing's typed, as on the web.
@@ -1383,8 +1383,8 @@ impl FuwaApp {
         } else {
             // Pasted pictures and files join the ones picked with the paperclip.
             let mut box_ = Textarea::new(&self.composer).appearance(false).text_size(px(15.2)).line_height(px(24.0));
-            if self.can_attach() {
-                box_ = box_.on_paste(self.paste_to_channel(cx));
+            if self.can_attach(crate::ui::attachments::Tray::Channel) {
+                box_ = box_.on_paste(self.paste_to_channel(crate::ui::attachments::Tray::Channel, cx));
             }
             // The editor keeps 10px of its own on the left and 8px above and below its
             // 24px lines; the web's box has 6px above and below and nothing at the side.
@@ -1402,7 +1402,8 @@ impl FuwaApp {
                 .into_any_element()
         };
         let hint = self.composer_hint(&p);
-        let attach = (!command && !recording && self.can_attach()).then(|| self.attach_button(&p, cx));
+        let attach = (!command && !recording && self.can_attach(crate::ui::attachments::Tray::Channel))
+            .then(|| self.attach_button(crate::ui::attachments::Tray::Channel, &p, cx));
         let tools = (!command && !recording).then(|| {
             div().flex().items_end().gap(px(8.0)).child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx))
         });
@@ -1497,7 +1498,7 @@ impl FuwaApp {
                     inset: false,
                 },
             ])
-            .map(|el| self.droppable(el, &p, cx))
+            .map(|el| self.droppable(crate::ui::attachments::Tray::Channel, el, &p, cx))
             .map(|el| self.mic_slide(el, cx))
             .children(tray)
             .child(row);

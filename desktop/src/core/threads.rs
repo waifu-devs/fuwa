@@ -105,9 +105,10 @@ impl Core {
         server_id: &str,
         channel_id: &str,
         content: &str,
+        attachments: Vec<pb::Attachment>,
         target: ThreadTarget,
     ) -> Result<(), Problem> {
-        self.send_to(key, server_id, channel_id, content, Vec::new(), Some(&target)).await?;
+        self.send_to(key, server_id, channel_id, content, attachments, Some(&target)).await?;
         // Replying follows a thread unless you unfollowed it once, which only the server knows: ask it again.
         let ask = self.shared.read(|s| {
             s.instance(key).and_then(|i| i.followed.get(server_id)).is_some_and(|f| !f.contains(&target.thread_id))

@@ -548,7 +548,7 @@ impl FuwaApp {
             return;
         }
         let Some(card) = self.board.open.clone() else { return };
-        let added = match self.take_files() {
+        let added = match self.take_files(crate::ui::attachments::Tray::Channel) {
             Ok(files) => files,
             Err(why) => {
                 self.toast("paperclip", why.into(), String::new(), None, None, cx);
@@ -1873,11 +1873,11 @@ impl FuwaApp {
                         ),
                 );
             }
-            let uploading = self.files_state().uploading;
+            let uploading = self.files_state(crate::ui::attachments::Tray::Channel).uploading;
             // Pasted or dropped pictures and files join the description's, as the paperclip's do.
             let mut body = Textarea::new(&self.board.body).appearance(false);
             if attach {
-                body = body.on_paste(self.paste_to_channel(cx));
+                body = body.on_paste(self.paste_to_channel(crate::ui::attachments::Tray::Channel, cx));
             }
             let (drop_bg, primary) = (alpha(p.primary, 0.08), p.primary);
             div()
@@ -1898,19 +1898,19 @@ impl FuwaApp {
                             el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_color(primary))
                                 .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                                     cx.stop_propagation();
-                                    this.add_files(paths.paths().to_vec(), cx)
+                                    this.add_files(crate::ui::attachments::Tray::Channel, paths.paths().to_vec(), cx)
                                 }))
                         })
                         .child(div().ml(px(-10.0)).child(body)),
                 )
                 .when(!kept.is_empty(), |el| el.child(files))
-                .children(self.file_tray(&p, cx))
+                .children(self.file_tray(crate::ui::attachments::Tray::Channel, &p, cx))
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .when(attach, |el| el.child(self.attach_button(&p, cx)))
+                        .when(attach, |el| el.child(self.attach_button(crate::ui::attachments::Tray::Channel, &p, cx)))
                         .child(
                             div()
                                 .flex_1()

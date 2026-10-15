@@ -333,6 +333,8 @@ pub struct FuwaApp {
     pub voice: crate::ui::voice_notes::VoiceState,
     /// Files picked to go with the next message.
     pub files: crate::ui::attachments::Files,
+    /// Files picked to go with the next reply in the open thread (or card's comments).
+    pub thread_files: crate::ui::attachments::Files,
     /// The composer's countdowns, shakes and voice problems.
     pub composing: crate::ui::composer::Composing,
     /// Searching the server on screen: the header's field and the results beside the chat.
@@ -722,6 +724,7 @@ impl FuwaApp {
             polls: Default::default(),
             voice: Default::default(),
             files: Default::default(),
+            thread_files: Default::default(),
             composing: Default::default(),
             search,
             threads,
@@ -1274,13 +1277,13 @@ impl FuwaApp {
             }
             return;
         }
-        if text.is_empty() && !self.has_files() {
+        if text.is_empty() && !self.has_files(crate::ui::attachments::Tray::Channel) {
             return;
         }
         if self.send_held(&text, cx) {
             return;
         }
-        let files = match self.take_files() {
+        let files = match self.take_files(crate::ui::attachments::Tray::Channel) {
             Ok(files) => files,
             Err(why) => {
                 self.toast("paperclip", "Not sent yet".into(), why.into(), None, None, cx);

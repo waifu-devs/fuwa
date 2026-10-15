@@ -49,13 +49,34 @@ pub enum Upload {
     Failed(String),
 }
 
-/// The files waiting to go with the next message, and where.
+/// The files waiting to go with the next message, and where: a channel's
+/// (or a board card's description), or a thread's (or a card's comments),
+/// each in a tray of its own since both boxes show at once.
 #[derive(Default)]
 pub struct Files {
-    place: Option<(String, String, String)>,
+    /// The instance, server, channel and (for a thread's) the message it's under.
+    place: Option<(String, String, String, String)>,
     staged: Vec<Staged>,
-    next: u64,
 }
+
+/// Which box's files: the channel's or the open thread's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tray {
+    Channel,
+    Thread,
+}
+
+impl Tray {
+    fn tag(self) -> &'static str {
+        match self {
+            Tray::Channel => "channel",
+            Tray::Thread => "thread",
+        }
+    }
+}
+
+/// Staged files' ids, unique across both trays, so a card's buttons find their file wherever it is.
+static NEXT_STAGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The files waiting to go, summed up for the send button.
 #[derive(Default, Clone, Copy)]
@@ -326,9 +347,10 @@ fn file_card(
 }
 
 impl FuwaApp {
-    /// Files go in a server's plain channels, never shared ones, for those who may attach them.
-    pub(crate) fn can_attach(&self) -> bool {
-        let Some(Target::Channel { key, server, channel }) = self.target() else { return false };
+    /// Files go in a server's plain channels, never shared ones, for those who
+    /// may attach them; a thread's files in its channel's, not a secure one's.
+    pub(crate) fn can_attach(&self, tray: Tray) -> bool {
+        let Some((key, server, channel, _)) = self.files_place(tray) else { return false };
         self.core.shared.read(|s| {
             s.instance(&key).is_some_and(|i| {
                 i.access(&server).has_in(&channel, pb::Permission::AttachFiles)
@@ -337,21 +359,48 @@ impl FuwaApp {
         })
     }
 
-    fn files_place(&self) -> Option<(String, String, String)> {
-        match self.target()? {
-            Target::Channel { key, server, channel } => Some((key, server, channel)),
-            _ => None,
+    fn files_place(&self, tray: Tray) -> Option<(String, String, String, String)> {
+        let Target::Channel { key, server, channel } = self.target()? else { return None };
+        match tray {
+            Tray::Channel => Some((key, server, channel, String::new())),
+            Tray::Thread => {
+                let open = self.threads.open.as_ref().filter(|o| o.key == key && o.server == server)?;
+                Some((key, server, open.channel.clone(), open.id.clone()))
+            }
         }
     }
 
-    pub(crate) fn attach_button(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        crate::ui::widgets::tool_button("attach", "paperclip", false, p)
+    fn tray(&self, tray: Tray) -> &Files {
+        match tray {
+            Tray::Channel => &self.files,
+            Tray::Thread => &self.thread_files,
+        }
+    }
+
+    fn tray_mut(&mut self, tray: Tray) -> &mut Files {
+        match tray {
+            Tray::Channel => &mut self.files,
+            Tray::Thread => &mut self.thread_files,
+        }
+    }
+
+    /// A staged file by its id, in whichever tray it is, with that tray.
+    fn staged_mut(&mut self, id: u64) -> Option<(&mut Staged, Tray)> {
+        if let Some(s) = self.files.staged.iter_mut().find(|s| s.id == id) {
+            return Some((s, Tray::Channel));
+        }
+        self.thread_files.staged.iter_mut().find(|s| s.id == id).map(|s| (s, Tray::Thread))
+    }
+
+    pub(crate) fn attach_button(&self, tray: Tray, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let id = SharedString::from(format!("attach|{}", tray.tag()));
+        crate::ui::widgets::tool_button(id, "paperclip", false, p)
             .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.files.attach")).build(window, cx))
-            .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx)))
+            .on_click(cx.listener(move |this, _, _, cx| this.pick_files(tray, cx)))
             .into_any_element()
     }
 
-    fn pick_files(&mut self, cx: &mut Context<Self>) {
+    fn pick_files(&mut self, tray: Tray, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: true,
             directories: false,
@@ -360,22 +409,23 @@ impl FuwaApp {
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let _ = this.update(cx, |this, cx| this.add_files(paths, cx));
+            let _ = this.update(cx, |this, cx| this.add_files(tray, paths, cx));
         })
         .detach();
     }
 
-    /// Picked or dropped files: each starts uploading at once.
-    pub(crate) fn add_files(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        if !self.can_attach() {
+    /// Picked, pasted or dropped files: each starts uploading at once.
+    pub(crate) fn add_files(&mut self, tray: Tray, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if !self.can_attach(tray) {
             return;
         }
-        let Some(place) = self.files_place() else { return };
-        if self.files.place.as_ref() != Some(&place) {
-            self.files = Files { place: Some(place.clone()), ..Default::default() };
+        let Some(place) = self.files_place(tray) else { return };
+        if self.tray(tray).place.as_ref() != Some(&place) {
+            *self.tray_mut(tray) = Files { place: Some(place.clone()), ..Default::default() };
         }
         let paths: Vec<PathBuf> = paths.into_iter().filter(|p| p.is_file()).collect();
-        if self.files.staged.len() + paths.len() > MAX_FILES {
+        let already = self.tray(tray).staged.len();
+        if already + paths.len() > MAX_FILES {
             self.toast(
                 "paperclip",
                 format!("You can send up to {MAX_FILES} files at once"),
@@ -385,14 +435,13 @@ impl FuwaApp {
                 cx,
             );
         }
-        let room = MAX_FILES.saturating_sub(self.files.staged.len());
+        let room = MAX_FILES.saturating_sub(already);
         for path in paths.into_iter().take(room) {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let size = std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0);
             let picture = attachments::look_of(attachments::content_type_of(&name)) == Look::Picture;
-            let id = self.files.next;
-            self.files.next += 1;
-            self.files.staged.push(Staged {
+            let id = NEXT_STAGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.tray_mut(tray).staged.push(Staged {
                 id,
                 name,
                 size,
@@ -401,17 +450,17 @@ impl FuwaApp {
                 state: Upload::Uploading,
                 spoiler: false,
             });
-            self.upload_staged(id, path, cx);
+            self.upload_staged(tray, id, path, cx);
         }
         cx.notify();
     }
 
     /// Sends a staged file up (again).
-    fn upload_staged(&mut self, id: u64, path: PathBuf, cx: &mut Context<Self>) {
-        let Some((key, server, _)) = self.files.place.clone() else { return };
+    fn upload_staged(&mut self, tray: Tray, id: u64, path: PathBuf, cx: &mut Context<Self>) {
+        let Some((key, server, _, _)) = self.tray(tray).place.clone() else { return };
         let core = self.core.clone();
         self.run(cx, async move { core.upload_attachment(&key, &server, &path).await }, move |this, result, cx| {
-            if let Some(s) = this.files.staged.iter_mut().find(|s| s.id == id) {
+            if let Some((s, _)) = this.staged_mut(id) {
                 s.state = match result {
                     Ok(file) => Upload::Ready(file),
                     Err(problem) => {
@@ -429,53 +478,55 @@ impl FuwaApp {
     }
 
     fn retry_file(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(s) = self.files.staged.iter_mut().find(|s| s.id == id) else { return };
+        let Some((s, tray)) = self.staged_mut(id) else { return };
         s.state = Upload::Uploading;
         let path = s.path.clone();
-        self.upload_staged(id, path, cx);
+        self.upload_staged(tray, id, path, cx);
         cx.notify();
     }
 
     /// Marks a staged file as a spoiler, or stops marking it.
     fn toggle_spoiler(&mut self, id: u64, cx: &mut Context<Self>) {
-        if let Some(s) = self.files.staged.iter_mut().find(|s| s.id == id) {
+        if let Some((s, _)) = self.staged_mut(id) {
             s.spoiler = !s.spoiler;
         }
         cx.notify();
     }
 
     /// Whether files can be marked as spoilers where they'll go ("spoiler-files").
-    fn spoilers_here(&self) -> bool {
-        let Some((key, _, _)) = &self.files.place else { return false };
+    fn spoilers_here(&self, tray: Tray) -> bool {
+        let Some((key, _, _, _)) = &self.tray(tray).place else { return false };
         self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("spoiler-files")))
     }
 
     fn remove_file(&mut self, id: u64, cx: &mut Context<Self>) {
         self.files.staged.retain(|s| s.id != id);
+        self.thread_files.staged.retain(|s| s.id != id);
         cx.notify();
     }
 
     /// Whether files wait to go here.
-    pub(crate) fn has_files(&self) -> bool {
-        self.files_place().is_some_and(|place| self.files.place.as_ref() == Some(&place))
-            && !self.files.staged.is_empty()
+    pub(crate) fn has_files(&self, tray: Tray) -> bool {
+        self.files_place(tray).is_some_and(|place| self.tray(tray).place.as_ref() == Some(&place))
+            && !self.tray(tray).staged.is_empty()
     }
 
     /// The files ready to go with the message being sent, taken from the
     /// tray; Err with why not when some are still uploading or didn't upload.
-    pub(crate) fn take_files(&mut self) -> Result<Vec<pb::Attachment>, &'static str> {
-        if !self.has_files() {
+    pub(crate) fn take_files(&mut self, tray: Tray) -> Result<Vec<pb::Attachment>, &'static str> {
+        if !self.has_files(tray) {
             return Ok(Vec::new());
         }
-        if self.files.staged.iter().any(|s| matches!(s.state, Upload::Uploading)) {
+        let staged = &self.tray(tray).staged;
+        if staged.iter().any(|s| matches!(s.state, Upload::Uploading)) {
             return Err("Your files are still uploading.");
         }
-        if self.files.staged.iter().any(|s| matches!(s.state, Upload::Failed(_))) {
+        if staged.iter().any(|s| matches!(s.state, Upload::Failed(_))) {
             return Err("Remove the files that didn't upload first.");
         }
         // Marks go only to an instance that keeps them.
-        let marks = self.spoilers_here();
-        Ok(std::mem::take(&mut self.files.staged)
+        let marks = self.spoilers_here(tray);
+        Ok(std::mem::take(&mut self.tray_mut(tray).staged)
             .into_iter()
             .filter_map(|s| match s.state {
                 Upload::Ready(file) => Some(pb::Attachment { spoiler: s.spoiler && marks, ..file }),
@@ -486,11 +537,11 @@ impl FuwaApp {
 
     /// How the files waiting here are going: still uploading, any broken, and
     /// how much of them is up (0 to 1, by files, since uploads don't report bytes).
-    pub(crate) fn files_state(&self) -> FilesState {
-        if !self.has_files() {
+    pub(crate) fn files_state(&self, tray: Tray) -> FilesState {
+        if !self.has_files(tray) {
             return FilesState::default();
         }
-        let staged = &self.files.staged;
+        let staged = &self.tray(tray).staged;
         let up = staged.iter().filter(|s| matches!(s.state, Upload::Ready(_))).count();
         FilesState {
             uploading: staged.iter().any(|s| matches!(s.state, Upload::Uploading)),
@@ -502,31 +553,39 @@ impl FuwaApp {
 
     /// Clears files that were for somewhere else.
     pub(crate) fn forget_files_elsewhere(&mut self) {
-        if self.files.place.is_some() && self.files.place != self.files_place() {
-            self.files = Files::default();
+        for tray in [Tray::Channel, Tray::Thread] {
+            if self.tray(tray).place.is_some() && self.tray(tray).place != self.files_place(tray) {
+                *self.tray_mut(tray) = Files::default();
+            }
         }
     }
 
     /// The files going with the next message, inside the composer above the
     /// box (the web's `StagedTray`): a card each, with how its upload is going.
-    pub(crate) fn file_tray(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.has_files() {
+    pub(crate) fn file_tray(&self, tray: Tray, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.has_files(tray) {
             return None;
         }
-        let mut tray = div().flex().gap(px(8.0)).mx(px(-4.0)).px(px(4.0)).pt(px(4.0)).pb(px(8.0));
-        for s in &self.files.staged {
-            tray = tray.child(self.staged_card(s, p, cx));
+        let spoilers = self.spoilers_here(tray);
+        let mut row = div().flex().gap(px(8.0)).mx(px(-4.0)).px(px(4.0)).pt(px(4.0)).pb(px(8.0));
+        for s in &self.tray(tray).staged {
+            row = row.child(self.staged_card(s, spoilers, p, cx));
         }
         Some(
             div()
-                .id("staged-tray")
+                .id(SharedString::from(format!("staged-tray|{}", tray.tag())))
                 .overflow_x_scroll()
-                .child(motion::rise(tray, "staged-tray-rise", Duration::ZERO, 8.0))
+                .child(motion::rise(
+                    row,
+                    SharedString::from(format!("staged-tray-rise|{}", tray.tag())),
+                    Duration::ZERO,
+                    8.0,
+                ))
                 .into_any_element(),
         )
     }
 
-    fn staged_card(&self, s: &Staged, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn staged_card(&self, s: &Staged, spoilers: bool, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let id = s.id;
         let failed = match &s.state {
             Upload::Failed(why) => Some(why.clone()),
@@ -603,7 +662,7 @@ impl FuwaApp {
                     .child(failed.clone().unwrap_or_else(|| attachments::format_bytes(s.size))),
             );
         // Marked as a spoiler: dimmed under a sheet, as others will first see it covered.
-        let marked = s.spoiler && self.spoilers_here();
+        let marked = s.spoiler && spoilers;
         if marked {
             card = card.child(div().absolute().top_0().left_0().size_full().bg(if shown {
                 gpui_kit::hsla(0.0, 0.0, 0.0, 0.45)
@@ -680,7 +739,7 @@ impl FuwaApp {
             .right(px(4.0))
             .flex()
             .gap(px(4.0))
-            .when(self.spoilers_here(), |el| {
+            .when(spoilers, |el| {
                 let (name, on) = (s.name.clone(), s.spoiler);
                 let (bg, fg) = (p.primary, p.primary_foreground);
                 el.child(
@@ -723,6 +782,10 @@ impl FuwaApp {
     /// files passes over it.
     pub(crate) fn drop_overlay(&self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let gate = self.send_gate()?;
+        // With a thread open that takes files too, each box takes its own drops instead.
+        if self.can_attach(Tray::Thread) {
+            return None;
+        }
         if !gate.can_attach || gate.pending || gate.timed_out() || !gate.can_send || self.dialog.is_some() {
             return None;
         }
@@ -732,11 +795,9 @@ impl FuwaApp {
             .shared
             .read(|s| s.instance(&key).and_then(|i| i.channel(&server, &channel).map(|c| c.name.clone())))?;
         let heading = t_with("chat.files.dropToChannel", &[("channel", Arg::Str(&name))]);
-        Some(
-            self.drop_sheet(heading, t("chat.files.dropNote"), p, window, cx, |this, paths, cx| {
-                this.add_files(paths, cx)
-            }),
-        )
+        Some(self.drop_sheet(heading, t("chat.files.dropNote"), p, window, cx, |this, paths, cx| {
+            this.add_files(Tray::Channel, paths, cx)
+        }))
     }
 
     /// The sheet over the window while files are dragged over it, saying where
@@ -831,18 +892,25 @@ impl FuwaApp {
         .into_any_element()
     }
 
-    /// Tints the composer while files are dragged over it (the overlay takes the drop).
+    /// Tints a composer while files are dragged over it, and takes them when
+    /// they're dropped on it (the window's sheet takes them first while it's up).
     pub(crate) fn droppable<E: InteractiveElement + gpui_kit::Styled + 'static>(
         &self,
+        tray: Tray,
         el: E,
         p: &Palette,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> E {
-        if !self.can_attach() {
+        if !self.can_attach(tray) {
             return el;
         }
         let (bg, border) = (alpha(p.primary, 0.08), p.primary);
-        el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(bg).border_color(border))
+        el.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(bg).border_color(border)).on_drop(cx.listener(
+            move |this, paths: &ExternalPaths, _, cx| {
+                cx.stop_propagation();
+                this.add_files(tray, paths.paths().to_vec(), cx)
+            },
+        ))
     }
 
     /// Asks where to save a file, then saves it there.
