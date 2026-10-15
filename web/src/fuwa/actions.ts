@@ -53,6 +53,7 @@ import type { Clip } from "@/voice/recorder";
 import { forgetAccount, forgetInstance } from "./accounts";
 import { evicted, KEEP_AT_BOTTOM, KEEP_PAGE, touched, trimmed } from "./lists";
 import { addAccount, dropAccount, engine, follow, keptAccounts, removeInstance } from "./sync";
+import { noteFocusRead, noteMarkedRead } from "./reads";
 import {
   addServer,
   applyEvent,
@@ -1658,8 +1659,10 @@ function evictFor(s: FuwaState, key: string, channelId: string, threadId: string
 
 /** Marks a thread as open beside its channel and clears its unread count; null when it closes. */
 export function focusThread(key: string, threadId: string | null) {
+  let moved = false;
   store.update((s) => {
     if (s.focus?.instance !== key || (s.focus.thread ?? null) === threadId) return s;
+    moved = true;
     const focus = { ...s.focus, thread: threadId ?? undefined };
     const inst = s.instances[key];
     let next: FuwaState = { ...s, focus };
@@ -1669,13 +1672,17 @@ export function focusThread(key: string, threadId: string | null) {
     }
     return evictFor(next, key, focus.channel, threadId);
   });
+  // Read here, so your other devices stop showing it unread.
+  if (moved && threadId) noteFocusRead();
 }
 
 /** Marks a channel as the one on screen and clears its unread count. */
 export function focusChannel(key: string | null, channelId: string | null) {
+  let changed = false;
   store.update((s) => {
     const focus = key && channelId ? { instance: key, channel: channelId } : null;
     const moved = !(s.focus?.instance === focus?.instance && s.focus?.channel === focus?.channel);
+    changed = moved;
     let next = moved ? { ...s, focus } : s;
     const inst = key ? next.instances[key] : undefined;
     if (inst && channelId && inst.unread[channelId]) {
@@ -1684,6 +1691,8 @@ export function focusChannel(key: string | null, channelId: string | null) {
     }
     return moved && key && channelId ? evictFor(next, key, channelId, null) : next;
   });
+  // Read here, so your other devices stop showing it unread.
+  if (changed && key && channelId) noteFocusRead();
 }
 
 /**
@@ -1702,9 +1711,18 @@ export function trimToLatest(key: string, at: string, keep = KEEP_AT_BOTTOM) {
   });
 }
 
+/** Which of these channels show unread and aren't secure (those go by what each device noted it read). */
+function unreadPlain(key: string, channelIds: readonly string[]): string[] {
+  const inst = store.get().instances[key];
+  if (!inst) return [];
+  const secure = new Set(Object.values(inst.channels).flatMap((list) => list.filter((c) => c.type === ChannelType.SECURE).map((c) => c.id)));
+  return channelIds.filter((id) => inst.unread[id] && !secure.has(id));
+}
+
 /** Clears the unread counts of every channel in a server. Returns how many channels had some. */
 export function markServerRead(key: string, serverId: string): number {
   let cleared = 0;
+  noteMarkedRead(key, unreadPlain(key, (store.get().instances[key]?.channels[serverId] ?? []).map((c) => c.id)));
   updateInstance(key, (i) => {
     const unread = { ...i.unread };
     for (const channel of i.channels[serverId] ?? []) {
@@ -1720,6 +1738,7 @@ export function markServerRead(key: string, serverId: string): number {
 /** Clears the unread counts of some channels, such as one channel or a category's. Returns how many had some. */
 export function markChannelsRead(key: string, channelIds: string[]): number {
   let cleared = 0;
+  noteMarkedRead(key, unreadPlain(key, channelIds));
   updateInstance(key, (i) => {
     const unread = { ...i.unread };
     for (const id of channelIds) {

@@ -75,7 +75,8 @@ export function newerHeads(i: InstanceState, heads: ChannelHeads, known: Readonl
 export function withHeads(i: InstanceState, news: HeadNews[], focusChannel: string | null): InstanceState {
   let unread = i.unread;
   for (const n of news) {
-    if (n.channelId === focusChannel) continue;
+    // Read up to there already, here or on another device (read-marks.ts).
+    if (n.channelId === focusChannel || n.lastMessageId <= (i.readMarks[n.channelId] ?? "")) continue;
     unread = { ...unread, [n.channelId]: (unread[n.channelId] ?? 0) + 1 };
   }
   return unread === i.unread ? i : { ...i, unread };

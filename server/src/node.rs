@@ -40,7 +40,12 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0026_agent_endpoints.sql"),
     include_str!("../migrations/node/0027_profile_item_pictures.sql"),
     include_str!("../migrations/node/0028_app_settings.sql"),
+    include_str!("../migrations/node/0029_read_marks.sql"),
 ];
+
+/// The places one account's read marks are kept for, at most; past it the
+/// ones longest unmoved are forgotten (those places just show unread again).
+pub const MAX_READ_MARKS: i64 = 20_000;
 
 /// Notes that the instance's profile items changed now (`Node.profile_items_at`).
 async fn items_changed(conn: &Connection) -> Result<()> {
@@ -1741,6 +1746,96 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── Read marks ─────────────────────────
+
+    /// Moves someone's read marks forward (docs/read-marks.md), from checked
+    /// marks (`crate::reads::check`). Returns each place as kept now and
+    /// whether it moved; a mark behind the one kept leaves it as it was. Past
+    /// [`MAX_READ_MARKS`] places, the ones longest unmoved are forgotten.
+    pub async fn mark_read(&self, account_id: &str, marks: &[pb::ReadMark]) -> Result<Vec<(pb::ReadMark, bool)>> {
+        let now = now_ms();
+        db::write(&self.db, async |conn| {
+            let mut kept = Vec::with_capacity(marks.len());
+            let mut added = false;
+            for mark in marks {
+                let before = query_one(
+                    conn,
+                    "SELECT message_id, sequence, at_ms FROM read_marks WHERE account_id = ?1 AND place = ?2",
+                    (account_id, mark.place.as_str()),
+                    |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?, r.get::<i64>(2)?)),
+                )
+                .await?;
+                let (message_id, sequence, at_ms, moved) = match before {
+                    None => {
+                        conn.execute(
+                            "INSERT INTO read_marks (account_id, place, message_id, sequence, at_ms)
+                             VALUES (?1, ?2, ?3, ?4, ?5)",
+                            (account_id, mark.place.as_str(), mark.message_id.as_str(), mark.sequence, now),
+                        )
+                        .await?;
+                        added = true;
+                        (mark.message_id.clone(), mark.sequence, now, true)
+                    }
+                    Some((old_id, old_sequence, at_ms)) => {
+                        let message_id = old_id.clone().max(mark.message_id.clone());
+                        let sequence = old_sequence.max(mark.sequence);
+                        if message_id == old_id && sequence == old_sequence {
+                            (message_id, sequence, at_ms, false)
+                        } else {
+                            conn.execute(
+                                "UPDATE read_marks SET message_id = ?3, sequence = ?4, at_ms = ?5
+                                 WHERE account_id = ?1 AND place = ?2",
+                                (account_id, mark.place.as_str(), message_id.as_str(), sequence, now),
+                            )
+                            .await?;
+                            (message_id, sequence, now, true)
+                        }
+                    }
+                };
+                kept.push((pb::ReadMark { place: mark.place.clone(), message_id, sequence, at_ms }, moved));
+            }
+            if added {
+                let count =
+                    query_one(conn, "SELECT count(*) FROM read_marks WHERE account_id = ?1", [account_id], |r| {
+                        r.get::<i64>(0)
+                    })
+                    .await?
+                    .unwrap_or(0);
+                if count > MAX_READ_MARKS {
+                    conn.execute(
+                        "DELETE FROM read_marks WHERE account_id = ?1 AND place IN (
+                           SELECT place FROM read_marks WHERE account_id = ?1 ORDER BY at_ms LIMIT ?2)",
+                        (account_id, count - MAX_READ_MARKS),
+                    )
+                    .await?;
+                }
+            }
+            Ok(kept)
+        })
+        .await
+    }
+
+    /// Someone's read marks that moved at or after `after_ms`, oldest first,
+    /// at most `limit`.
+    pub async fn read_marks_since(&self, account_id: &str, after_ms: i64, limit: i64) -> Result<Vec<pb::ReadMark>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT place, message_id, sequence, at_ms FROM read_marks
+             WHERE account_id = ?1 AND at_ms >= ?2 ORDER BY at_ms LIMIT ?3",
+            (account_id, after_ms, limit),
+            |r| {
+                Ok(pb::ReadMark {
+                    place: r.get::<String>(0)?,
+                    message_id: r.get::<String>(1)?,
+                    sequence: r.get::<i64>(2)?,
+                    at_ms: r.get::<i64>(3)?,
+                })
+            },
+        )
+        .await
+    }
+
     // ───────────────────────── Server arrangement ─────────────────────────
 
     /// How someone arranged their servers, and when (ms), as stored: it can
@@ -2511,6 +2606,7 @@ impl NodeDb {
                 "upload_days",
                 "server_arrangements",
                 "app_settings",
+                "read_marks",
                 "attachment_days",
                 "saved_gifs",
                 "presence_settings",

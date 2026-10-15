@@ -25,7 +25,7 @@ use tonic::Code;
 use crate::core::api::Api;
 use crate::core::config::Prefs;
 use crate::core::store::{self, ChannelMessages, InstanceState, Store};
-use crate::core::{Area, Core, Watch, dms, notifications, threads};
+use crate::core::{Area, Core, Watch, dms, notifications, read_marks, threads};
 use crate::pb;
 use crate::rpc;
 
@@ -136,7 +136,10 @@ pub fn apply_heads(
                 continue;
             }
             i.newest.insert(head.channel_id.clone(), head.last_message_id.clone());
-            if focus == Some(head.channel_id.as_str()) {
+            // Read up to there already, here or on another device (`read_marks.rs`).
+            if focus == Some(head.channel_id.as_str())
+                || read_marks::read_already(i, &head.channel_id, &head.last_message_id)
+            {
                 continue;
             }
             *i.unread.entry(head.channel_id.clone()).or_default() += 1;
@@ -632,6 +635,21 @@ mod tests {
         assert_eq!(i.unread.get("c1"), Some(&1));
         apply_heads(&mut i, &heads(&[("c1", "08")]), None, &prefs, 0);
         assert_eq!(i.unread.get("c1"), Some(&2));
+    }
+
+    #[test]
+    fn heads_another_device_read_up_to_count_nothing() {
+        let mut i = instance();
+        i.read_marks.insert("c1".into(), "07".into());
+        let everything = Prefs { notify_for: crate::core::config::NotifyFor::All, ..Prefs::default() };
+        let missed = apply_heads(&mut i, &heads(&[("c1", "07"), ("c2", "04")]), None, &everything, 0);
+        assert_eq!(missed.iter().map(|m| m.channel_id.as_str()).collect::<Vec<_>>(), ["c2"]);
+        assert_eq!(i.unread.get("c1"), None);
+        assert_eq!(i.unread.get("c2"), Some(&1));
+        // It still moves the channel on, and what comes after counts.
+        assert_eq!(store::newest_known(&i, "c1"), Some("07"));
+        apply_heads(&mut i, &heads(&[("c1", "08")]), None, &everything, 0);
+        assert_eq!(i.unread.get("c1"), Some(&1));
     }
 
     #[test]

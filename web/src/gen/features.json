@@ -40,6 +40,7 @@
     { "id": "app-settings-sync", "date": "2026-10-14", "title": "App settings on every device" },
     { "id": "spoiler-files", "date": "2026-10-14", "title": "Files marked as spoilers" },
     { "id": "typing", "date": "2026-10-14", "title": "Typing indicators" },
-    { "id": "gacha", "date": "2026-10-14", "title": "Gacha banners in the shop" }
+    { "id": "gacha", "date": "2026-10-14", "title": "Gacha banners in the shop" },
+    { "id": "read-marks", "date": "2026-10-15", "title": "Unread marks cleared on every device" }
   ]
 }

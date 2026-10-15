@@ -348,9 +348,14 @@ async fn follow_live(
 ) -> Result<(), Problem> {
     let state = Arc::new(Mutex::new(Follow::default()));
     let mut backoff = Backoff::new();
+    // The newest read mark heard (docs/read-marks.md): a connection opened
+    // again asks for what came from there on.
+    let mut reads_after = 0;
     loop {
         let ids = followed.borrow_and_update().clone();
         let focus = core.shared.read(|s| live::choose_focus(s, key));
+        // Your other devices' read marks, from where this connection last heard them.
+        let reads = core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("read-marks")));
         // Only while there's a device here to read them with.
         let direct_messages = core.shared.read(|s| s.instance(key).is_some_and(|i| i.dms.status != DmStatus::Failed));
         let request = {
@@ -369,9 +374,12 @@ async fn follow_live(
                 presence: true,
                 messages: pb::MessageIntent::Unspecified as i32,
                 focus: Some(focus),
+                reads,
+                reads_after,
             }
         };
-        let outcome = live_once(core, key, api, request, &state, &mut backoff, &mut followed, dms).await;
+        let outcome =
+            live_once(core, key, api, request, &state, &mut backoff, &mut followed, dms, &mut reads_after).await;
         core.shared.instance(key, |i| i.live = None);
         match outcome {
             // The server stopped (an older one, for a deploy), or a server
@@ -436,6 +444,7 @@ async fn live_once(
     backoff: &mut Backoff,
     followed: &mut watch::Receiver<Vec<String>>,
     dms: &Arc<Mutex<Option<Arc<DmEngine>>>>,
+    reads_after: &mut i64,
 ) -> Result<(), Problem> {
     use pb::open_response::Item;
     let mut catching_up = Some(std::time::Instant::now());
@@ -490,6 +499,7 @@ async fn live_once(
                         notifier.pump(core, key, api, &mut tasks);
                     }
                     Some(Item::Focus(now)) => focus.echoed(api, now, &mut tasks),
+                    Some(Item::Reads(reads)) => *reads_after = core.take_read_marks(key, &reads, *reads_after),
                 }
             }
             Some(done) = tasks.join_next(), if !tasks.is_empty() => {
@@ -704,6 +714,10 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     });
     if let Some(notice) = notice {
         core.shared.notice(notice);
+    }
+    // In the channel or thread on screen, that's read on your other devices too.
+    if let Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = &event.payload {
+        core.note_arrived(key, m);
     }
     // Secure channels' records, and changes to who can read them, go to the encryption.
     if let Some(payload) = &event.payload

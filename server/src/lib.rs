@@ -32,6 +32,7 @@ pub mod presence;
 pub mod previews;
 pub mod probes;
 pub mod profile_items;
+pub mod reads;
 pub mod recordings;
 pub mod releases;
 pub mod replica;

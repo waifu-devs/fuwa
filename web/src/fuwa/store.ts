@@ -214,6 +214,11 @@ export type InstanceState = {
   followed: Record<string, Record<string, true>>;
   /** Per thread you follow: replies from others that came while it wasn't open. */
   threadUnread: Record<string, number>;
+  /**
+   * Per channel or thread: the newest message you read there, on this device
+   * or another (read-marks.ts). Messages up to it don't count as unread.
+   */
+  readMarks: Record<string, string>;
   /** Servers whose channels and members are loaded. */
   synced: Record<string, boolean>;
   /** Your notification settings, by `notificationKey`. Only servers and channels that have some. */
@@ -299,6 +304,7 @@ export function emptyInstance(key: string, url: string, account = ""): InstanceS
     threadParents: {},
     followed: {},
     threadUnread: {},
+    readMarks: {},
     synced: {},
     notifications: {},
     rail: null,
@@ -638,7 +644,8 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
           !seen &&
           message.authorId !== i.me?.id &&
           focusThread !== message.threadId &&
-          next.followed[sid]?.[message.threadId]
+          next.followed[sid]?.[message.threadId] &&
+          message.id > (next.readMarks[message.threadId] ?? "")
         ) {
           next = { ...next, threadUnread: { ...next.threadUnread, [message.threadId]: (next.threadUnread[message.threadId] ?? 0) + 1 } };
         }
@@ -656,7 +663,8 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         p.case === "messageCreated" &&
         !known &&
         message.authorId !== i.me?.id &&
-        focusChannel !== message.channelId
+        focusChannel !== message.channelId &&
+        message.id > (next.readMarks[message.channelId] ?? "")
       ) {
         next = { ...next, unread: { ...next.unread, [message.channelId]: (next.unread[message.channelId] ?? 0) + 1 } };
       }

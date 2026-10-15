@@ -43,6 +43,66 @@ fn feed<T: Send + 'static>(
     Box::pin(stream.map(move |next| next.map(|r| pb::OpenResponse { item: Some(item(r)) })))
 }
 
+impl Api {
+    /// Someone's read marks (docs/read-marks.md): the ones taken at or after
+    /// `after_ms` (none for 0), `ready`, then each batch as it's taken. A
+    /// connection that falls behind is sent what it missed from node.db.
+    fn reads_feed(
+        &self,
+        account_id: &str,
+        after_ms: i64,
+    ) -> Result<mpsc::Receiver<Result<pb::ReadMarks, Status>>, Error> {
+        // Listening before reading what's kept, so nothing falls in between;
+        // a mark heard twice changes nothing.
+        let mut live = self.app.reads.watch(account_id);
+        let app = self.app.clone();
+        let account_id = account_id.to_string();
+        app.node()?;
+        let (tx, rx) = mpsc::channel(16);
+        tokio::spawn(async move {
+            let replay = async |after_ms: i64| -> Result<Vec<pb::ReadMark>, Error> {
+                match after_ms > 0 {
+                    true => app.node()?.read_marks_since(&account_id, after_ms, crate::reads::MAX_REPLAY).await,
+                    false => Ok(Vec::new()),
+                }
+            };
+            let mut last = if after_ms > 0 { after_ms } else { crate::id::now_ms() };
+            let marks = match replay(after_ms).await {
+                Ok(marks) => marks,
+                Err(err) => {
+                    let _ = tx.send(Err(err.into())).await;
+                    return;
+                }
+            };
+            last = marks.iter().map(|m| m.at_ms).max().unwrap_or(last);
+            if tx.send(Ok(pb::ReadMarks { marks, ready: true })).await.is_err() {
+                return;
+            }
+            loop {
+                let marks = tokio::select! {
+                    _ = tx.closed() => return,
+                    next = live.recv() => match next {
+                        Ok(marks) => (*marks).clone(),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => match replay(last).await {
+                            Ok(marks) => marks,
+                            Err(err) => {
+                                let _ = tx.send(Err(err.into())).await;
+                                return;
+                            }
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    },
+                };
+                last = marks.iter().map(|m| m.at_ms).max().unwrap_or(last).max(last);
+                if !marks.is_empty() && tx.send(Ok(pb::ReadMarks { marks, ready: false })).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(rx)
+    }
+}
+
 #[tonic::async_trait]
 impl LiveService for Api {
     type OpenStream = OpenStream;
@@ -83,6 +143,9 @@ impl LiveService for Api {
         if req.presence {
             let rx = self.presence_feed(caller.clone(), Some(opened.focus.clone())).await?;
             feeds.push(feed(ReceiverStream::new(rx), Item::Presence));
+        }
+        if req.reads && !agent {
+            feeds.push(feed(ReceiverStream::new(self.reads_feed(&caller.account.id, req.reads_after)?), Item::Reads));
         }
 
         let (tx, rx) = mpsc::channel::<Result<pb::OpenResponse, Status>>(256);

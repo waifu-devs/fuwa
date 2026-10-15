@@ -77,6 +77,9 @@ meet. A head lights a channel's unread mark; for channels set to notify on
 every message, the app reads what the head covers and notifies from that.
 Heads don't say which thread moved, so threads someone follows light up only
 when their channel is in focus or the reply mentions them.
+A channel, thread or conversation read on another device clears here too:
+the stream carries your [read marks](read-marks.md) when asked (`reads`),
+and heads at or before a mark light nothing.
 
 ## Presence
 

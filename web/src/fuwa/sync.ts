@@ -10,6 +10,7 @@ import { dmEngine, startDms, stopDms } from "@/e2ee/engine";
 import { loadApplied } from "@/lib/applied";
 import { adoptInstanceKeys, forgetAccount } from "./accounts";
 import { closeNotifications, onLiveEvent, onRemoved } from "@/lib/notify";
+import { noteArrived, takeReadMarks } from "./reads";
 import { effectiveNotifications } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
@@ -741,6 +742,7 @@ const followEvents = (
           const during = touched && rereading.get(touched.channelId);
           if (touched && during) (touched.deleted ? during.deleted : during.changed).add(touched.messageId);
           onLiveEvent(key, event);
+          if (event.payload.case === "messageCreated") noteArrived(key, event.payload.value.message);
           dmEngine(key)?.onServerEvent(event);
           onPinEvent(key, event);
           onModEvent(key, event);
@@ -989,6 +991,9 @@ const followEvents = (
       );
 
     const person = live.person;
+    // The newest read mark heard (docs/read-marks.md): a connection opened
+    // again asks for what came from there on.
+    let readsAfter = 0n;
     const onLive = (res: OpenResponse) =>
       Effect.gen(function* () {
         const item = res.item;
@@ -1016,6 +1021,9 @@ const followEvents = (
             return yield* onHeads(item.value);
           case "focus":
             return yield* onFocus(item.value);
+          case "reads":
+            readsAfter = takeReadMarks(key, item.value, readsAfter);
+            return;
         }
         // Nothing set: the heartbeat, which only keeps the silence timeout away.
       });
@@ -1041,6 +1049,9 @@ const followEvents = (
               friends: person,
               presence: true,
               focus: told,
+              // Your other devices' read marks, from where this connection last heard them.
+              reads: person && instanceHas(store.get().instances[key]?.node?.versions, "read-marks"),
+              readsAfter,
             };
             return Stream.fromAsyncIterable<OpenResponse, FuwaError>(api.live.open(request, { signal: controller.signal }), toFuwaError).pipe(
               Stream.concat(Stream.fail(ENDED)),
