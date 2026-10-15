@@ -1,6 +1,6 @@
 [package]
 name = "fuwa-desktop"
-version = "0.5.3"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.91"
 description = "fuwa for Windows, macOS and Linux: a native app (GPUI Kit) for any fuwa instance"
