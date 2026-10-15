@@ -190,6 +190,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
               pendingIn={inChannel}
               threads={hooks}
               reacting={reacting}
+              canReply={canSend}
             />
             <SecureComposer instanceKey={instanceKey} serverId={serverId} channel={channel} canSend={canSend} canAttach={canAttach} canReset={canReset} />
             <SecureChannelDialog

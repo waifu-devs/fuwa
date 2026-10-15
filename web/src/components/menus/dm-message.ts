@@ -1,11 +1,14 @@
-import { CopyIcon, MessageSquareReplyIcon, PencilIcon, PinIcon, PinOffIcon, SmileIcon, SmilePlusIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, MessageSquareReplyIcon, PencilIcon, PinIcon, PinOffIcon, ReplyIcon, SmileIcon, SmilePlusIcon, Trash2Icon } from "lucide-react";
 import type { MenuTrigger } from "@/components/ContextMenu";
 import { targetSection, type MessageMenuActions } from "@/components/menus/message";
 import { i18n } from "@/i18n/i18n";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 
 /** What a direct message's (or secure channel's) own buttons can do; the moderation a channel has doesn't apply. */
-export type DmMessageMenuActions = Pick<MessageMenuActions, "thread" | "edit" | "copyText" | "pin" | "react" | "reactions" | "delete">;
+export type DmMessageMenuActions = Pick<MessageMenuActions, "thread" | "edit" | "copyText" | "pin" | "react" | "reactions" | "delete"> & {
+  /** Answer it from the composer, quoting it. */
+  reply?: () => void;
+};
 
 /**
  * A line's menu in a direct message or secure channel, with the same
@@ -29,6 +32,7 @@ export function dmMessageMenu(ctx: MenuContexts["dm_message"], trigger: MenuTrig
       {
         id: "primary",
         items: items(
+          actions.reply && { id: "reply", label: t("workspace.menu.message.reply"), icon: ReplyIcon, onSelect: actions.reply },
           actions.thread && { id: "thread", label: actions.thread.open ? t("workspace.menu.message.openThread") : t("workspace.menu.message.replyInThread"), icon: MessageSquareReplyIcon, onSelect: actions.thread.go },
           actions.edit && { id: "edit", label: t("workspace.menu.message.edit"), icon: PencilIcon, onSelect: actions.edit },
           actions.copyText && { id: "copy-text", label: t("workspace.menu.message.copyText"), icon: CopyIcon, onSelect: actions.copyText },

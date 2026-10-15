@@ -210,6 +210,9 @@ impl FuwaApp {
             ),
         };
         let lines = Lines { items: lines, pending: &*pending, place, dress: &dress, in_thread: thread.is_some() };
+        // Lines are answered from the box under them: in a locked thread only moderators write.
+        let can_reply =
+            can_send && thread.is_none_or(|parent| manage || !org.threads.get(&parent).is_some_and(|t| t.locked));
         let mut rows = crate::ui::dm_view::encrypted_rows(
             i,
             channel,
@@ -222,6 +225,7 @@ impl FuwaApp {
             &question,
             Some(lines),
             react,
+            can_reply,
         );
         if thread.is_some() {
             // The panel draws the thread's message itself.
@@ -299,7 +303,8 @@ impl FuwaApp {
         crate::ui::dm_view::set_problem(&place, None);
         let core = self.core.clone();
         let text = self.encode_emoji(&text);
-        let content = Content::Reply { text, thread: parent, in_channel: also, files: Vec::new() };
+        let reply_to = crate::ui::dm_view::take_replying(&place);
+        let content = Content::Reply { text, thread: parent, in_channel: also, files: Vec::new(), reply_to };
         self.run(cx, async move { core.send_dm(&key, &channel, content).await }, move |this, result, cx| {
             crate::ui::dm_view::set_problem(&place, result.err().map(|e| e.0));
             this.sync_list(cx);

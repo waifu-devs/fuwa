@@ -142,8 +142,8 @@ type Room = {
   /** Passes earlier messages on, right after this device's commit that added devices. */
   history(ciphertext: Uint8Array): Promise<void>;
   remove(seq: number): Promise<void>;
-  /** A message someone else sent, just opened. */
-  notify(item: vault.Item): void;
+  /** A message someone else sent, just opened; `answersMe` when it replies to one of this account's. */
+  notify(item: vault.Item, answersMe: boolean): void;
 };
 
 /** A secure channel this device follows. */
@@ -728,7 +728,7 @@ export class DmEngine {
       remove: async (seq) => {
         await secure.deleteSecureRecord({ ...at, sequence: BigInt(seq) }, CALL);
       },
-      notify: (i) => onSecureMessage(this.key, sc.serverId, id, i.senderId, vault.lineText(i), i.at),
+      notify: (i, answersMe) => onSecureMessage(this.key, sc.serverId, id, i.senderId, vault.lineText(i), i.at, answersMe),
     };
   }
 
@@ -779,7 +779,8 @@ export class DmEngine {
         // A reply kept to its thread only reaches you if you follow the thread.
         const parent = c.channel ? threads.threadOf(i, known) : 0;
         if (parent && !i.inChannel && !threads.following(note, parent, lines, this.me.id)) continue;
-        c.notify(i);
+        // A reply to one of yours reaches you like a mention: only this device can tell what it answers.
+        c.notify(i, i.replyTo > 0 && known.get(i.replyTo)?.senderId === this.me.id);
       }
       if (rejoin) {
         if (depth < 2) await this.catchUp(id, depth + 1);

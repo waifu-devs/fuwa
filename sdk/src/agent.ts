@@ -5,7 +5,7 @@ import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
 import type { Balance, LiveTile, LiveTileContentSchema, ModReportReason } from "./gen/fuwa/v1/types_pb.js";
-import type { GrantResponse } from "./gen/fuwa/v1/economy_pb.js";
+import type { GrantResponse, PullResponse } from "./gen/fuwa/v1/economy_pb.js";
 import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
   AccountKind,
@@ -509,6 +509,15 @@ export class Agent {
   async wallet(serverId: string, userId = ""): Promise<Balance[]> {
     const { balances } = await this.api.economy.getWallet({ serverId, userId });
     return balances;
+  }
+
+  /**
+   * Pulls on one of a server's gacha banners with the agent's own balance:
+   * once, or the banner's multi-pull (`count`). What dropped is in
+   * `pull.results`, each with its tier, prize and the rolls that drew it.
+   */
+  async pull(serverId: string, bannerId: string, count = 1): Promise<PullResponse> {
+    return this.api.economy.pull({ serverId, bannerId, count, expectedPrice: 0n });
   }
 
   /** Who reacted to a message with an emoji, the earliest first (up to 100). */

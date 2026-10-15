@@ -167,6 +167,8 @@ pub struct DmPending {
     /// In a secure channel: the thread it replies in (0: none), and whether it goes to the channel too.
     pub thread: i64,
     pub in_channel: bool,
+    /// The record of the line it answers (0: none).
+    pub reply_to: i64,
 }
 
 /// A number for a message on its way, unique while the app runs.
@@ -224,13 +226,16 @@ pub enum Content {
     Files {
         text: String,
         files: Vec<pb::SealedFile>,
+        reply_to: i64,
     },
     /// A secure channel's thread reply (with files, if any), and whether it goes to the channel too.
+    /// `reply_to` is a line in the thread it answers, quoted (0: none).
     Reply {
         text: String,
         thread: i64,
         in_channel: bool,
         files: Vec<pb::SealedFile>,
+        reply_to: i64,
     },
     /// A moderator locking or unlocking the thread under a secure channel's message.
     Lock {
@@ -293,14 +298,18 @@ fn plain_content_of(content: &Content) -> pb::DirectMessageContent {
             Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone(), ..Default::default() })
         }
         Content::Voice(voice) => Body::Voice(voice.clone()),
-        Content::Files { text, files } => {
-            Body::Text(pb::DirectMessageText { content: text.clone(), files: files.clone(), ..Default::default() })
-        }
-        Content::Reply { text, thread, in_channel, files } => Body::Text(pb::DirectMessageText {
+        Content::Files { text, files, reply_to } => Body::Text(pb::DirectMessageText {
+            content: text.clone(),
+            files: files.clone(),
+            reply_to_sequence: *reply_to,
+            ..Default::default()
+        }),
+        Content::Reply { text, thread, in_channel, files, reply_to } => Body::Text(pb::DirectMessageText {
             content: text.clone(),
             thread_sequence: *thread,
             in_channel: *in_channel,
             files: files.clone(),
+            reply_to_sequence: *reply_to,
             ..Default::default()
         }),
         Content::Lock { parent, locked } => {
@@ -1025,11 +1034,13 @@ impl DmEngine {
         Ok(())
     }
 
-    /// A message someone else sent, just opened.
-    fn notify(&self, room: &Room, item: &Item) {
+    /// A message someone else sent, just opened; `answers_me` when it replies to one of this account's.
+    fn notify(&self, room: &Room, item: &Item, answers_me: bool) {
         match room {
             Room::Dm(c) => self.shared.notify_dm(&self.key, c, item),
-            Room::Channel { id, server_id, .. } => self.shared.notify_secure(&self.key, server_id, id, item),
+            Room::Channel { id, server_id, .. } => {
+                self.shared.notify_secure(&self.key, server_id, id, item, answers_me)
+            }
         }
     }
 
@@ -1116,7 +1127,10 @@ impl DmEngine {
                 {
                     continue;
                 }
-                self.notify(&room, &item);
+                // A reply to one of yours reaches you like a mention: only this device can tell what it answers.
+                let answers_me =
+                    item.reply_to > 0 && seqs.get(&item.reply_to).is_some_and(|i| i.sender_id == self.me.id);
+                self.notify(&room, &item, answers_me);
             }
             if rejoin {
                 if depth < 2 {
@@ -2275,14 +2289,14 @@ impl crate::core::Core {
                 .get(id)?
                 .iter()
                 .find(|p| p.nonce == nonce)
-                .map(|p| (p.text.clone(), p.thread, p.in_channel))
+                .map(|p| (p.text.clone(), p.thread, p.in_channel, p.reply_to))
         });
-        let Some((text, thread, in_channel)) = text else { return Ok(()) };
+        let Some((text, thread, in_channel, reply_to)) = text else { return Ok(()) };
         self.dismiss_dm(key, id, nonce);
         let content = if thread > 0 {
-            Content::Reply { text, thread, in_channel, files: Vec::new() }
+            Content::Reply { text, thread, in_channel, files: Vec::new(), reply_to }
         } else {
-            Content::Text { text, reply_to: 0 }
+            Content::Text { text, reply_to }
         };
         self.send_dm(key, id, content).await
     }
@@ -2321,8 +2335,15 @@ mod pending_tests {
     #[test]
     fn a_message_that_went_leaves_and_one_that_didnt_says_why() {
         let mut dms = DmState::default();
-        let pending =
-            |nonce| DmPending { nonce, text: "hi".into(), created_at: 0, failed: None, thread: 0, in_channel: false };
+        let pending = |nonce| DmPending {
+            nonce,
+            text: "hi".into(),
+            created_at: 0,
+            failed: None,
+            thread: 0,
+            in_channel: false,
+            reply_to: 0,
+        };
         dms.sending.insert("c".into(), vec![pending(1), pending(2)]);
         settle_pending(&mut dms, "c", 1, &Ok(()));
         settle_pending(&mut dms, "c", 2, &Err(DmError("nope".into())));

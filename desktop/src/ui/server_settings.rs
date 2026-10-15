@@ -1360,6 +1360,8 @@ fn field_label(field: &str) -> String {
         "transferable" => t("desktop.economy.audit.field.transferable"),
         "earn" => t("desktop.economy.audit.field.earn"),
         "icon" => t("desktop.economy.audit.field.icon"),
+        "gacha_only" => t("serversettings.audit.field.gachaOnly"),
+        "rates" => t("serversettings.audit.field.rates"),
         other => other.to_owned(),
     }
 }
@@ -1372,12 +1374,12 @@ fn value(field: &str, raw: &str, entry: &pb::AuditEntry, people: &People, channe
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     match field {
         "discoverable" | "enabled" | "hoist" | "mentionable" | "applications" | "linked_only" | "available"
-        | "transferable" => yes_no(raw),
+        | "transferable" | "gacha_only" => yes_no(raw),
         "stock" if raw.is_empty() => t("settings.controls.noLimit"),
         "amount" | "price" | "stock" => {
             raw.parse::<i64>().map(crate::core::economy::amount_text).unwrap_or_else(|_| raw.to_owned())
         }
-        "earn" if raw == "changed" => t("desktop.economy.audit.value.changed"),
+        "earn" | "rates" if raw == "changed" => t("desktop.economy.audit.value.changed"),
         "status" if entry.action == A::ModCaseUpdate as i32 => {
             match raw.parse::<i32>().ok().and_then(|s| pb::ModCaseStatus::try_from(s).ok()) {
                 Some(status) => t(crate::core::mod_view::status_key(status)),
@@ -1706,6 +1708,19 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
                 A::ShopListingCreate => "desktop.economy.audit.s.listingCreate",
                 A::ShopListingUpdate => "desktop.economy.audit.s.listingUpdate",
                 _ => "desktop.economy.audit.s.listingDelete",
+            };
+            t_with(key, &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))])
+        }
+        A::GachaBannerCreate | A::GachaBannerUpdate | A::GachaBannerDelete => {
+            let name = match entry.action() {
+                A::GachaBannerDelete => change("name").map(|_| before.clone()),
+                _ => change("name").map(|_| after.clone()),
+            }
+            .unwrap_or_else(|| format!("**{}**", t("serversettings.audit.aBanner")));
+            let key = match entry.action() {
+                A::GachaBannerCreate => "serversettings.audit.s.bannerCreate",
+                A::GachaBannerUpdate => "serversettings.audit.s.bannerUpdate",
+                _ => "serversettings.audit.s.bannerDelete",
             };
             t_with(key, &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))])
         }

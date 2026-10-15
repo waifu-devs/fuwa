@@ -109,7 +109,7 @@ pub(super) async fn currencies(conn: &turso::Connection, server_id: &str) -> Res
     .collect()
 }
 
-async fn load_currency(conn: &turso::Connection, server_id: &str, id: &str) -> Result<pb::Currency> {
+pub(super) async fn load_currency(conn: &turso::Connection, server_id: &str, id: &str) -> Result<pb::Currency> {
     let row = query_one(
         conn,
         &format!("SELECT {CURRENCY_COLUMNS} FROM currencies WHERE id = ?1"),
@@ -286,8 +286,7 @@ fn currency_audit(action: pb::AuditAction, before: &pb::Currency, after: &pb::Cu
 
 // The shop.
 
-const LISTING_COLUMNS: &str =
-    "id, currency_id, kind, target_id, name, description, price, stock, sold, position, available, created_at";
+const LISTING_COLUMNS: &str = "id, currency_id, kind, target_id, name, description, price, stock, sold, position, available, created_at, gacha_only";
 
 fn listing_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<pb::ShopListing> + '_ {
     move |r| {
@@ -305,12 +304,13 @@ fn listing_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<pb::Sho
             position: r.get(9)?,
             available: r.get::<i64>(10)? != 0,
             created_at: Some(timestamp(r.get(11)?)),
+            gacha_only: r.get::<i64>(12)? != 0,
         })
     }
 }
 
 /// Every listing, in order.
-async fn listings(conn: &turso::Connection, server_id: &str) -> Result<Vec<pb::ShopListing>> {
+pub(super) async fn listings(conn: &turso::Connection, server_id: &str) -> Result<Vec<pb::ShopListing>> {
     query_all(
         conn,
         &format!("SELECT {LISTING_COLUMNS} FROM shop_listings ORDER BY position, created_at, id"),
@@ -320,7 +320,7 @@ async fn listings(conn: &turso::Connection, server_id: &str) -> Result<Vec<pb::S
     .await
 }
 
-async fn load_listing(conn: &turso::Connection, server_id: &str, id: &str) -> Result<pb::ShopListing> {
+pub(super) async fn load_listing(conn: &turso::Connection, server_id: &str, id: &str) -> Result<pb::ShopListing> {
     query_one(conn, &format!("SELECT {LISTING_COLUMNS} FROM shop_listings WHERE id = ?1"), [id], listing_row(server_id))
         .await?
         .ok_or(Error::NotFound("listing"))
@@ -329,11 +329,11 @@ async fn load_listing(conn: &turso::Connection, server_id: &str, id: &str) -> Re
 async fn save_listing(conn: &turso::Connection, l: &pb::ShopListing) -> Result<()> {
     conn.execute(
         "INSERT INTO shop_listings (id, currency_id, kind, target_id, name, description, price, stock, sold, position,
-           available, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+           available, created_at, gacha_only)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description,
            price = excluded.price, stock = excluded.stock, position = excluded.position,
-           available = excluded.available",
+           available = excluded.available, gacha_only = excluded.gacha_only",
         (
             l.id.as_str(),
             l.currency_id.as_str(),
@@ -347,6 +347,7 @@ async fn save_listing(conn: &turso::Connection, l: &pb::ShopListing) -> Result<(
             l.position,
             l.available as i64,
             l.created_at.as_ref().map(crate::id::millis).unwrap_or_else(now_ms),
+            l.gacha_only as i64,
         ),
     )
     .await?;
@@ -354,7 +355,7 @@ async fn save_listing(conn: &turso::Connection, l: &pb::ShopListing) -> Result<(
 }
 
 /// The whole shop, as the event members get.
-async fn shop_changed(conn: &turso::Connection, server_id: &str, events: &mut Vec<Payload>) -> Result<()> {
+pub(super) async fn shop_changed(conn: &turso::Connection, server_id: &str, events: &mut Vec<Payload>) -> Result<()> {
     let listings = listings(conn, server_id).await?;
     events.push(Payload::ShopUpdated(pb::ShopUpdated { listings }));
     Ok(())
@@ -372,12 +373,19 @@ pub(super) async fn unlist(
     if kind == ListingKind::ProfileItem {
         conn.execute("DELETE FROM profile_item_owners WHERE item_id = ?1", [target_id]).await?;
     }
-    let gone =
-        conn.execute("DELETE FROM shop_listings WHERE kind = ?1 AND target_id = ?2", (kind as i64, target_id)).await?;
-    if gone > 0 {
-        shop_changed(conn, server_id, events).await?;
+    let ids = query_all(
+        conn,
+        "SELECT id FROM shop_listings WHERE kind = ?1 AND target_id = ?2",
+        (kind as i64, target_id),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    if ids.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    conn.execute("DELETE FROM shop_listings WHERE kind = ?1 AND target_id = ?2", (kind as i64, target_id)).await?;
+    shop_changed(conn, server_id, events).await?;
+    super::gacha::forget_prizes(conn, server_id, |p| ids.contains(&p.listing_id), events).await
 }
 
 /// Whether someone may put on one of the server's profile items: anyone,
@@ -411,12 +419,12 @@ async fn owns(conn: &turso::Connection, item_id: &str, account_id: &str) -> Resu
 // Balances and the ledger.
 
 /// Someone's balance, with the UTC day of their last daily claim.
-struct Held {
-    balance: pb::Balance,
+pub(super) struct Held {
+    pub(super) balance: pb::Balance,
     daily_day: i64,
 }
 
-async fn held(conn: &turso::Connection, currency_id: &str, account_id: &str) -> Result<Held> {
+pub(super) async fn held(conn: &turso::Connection, currency_id: &str, account_id: &str) -> Result<Held> {
     let row = query_one(
         conn,
         "SELECT amount, earned, spent, daily_day, daily_at, daily_streak FROM currency_balances
@@ -450,7 +458,7 @@ async fn held(conn: &turso::Connection, currency_id: &str, account_id: &str) -> 
 }
 
 const LEDGER_COLUMNS: &str = "id, currency_id, account_id, amount, balance_after, kind, action, actor_id, \
-     counterpart_id, listing_id, role_id, note, created_at";
+     counterpart_id, listing_id, role_id, note, created_at, banner_id";
 
 fn ledger_row(r: &turso::Row) -> turso::Result<pb::LedgerEntry> {
     Ok(pb::LedgerEntry {
@@ -467,24 +475,26 @@ fn ledger_row(r: &turso::Row) -> turso::Result<pb::LedgerEntry> {
         role_id: r.get(10)?,
         note: r.get(11)?,
         created_at: Some(timestamp(r.get(12)?)),
+        banner_id: r.get(13)?,
     })
 }
 
 /// Why a balance changes: the ledger entry's details beside who and how much.
 #[derive(Clone, Default)]
-struct Why<'a> {
-    kind: LedgerKind,
-    action: Action,
-    actor_id: &'a str,
-    counterpart_id: &'a str,
-    listing_id: &'a str,
-    role_id: &'a str,
-    note: &'a str,
+pub(super) struct Why<'a> {
+    pub(super) kind: LedgerKind,
+    pub(super) action: Action,
+    pub(super) actor_id: &'a str,
+    pub(super) counterpart_id: &'a str,
+    pub(super) listing_id: &'a str,
+    pub(super) role_id: &'a str,
+    pub(super) note: &'a str,
+    pub(super) banner_id: &'a str,
 }
 
 /// How [`credit`] takes more than someone has.
 #[derive(Clone, Copy, PartialEq)]
-enum Short {
+pub(super) enum Short {
     /// Refuses: a purchase or a transfer.
     Refuse,
     /// Takes what there is: a grant below zero.
@@ -495,7 +505,7 @@ enum Short {
 /// write, with its ledger entry, and tells them (`announce`). Nothing when
 /// nothing moves.
 #[allow(clippy::too_many_arguments)]
-async fn credit(
+pub(super) async fn credit(
     conn: &turso::Connection,
     currency: &pb::Currency,
     account_id: &str,
@@ -546,9 +556,10 @@ async fn credit(
         role_id: why.role_id.to_string(),
         note: why.note.to_string(),
         created_at: Some(timestamp(now)),
+        banner_id: why.banner_id.to_string(),
     };
     conn.execute(
-        &format!("INSERT INTO currency_ledger ({LEDGER_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"),
+        &format!("INSERT INTO currency_ledger ({LEDGER_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
         (
             entry.id.as_str(),
             entry.currency_id.as_str(),
@@ -563,6 +574,7 @@ async fn credit(
             entry.role_id.as_str(),
             entry.note.as_str(),
             now,
+            entry.banner_id.as_str(),
         ),
     )
     .await?;
@@ -582,6 +594,9 @@ pub(super) fn event_shown(account_id: &str, access: &Access, payload: &Payload) 
         Payload::BalanceUpdated(pb::BalanceUpdated { balance: Some(b), .. }) => b.user_id == account_id,
         Payload::PurchaseMade(pb::PurchaseMade { entry: Some(e), .. }) => {
             e.user_id == account_id || access.has(Permission::ManageEconomy)
+        }
+        Payload::GachaPulled(pb::GachaPulled { pull: Some(p), .. }) => {
+            p.user_id == account_id || access.has(Permission::ManageEconomy)
         }
         _ => false,
     }
@@ -808,7 +823,14 @@ async fn credit_voice(app: &App, server_id: &str) -> Result<()> {
 /// Deletes everything about an account's money in the server, inside the
 /// write that forgets them.
 pub(crate) async fn forget_account(conn: &turso::Connection, account_id: &str) -> Result<()> {
-    for table in ["currency_balances", "currency_earnings", "currency_ledger", "profile_item_owners"] {
+    for table in [
+        "currency_balances",
+        "currency_earnings",
+        "currency_ledger",
+        "profile_item_owners",
+        "gacha_progress",
+        "gacha_pulls",
+    ] {
         conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
     }
     Ok(())
@@ -846,9 +868,20 @@ async fn overview(conn: &turso::Connection, currency_id: &str, days: i32, now: i
             Ok(LedgerKind::Grant) => (o.granted, o.taken) = (inward, outward),
             Ok(LedgerKind::Transfer) => o.transferred = inward,
             Ok(LedgerKind::Purchase) => (o.spent, o.purchases) = (outward, count),
+            Ok(LedgerKind::Gacha) => (o.gacha_spent, o.gacha_paid) = (outward, inward),
             _ => {}
         }
     }
+    o.gacha_draws = query_all(
+        conn,
+        "SELECT results FROM gacha_pulls WHERE currency_id = ?1 AND created_at >= ?2",
+        (currency_id, since),
+        |r| r.get::<Vec<u8>>(0),
+    )
+    .await?
+    .iter()
+    .map(|bytes| super::gacha::draws(bytes))
+    .sum();
     o.earned_by_action = query_all(
         conn,
         "SELECT action, sum(amount) FROM currency_ledger WHERE currency_id = ?1 AND created_at >= ?2 AND kind = ?3
@@ -891,9 +924,17 @@ async fn overview(conn: &turso::Connection, currency_id: &str, days: i32, now: i
         "SELECT created_at / ?3 AS day,
            coalesce(sum(CASE WHEN kind = ?4 THEN amount ELSE 0 END), 0),
            coalesce(sum(CASE WHEN kind = ?5 AND amount > 0 THEN amount ELSE 0 END), 0),
-           coalesce(sum(CASE WHEN kind = ?6 THEN -amount ELSE 0 END), 0)
+           coalesce(sum(CASE WHEN kind = ?6 OR (kind = ?7 AND amount < 0) THEN -amount ELSE 0 END), 0)
          FROM currency_ledger WHERE currency_id = ?1 AND created_at >= ?2 GROUP BY day",
-        (currency_id, since, DAY_MS, LedgerKind::Earn as i64, LedgerKind::Grant as i64, LedgerKind::Purchase as i64),
+        (
+            currency_id,
+            since,
+            DAY_MS,
+            LedgerKind::Earn as i64,
+            LedgerKind::Grant as i64,
+            LedgerKind::Purchase as i64,
+            LedgerKind::Gacha as i64,
+        ),
         |r| Ok((r.get::<i64>(0)?, r.get::<i64>(1)?, r.get::<i64>(2)?, r.get::<i64>(3)?)),
     )
     .await?;
@@ -930,7 +971,7 @@ fn whose(account_id: &str, asked: &str, access: &Access, may: &[Permission]) -> 
 
 /// A checked amount for something that moves currency: 1 or more (or, when
 /// `signed`, anything but 0) up to the most anything moves.
-fn amount(value: i64, signed: bool) -> Result<i64> {
+pub(super) fn amount(value: i64, signed: bool) -> Result<i64> {
     let fine = if signed {
         value != 0 && value.unsigned_abs() <= MAX_AMOUNT as u64
     } else {
@@ -945,7 +986,7 @@ fn amount(value: i64, signed: bool) -> Result<i64> {
 
 /// A role the shop may sell: one of the server's (not @everyone) that carries
 /// nothing that moderates or manages the server.
-async fn sellable_role(conn: &turso::Connection, server_id: &str, role_id: &str) -> Result<pb::Role> {
+pub(super) async fn sellable_role(conn: &turso::Connection, server_id: &str, role_id: &str) -> Result<pb::Role> {
     let role = crate::permissions::roles(conn, server_id)
         .await?
         .into_iter()
@@ -1208,6 +1249,11 @@ impl EconomyService for Api {
                         if !listing.available {
                             return Err(Error::NotFound("listing"));
                         }
+                        if listing.gacha_only {
+                            return Err(Error::FailedPrecondition(
+                                "this can only be won from the server's gacha banners".into(),
+                            ));
+                        }
                         if req.expected_price != 0 && req.expected_price != listing.price {
                             return Err(Error::FailedPrecondition(
                                 "the price changed: have another look before buying".into(),
@@ -1273,6 +1319,45 @@ impl EconomyService for Api {
             }
             .await,
         )
+    }
+
+    async fn list_gacha_banners(
+        &self,
+        request: Request<pb::ListGachaBannersRequest>,
+    ) -> Result<Response<pb::ListGachaBannersResponse>, Status> {
+        super::gacha::list_banners(self, request).await
+    }
+
+    async fn pull(&self, request: Request<pb::PullRequest>) -> Result<Response<pb::PullResponse>, Status> {
+        super::gacha::pull(self, request).await
+    }
+
+    async fn list_gacha_pulls(
+        &self,
+        request: Request<pb::ListGachaPullsRequest>,
+    ) -> Result<Response<pb::ListGachaPullsResponse>, Status> {
+        super::gacha::list_pulls(self, request).await
+    }
+
+    async fn create_gacha_banner(
+        &self,
+        request: Request<pb::CreateGachaBannerRequest>,
+    ) -> Result<Response<pb::CreateGachaBannerResponse>, Status> {
+        super::gacha::create_banner(self, request).await
+    }
+
+    async fn update_gacha_banner(
+        &self,
+        request: Request<pb::UpdateGachaBannerRequest>,
+    ) -> Result<Response<pb::UpdateGachaBannerResponse>, Status> {
+        super::gacha::update_banner(self, request).await
+    }
+
+    async fn delete_gacha_banner(
+        &self,
+        request: Request<pb::DeleteGachaBannerRequest>,
+    ) -> Result<Response<pb::DeleteGachaBannerResponse>, Status> {
+        super::gacha::delete_banner(self, request).await
     }
 
     async fn create_currency(
@@ -1358,6 +1443,7 @@ impl EconomyService for Api {
                             .await?;
                     }
                     conn.execute("DELETE FROM currencies WHERE id = ?1", [currency.id.as_str()]).await?;
+                    super::gacha::forget_currency(conn, &sdb.id, &currency.id, events).await?;
                     let entry =
                         Audit::new(pb::AuditAction::CurrencyDelete, &currency.id).change("name", &currency.name, "");
                     store::audit(conn, &account.id, entry).await?;
@@ -1407,6 +1493,7 @@ impl EconomyService for Api {
                     position: new.position,
                     available: new.available,
                     created_at: Some(timestamp(now_ms())),
+                    gacha_only: new.gacha_only,
                 };
                 let listing = sdb
                     .write(&account.id, async |conn, events| {
@@ -1430,7 +1517,8 @@ impl EconomyService for Api {
                             .change("name", "", &listing.name)
                             .change("target", "", &listing.target_id)
                             .change("currency", "", &currency.name)
-                            .change("price", "", listing.price);
+                            .change("price", "", listing.price)
+                            .change("gacha_only", false, listing.gacha_only);
                         store::audit(conn, &account.id, entry).await?;
                         shop_changed(conn, &sdb.id, events).await?;
                         Ok(listing.clone())
@@ -1477,6 +1565,9 @@ impl EconomyService for Api {
                         if let Some(available) = change.available {
                             listing.available = available;
                         }
+                        if let Some(gacha_only) = change.gacha_only {
+                            listing.gacha_only = gacha_only;
+                        }
                         if listing == before {
                             return Ok(listing);
                         }
@@ -1488,7 +1579,8 @@ impl EconomyService for Api {
                             .change("price", before.price, listing.price)
                             .change("stock", stock(before.stock), stock(listing.stock))
                             .change("position", before.position, listing.position)
-                            .change("available", before.available, listing.available);
+                            .change("available", before.available, listing.available)
+                            .change("gacha_only", before.gacha_only, listing.gacha_only);
                         store::audit(conn, &account.id, entry).await?;
                         shop_changed(conn, &sdb.id, events).await?;
                         Ok(listing)
@@ -1512,6 +1604,7 @@ impl EconomyService for Api {
                 sdb.write(&account.id, async |conn, events| {
                     let listing = load_listing(conn, &sdb.id, &req.listing_id).await?;
                     conn.execute("DELETE FROM shop_listings WHERE id = ?1", [listing.id.as_str()]).await?;
+                    super::gacha::forget_prizes(conn, &sdb.id, |p| p.listing_id == listing.id, events).await?;
                     let entry = Audit::new(pb::AuditAction::ShopListingDelete, &listing.id)
                         .change("name", &listing.name, "")
                         .change("target", &listing.target_id, "");

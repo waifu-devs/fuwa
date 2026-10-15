@@ -373,7 +373,7 @@ impl ServerSettingsView {
         }
         let mut ledger = div().flex().flex_col().gap(px(6.0));
         for e in &self.finances.ledger {
-            let listing = economy.listing(&e.listing_id).map(|l| listing_name(l, &roles, &items));
+            let listing = eco::entry_subject(&economy, e, &roles, &items);
             let line = ledger_line(e, &name_of, listing);
             let (amount, tint) = signed(e.amount, p);
             let when = crate::ui::text::ago(ms_of(e.created_at.as_ref()), now_ms());

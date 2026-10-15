@@ -236,7 +236,10 @@ role with `roleId`; below zero takes), and reads anyone's balances with
 `purchaseMade` for everything bought, to hand out what a custom listing
 promises; everyone gets `balanceUpdated` for their own balance. Agents
 never earn by what they do in a server, but can hold, send and spend
-currency like anyone.
+currency like anyone. Gacha banners are `agent.api.economy.listGachaBanners` and
+`createGachaBanner`; `agent.pull(serverId, bannerId, count)` pulls with
+the agent's own balance, and with Manage Economy it gets `gachaPulled` for
+every pull, to hand out what a custom prize promises.
 
 ### Typed events
 

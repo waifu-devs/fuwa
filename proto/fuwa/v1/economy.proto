@@ -37,8 +37,17 @@ service EconomyService {
   // Sends some of a transferable currency to another member.
   rpc Transfer(TransferRequest) returns (TransferResponse);
   // Buys an available listing: a role or profile item once, a custom
-  // listing as often as there's stock.
+  // listing as often as there's stock. Not one that's gacha_only.
   rpc Buy(BuyRequest) returns (BuyResponse);
+  // The server's gacha banners, in order, as GachaBannersUpdated has them,
+  // and your progress on each. Apps show members the available ones.
+  rpc ListGachaBanners(ListGachaBannersRequest) returns (ListGachaBannersResponse);
+  // Pulls once, or a multi-pull, on an available banner while it's open:
+  // pays first, then draws each prize with the server's own randomness.
+  rpc Pull(PullRequest) returns (PullResponse);
+  // Pulls, newest first, with every roll: yours; anyone's, or everyone's,
+  // with MANAGE_ECONOMY.
+  rpc ListGachaPulls(ListGachaPullsRequest) returns (ListGachaPullsResponse);
 
   // MANAGE_ECONOMY.
 
@@ -54,6 +63,12 @@ service EconomyService {
   // The finance page: one currency's state, and what happened over the last
   // days.
   rpc GetEconomyOverview(GetEconomyOverviewRequest) returns (GetEconomyOverviewResponse);
+  // Gacha banners. A ROLE prize, like a listing, also takes MANAGE_ROLES.
+  rpc CreateGachaBanner(CreateGachaBannerRequest) returns (CreateGachaBannerResponse);
+  // Replaces the whole banner with the one given (its id says which).
+  rpc UpdateGachaBanner(UpdateGachaBannerRequest) returns (UpdateGachaBannerResponse);
+  // Its pulls stay in the log, and what was won with its winners.
+  rpc DeleteGachaBanner(DeleteGachaBannerRequest) returns (DeleteGachaBannerResponse);
 
   // GRANT_CURRENCY.
 
@@ -203,6 +218,7 @@ message NewShopListing {
   optional int64 stock = 7;
   int32 position = 8;
   bool available = 9;
+  bool gacha_only = 10;
 }
 
 // What changes; unset fields stay. The currency, kind and target can't
@@ -216,6 +232,7 @@ message ShopListingChange {
   bool unlimited = 5;
   optional int32 position = 6;
   optional bool available = 7;
+  optional bool gacha_only = 8;
 }
 
 message CreateShopListingRequest {
@@ -277,8 +294,14 @@ message EconomyOverview {
   repeated PersonTotal top_earners = 13;
   // Listings bought the most over the period, up to 10.
   repeated ListingTotal top_listings = 14;
-  // Every day of the period, oldest first, by UTC day.
+  // Every day of the period, oldest first, by UTC day (spent includes
+  // gacha pulls).
   repeated DayTotal days = 15;
+  // Gacha over the period: spent on pulls, how many draws, and what came
+  // back as currency prizes and refunds.
+  int64 gacha_spent = 16;
+  int64 gacha_draws = 17;
+  int64 gacha_paid = 18;
 }
 
 message ActionTotal {
@@ -323,3 +346,74 @@ message GrantResponse {
   int32 people = 1;
   int64 total = 2;
 }
+
+message ListGachaBannersRequest {
+  string server_id = 1;
+}
+
+message ListGachaBannersResponse {
+  repeated GachaBanner banners = 1;
+  // Yours, on the banners you've pulled on.
+  repeated GachaProgress progress = 2;
+}
+
+message PullRequest {
+  string server_id = 1;
+  string banner_id = 2;
+  // 1, or the banner's multi_pull.
+  int32 count = 3;
+  // The price the app showed for that many: refused if it changed since.
+  int64 expected_price = 4;
+}
+
+message PullResponse {
+  GachaPull pull = 1;
+  GachaProgress progress = 2;
+  // Your balances that moved: what paid, and any currency won or given back.
+  repeated Balance balances = 3;
+}
+
+message ListGachaPullsRequest {
+  string server_id = 1;
+  // Empty for every banner.
+  string banner_id = 2;
+  // Empty for yours; "*" for everyone's (MANAGE_ECONOMY).
+  string user_id = 3;
+  // Pulls older than this one, for the next page.
+  string before_id = 4;
+  // 1 to 100; 50 when unset.
+  int32 limit = 5;
+}
+
+message ListGachaPullsResponse {
+  repeated GachaPull pulls = 1;
+  bool has_more = 2;
+  // Everyone who pulled, as the server last saw them.
+  repeated User users = 3;
+}
+
+message CreateGachaBannerRequest {
+  string server_id = 1;
+  // Its id, server_id and created_at are ignored.
+  GachaBanner banner = 2;
+}
+
+message CreateGachaBannerResponse {
+  GachaBanner banner = 1;
+}
+
+message UpdateGachaBannerRequest {
+  string server_id = 1;
+  GachaBanner banner = 2;
+}
+
+message UpdateGachaBannerResponse {
+  GachaBanner banner = 1;
+}
+
+message DeleteGachaBannerRequest {
+  string server_id = 1;
+  string banner_id = 2;
+}
+
+message DeleteGachaBannerResponse {}

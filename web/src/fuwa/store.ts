@@ -60,6 +60,8 @@ export type PendingMessage = {
   /** In a secure channel: the thread it's going to, and whether it's also going to the channel. */
   thread?: number;
   inChannel?: boolean;
+  /** In an encrypted conversation or secure channel: the record of the line it answers. */
+  replyTo?: number;
   /** A voice message on its way: how it looks until it's sent. */
   voice?: { durationMs: number; waveform: Uint8Array };
   /** Files going sealed in an encrypted message: their names and sizes (and which are spoilers) until it's sent. */

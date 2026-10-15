@@ -73,6 +73,10 @@ impl FuwaApp {
         if self.board_keys(key, window, cx) {
             return true;
         }
+        // Escape stops answering a line before anything else it does in a box.
+        if key.key == "escape" && self.cancel_reply_here(window, cx) {
+            return true;
+        }
         // Escape in a thread's reply box closes the thread, back to the channel.
         if key.key == "escape" && self.threads.reply.read(cx).focus_handle(cx).is_focused(window) {
             self.close_thread(cx);
