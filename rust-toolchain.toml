@@ -1,0 +1,7 @@
+# The Rust every build uses: CI, the release builds and the Dockerfiles (rust:1.99.0)
+# all match it, so a new stable release can't turn master red with a new lint.
+# Moving to a newer Rust is its own pull request: change this file, the
+# `toolchain:` lines in .github/workflows and the rust: images in Dockerfile and
+# deploy/crowd.Dockerfile together, and fix what the new lints find.
+[toolchain]
+channel = "1.99.0"
