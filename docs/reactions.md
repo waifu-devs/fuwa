@@ -64,8 +64,10 @@ message, each with its count, the reader's own marked.
 The server never learns who reacted to what there. A reaction is a
 `DirectMessageReaction` inside the encryption (`DirectMessageContent`, sent
 signed in a secure channel like a text): the record reacted to, a standard
-emoji, and whether it's taken off. Each device tallies what it reads, the
-latest from a sender for an emoji winning; reactions never show as messages,
+emoji or a server emoji from any server the sender is in (`custom`, carried
+with its picture as texts carry theirs, see docs/e2ee.md), and whether it's
+taken off. Each device tallies what it reads, the latest from a sender for an
+emoji winning (a server emoji by its id); reactions never show as messages,
 count as unread or notify. `React` refuses secure channels so nothing reaches
 the server in the clear.
 

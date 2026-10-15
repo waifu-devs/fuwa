@@ -21,9 +21,9 @@ use gpui_kit::{
 };
 
 use crate::core::i18n::{Arg, t, t_with};
-use crate::core::reactions::EmojiKey;
+use crate::core::reactions::{EmojiKey, Reacted};
 use crate::core::store::InstanceState;
-use crate::core::vault::ReactionMark;
+use crate::core::vault::{EmojiRef, ReactionMark};
 use crate::pb;
 use crate::ui::app::{FuwaApp, Target};
 use crate::ui::emoji::{Catalog, Choice, InColor as _};
@@ -79,7 +79,7 @@ pub struct ReactBits {
     pub can_add: bool,
     /// You may take others' off (Manage Messages).
     pub can_clear: bool,
-    /// Only standard emoji: a conversation or a secure channel.
+    /// Only standard emoji, none of the servers'.
     pub standard_only: bool,
 }
 
@@ -127,12 +127,8 @@ impl ReactBits {
         name_of: &dyn Fn(&str) -> String,
     ) -> Self {
         let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
-        let pending = i
-            .dms
-            .reacting
-            .iter()
-            .filter(|p| p.room == room && p.sequence == item.seq)
-            .map(|p| (p.emoji.as_str(), p.on));
+        let pending =
+            i.dms.reacting.iter().filter(|p| p.room == room && p.sequence == item.seq).map(|p| (&p.emoji, p.on));
         let marks = crate::core::reactions::with_pending(&item.reactions, me, pending);
         Self::encrypted(&marks, me, can_add, name_of)
     }
@@ -142,22 +138,17 @@ impl ReactBits {
         let chips = crate::core::reactions::tally(marks, me)
             .into_iter()
             .map(|r| {
-                let who = crate::core::reactions::reactors(marks, &r.emoji)
+                let key = EmojiKey::of(&r);
+                let who = crate::core::reactions::reactors(marks, &key)
                     .iter()
                     .map(|u| if u == me { t("chattools.reactions.you") } else { name_of(u) })
                     .collect();
-                Chip {
-                    key: EmojiKey::of(&r),
-                    name: String::new(),
-                    animated: false,
-                    url: None,
-                    count: r.count,
-                    me: r.me,
-                    who: Some(who),
-                }
+                // A server emoji draws the picture its sender carried.
+                let url = (!r.emoji_id.is_empty()).then(|| r.emoji_url.clone());
+                Chip { key, name: r.emoji_name, animated: r.animated, url, count: r.count, me: r.me, who: Some(who) }
             })
             .collect();
-        Self { chips, can_add, can_clear: false, standard_only: true }
+        Self { chips, can_add, can_clear: false, standard_only: false }
     }
 }
 
@@ -523,8 +514,12 @@ impl FuwaApp {
 
     /// The custom emoji a reaction in the open channel may use: its server's
     /// own, or in a channel shown here from another server, that server's
-    /// (asked of the instance the first time). None in encrypted places.
+    /// (asked of the instance the first time). In encrypted places, every
+    /// server's you're in on the instance (they're carried along).
     pub(crate) fn react_catalog(&self) -> Catalog {
+        if let Some(catalog) = self.encrypted_catalog() {
+            return catalog;
+        }
         let Some(Target::Channel { key, server, channel }) = self.target() else { return Catalog::default() };
         let (catalog, guest) = self.core.shared.read(|s| {
             let Some(i) = s.instance(&key) else { return (Catalog::default(), false) };
@@ -570,10 +565,8 @@ impl FuwaApp {
             ),
             Some(Target::Dm { key, conversation: room } | Target::Secure { key, channel: room, .. }) => {
                 let Ok(seq) = msg.parse::<i64>() else { return };
-                if r.emoji.is_empty() {
-                    return;
-                }
-                self.run(cx, async move { core.react_dm(&key, &room, seq, &r.emoji, on).await }, |this, result, cx| {
+                let Some(emoji) = self.dm_reacted(&key, &room, seq, &r) else { return };
+                self.run(cx, async move { core.react_dm(&key, &room, seq, emoji, on).await }, |this, result, cx| {
                     if let Err(err) = result {
                         this.toast("circle-alert", t("chattools.reactions.failed"), err.0, None, None, cx);
                     }
@@ -581,6 +574,23 @@ impl FuwaApp {
             }
             None => {}
         }
+    }
+
+    /// What a reaction in an encrypted place is with: a standard emoji, or a
+    /// server emoji to carry along, from your servers' or as its chip's
+    /// sender carried it.
+    fn dm_reacted(&self, key: &str, room: &str, seq: i64, r: &pb::Reaction) -> Option<Reacted> {
+        if r.emoji_id.is_empty() {
+            return (!r.emoji.is_empty()).then(|| Reacted::Standard(r.emoji.clone()));
+        }
+        if let Some(c) = self.react_catalog().by_id(&r.emoji_id) {
+            return Some(Reacted::Custom(EmojiRef::of(&c.emoji)));
+        }
+        let carried = self.core.shared.read(|s| {
+            let item = s.instance(key)?.dms.items.get(room)?.iter().find(|i| i.seq == seq)?;
+            item.reactions.iter().find_map(|m| m.custom.clone().filter(|e| e.id == r.emoji_id))
+        });
+        carried.map(Reacted::Custom)
     }
 
     /// Reacts with an emoji from the menu's row (or takes it off, if it's already yours).

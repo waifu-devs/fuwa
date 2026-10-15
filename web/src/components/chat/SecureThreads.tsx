@@ -20,6 +20,7 @@ import { T, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { EMOJI_TOKEN } from "@/lib/emoji";
 
 /*
  * Threads inside a secure channel. The same panel and list as an ordinary
@@ -145,7 +146,7 @@ function SecureThreadStart({
       {parent ? (
         <div className="message-row first flex gap-3 px-4">
           <MessageLine display={display} first author={author} member={member} date={new Date(parent.at)} instanceKey={instanceKey}>
-            <MessageBody content={lineText(parent)} display={display} />
+            <MessageBody content={lineText(parent)} emojis={parent.emojis} display={display} />
           </MessageLine>
         </div>
       ) : (
@@ -248,6 +249,7 @@ export function SecureThreadPanel({
       <EncryptedMessages
         key={parent}
         instanceKey={instanceKey}
+        serverId={serverId}
         id={id}
         me={me}
         userOf={userOf}
@@ -353,6 +355,7 @@ function SecureThreadHeader({
 // Previews show text, not Markdown marks.
 const plain = (content: string) =>
   content
+    .replace(EMOJI_TOKEN, ":$2:")
     .replace(/[*_~`>#]+/g, "")
     .replace(/\s+/g, " ")
     .trim();

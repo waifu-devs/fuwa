@@ -366,6 +366,19 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
     }
 }
 
+/// An encrypted message's text with the server emoji it carried drawn as
+/// their pictures; any other token shows as its `:name:`.
+fn carried_shown(m: &mut Msg, emojis: impl IntoIterator<Item = (String, String)>) {
+    if m.content.contains('<') {
+        m.shown = crate::ui::mentions::emoji_links(&m.shown, emojis.into_iter().collect());
+    }
+}
+
+/// What you're sending writes of your servers' emoji, to draw them before it's read back.
+fn sending_emojis(i: &InstanceState, text: &str) -> Vec<(String, String)> {
+    crate::core::emoji::carried(i, text).into_iter().map(|e| (e.id, e.url)).collect()
+}
+
 /// Which lines an encrypted list shows and what it adds to them, when it
 /// isn't simply everything in the conversation (a secure channel without its
 /// threads' replies, or one thread).
@@ -496,6 +509,7 @@ pub(crate) fn encrypted_rows(
                     can_reply: can_reply && !item.deleted,
                 };
                 let mut m = plain_msg(key.clone(), author, item.content.clone(), item.at, mine, enc);
+                carried_shown(&mut m, item.emojis.iter().map(|e| (e.id.clone(), e.url.clone())));
                 m.editing = editing;
                 m.edited = item.edited_at > 0;
                 m.can_delete = can_delete;
@@ -531,6 +545,7 @@ pub(crate) fn encrypted_rows(
         let quote = (pending.reply_to > 0).then(|| quote_of(pending.reply_to, &by_seq, &who_of));
         let enc = EncBits { question: question.to_owned(), quote, ..Default::default() };
         let mut m = plain_msg(format!("p{}", pending.nonce), who, pending.text.clone(), pending.created_at, true, enc);
+        carried_shown(&mut m, sending_emojis(i, &pending.text));
         m.can_delete = false;
         m.pending = true;
         m.nonce = pending.nonce;
@@ -543,6 +558,8 @@ pub(crate) fn encrypted_rows(
         let who = Who { name: me.as_ref().map(user_name).unwrap_or_default(), color: None, user: me.clone() };
         let enc = EncBits { question: question.to_owned(), sending: files, ..Default::default() };
         let mut m = plain_msg(format!("f{nonce}"), who, text, crate::core::dms::now_ms(), true, enc);
+        let sending = sending_emojis(i, &m.content);
+        carried_shown(&mut m, sending);
         m.can_delete = false;
         m.pending = true;
         rows.push(Row::Msg(Rc::new(m)));
@@ -577,6 +594,7 @@ fn item_digest(item: &Item, h: &mut impl Hasher) {
     }
     item.voice.as_ref().map(|v| (&v.media_id, v.duration_ms, &v.waveform)).hash(h);
     (item.thread, item.reply_to).hash(h);
+    item.emojis.iter().for_each(|e| (&e.id, &e.url).hash(h));
 }
 
 impl FuwaApp {

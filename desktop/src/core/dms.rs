@@ -242,10 +242,10 @@ pub enum Content {
         parent: i64,
         locked: bool,
     },
-    /// Reacting to the message at `sequence` with a standard emoji, or (`removed`) taking it off.
+    /// Reacting to the message at `sequence` with an emoji, or (`removed`) taking it off.
     React {
         sequence: i64,
-        emoji: String,
+        emoji: crate::core::reactions::Reacted,
         removed: bool,
     },
 }
@@ -261,9 +261,32 @@ impl Content {
             _ => Vec::new(),
         }
     }
+
+    /// The text that may write server emoji tokens, if any.
+    fn text(&self) -> Option<&str> {
+        match self {
+            Content::Text { text, .. }
+            | Content::Edit { text, .. }
+            | Content::Files { text, .. }
+            | Content::Reply { text, .. } => Some(text),
+            _ => None,
+        }
+    }
 }
 
-fn content_of(content: &Content) -> pb::DirectMessageContent {
+/// The plaintext of `content`, carrying the server emoji its text writes
+/// (`core::emoji::carried`).
+fn content_of(content: &Content, emojis: &[pb::Emoji]) -> pb::DirectMessageContent {
+    let mut out = plain_content_of(content);
+    match &mut out.body {
+        Some(pb::direct_message_content::Body::Text(t)) => t.emojis = emojis.to_vec(),
+        Some(pb::direct_message_content::Body::Edit(e)) => e.emojis = emojis.to_vec(),
+        _ => {}
+    }
+    out
+}
+
+fn plain_content_of(content: &Content) -> pb::DirectMessageContent {
     use pb::direct_message_content::Body;
     let body = match content {
         Content::Text { text, reply_to } => Body::Text(pb::DirectMessageText {
@@ -272,7 +295,7 @@ fn content_of(content: &Content) -> pb::DirectMessageContent {
             ..Default::default()
         }),
         Content::Edit { sequence, text } => {
-            Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone() })
+            Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone(), ..Default::default() })
         }
         Content::Voice(voice) => Body::Voice(voice.clone()),
         Content::Files { text, files, reply_to } => Body::Text(pb::DirectMessageText {
@@ -287,13 +310,12 @@ fn content_of(content: &Content) -> pb::DirectMessageContent {
             in_channel: *in_channel,
             files: files.clone(),
             reply_to_sequence: *reply_to,
+            ..Default::default()
         }),
         Content::Lock { parent, locked } => {
             Body::Thread(pb::ThreadChange { parent_sequence: *parent, locked: *locked })
         }
-        Content::React { sequence, emoji, removed } => {
-            Body::Reaction(pb::DirectMessageReaction { sequence: *sequence, emoji: emoji.clone(), removed: *removed })
-        }
+        Content::React { sequence, emoji, removed } => Body::Reaction(emoji.to_pb(*sequence, *removed)),
     };
     pb::DirectMessageContent { body: Some(body) }
 }
@@ -332,8 +354,8 @@ fn lock_item(seq: i64, at: i64, sender: &str, device: &str, change: &pb::ThreadC
     item
 }
 
-fn encode(content: &Content) -> Vec<u8> {
-    content_of(content).encode_to_vec()
+fn encode(content: &Content, emojis: &[pb::Emoji]) -> Vec<u8> {
+    content_of(content, emojis).encode_to_vec()
 }
 
 fn ts_ms(t: Option<&prost_types::Timestamp>) -> i64 {
@@ -597,6 +619,16 @@ impl DmEngine {
 
     pub(crate) fn stopped(&self) -> bool {
         self.stop.is_cancelled()
+    }
+
+    /// The addresses this instance's emoji pictures may be at
+    /// (`core::emoji::origins`), for checking emoji someone's device carried.
+    pub(crate) fn origins(&self) -> Vec<String> {
+        let mut out = self.shared.read(|s| s.instance(&self.key).map(crate::core::emoji::origins)).unwrap_or_default();
+        if !out.contains(&self.api.url) {
+            out.push(self.api.url.clone());
+        }
+        out
     }
 
     /// Changes only the direct messages' state (`Area::Dms`).
@@ -1267,6 +1299,7 @@ impl DmEngine {
             Some(Body::Text(text)) => {
                 let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
                 item.content = clip(&text.content);
+                item.emojis = crate::core::emoji::checked(&text.emojis, &item.content, &self.origins());
                 item.files = crate::core::sealed_files::files_of(&text.files);
                 item.reply_to = text.reply_to_sequence;
                 if room.server().is_some() {
@@ -1287,6 +1320,7 @@ impl DmEngine {
                     && !target.deleted
                 {
                     target.content = clip(&edit.content);
+                    target.emojis = crate::core::emoji::checked(&edit.emojis, &target.content, &self.origins());
                     target.edited_at = at;
                     target.edit_signed = signed;
                     change.items.push((id, target));
@@ -1338,9 +1372,7 @@ impl DmEngine {
         r: &pb::DirectMessageReaction,
         signed: Option<Signed>,
     ) -> Result<()> {
-        if !crate::core::reactions::valid_emoji(&r.emoji) {
-            return Ok(());
-        }
+        let Some(emoji) = crate::core::reactions::reacted_of(r, &self.origins()) else { return Ok(()) };
         if let Some(server) = room.server()
             && !r.removed
             && !self.shared.read(|s| {
@@ -1354,7 +1386,7 @@ impl DmEngine {
         if let Some(mut target) = inner.known(change, &id, r.sequence)?
             && target.kind == ItemKind::Text
             && !target.deleted
-            && crate::core::reactions::mark(&mut target.reactions, sender_id, &r.emoji, seq, r.removed, signed)
+            && crate::core::reactions::mark(&mut target.reactions, sender_id, emoji, seq, r.removed, signed)
         {
             change.items.push((id, target));
         }
@@ -1362,13 +1394,13 @@ impl DmEngine {
     }
 
     /// What this device sends in a secure channel: the content, signed by this device.
-    fn signed_content(&self, inner: &Inner, id: &str, content: &Content) -> Result<Vec<u8>> {
+    fn signed_content(&self, inner: &Inner, id: &str, content: &Content, emojis: &[pb::Emoji]) -> Result<Vec<u8>> {
         use pb::direct_message_content::Body;
         let payload = pb::SignedPayload {
             conversation_id: id.to_owned(),
             sender_id: self.me.id.clone(),
             sent_at_ms: now_ms(),
-            content: Some(content_of(content)),
+            content: Some(content_of(content, emojis)),
         }
         .encode_to_vec();
         let signature = inner.device.sign(&payload)?;
@@ -1461,6 +1493,7 @@ impl DmEngine {
                     }
                     let mut item = Item::new(*seq, ItemKind::Text, at, sender, device);
                     item.content = clip(&text.content);
+                    item.emojis = crate::core::emoji::checked(&text.emojis, &item.content, &self.origins());
                     item.files = crate::core::sealed_files::files_of(&text.files);
                     item.reply_to = text.reply_to_sequence;
                     thread_fields(&mut item, text);
@@ -1489,6 +1522,7 @@ impl DmEngine {
                         && !target.deleted
                     {
                         target.content = clip(&edit.content);
+                        target.emojis = crate::core::emoji::checked(&edit.emojis, &target.content, &self.origins());
                         target.edited_at = o.payload.sent_at_ms;
                         target.edit_signed = Some(o.signed.clone());
                         change.items.push((id.clone(), target));
@@ -1807,8 +1841,18 @@ impl DmEngine {
                 return Err(DmError("Voice messages can't be sent in secure channels yet.".into()));
             }
             self.reconcile(&mut inner, &room).await?;
-            let plaintext =
-                if room.server().is_some() { self.signed_content(&inner, id, &content)? } else { encode(&content) };
+            // The server emoji the text writes go along, so every device can draw them.
+            let emojis = content
+                .text()
+                .and_then(|text| {
+                    self.shared.read(|s| s.instance(&self.key).map(|i| crate::core::emoji::carried(i, text)))
+                })
+                .unwrap_or_default();
+            let plaintext = if room.server().is_some() {
+                self.signed_content(&inner, id, &content, &emojis)?
+            } else {
+                encode(&content, &emojis)
+            };
             for attempt in 0.. {
                 let ciphertext = inner.device.encrypt(id, &plaintext)?;
                 let hash = sha256_hex(&ciphertext);

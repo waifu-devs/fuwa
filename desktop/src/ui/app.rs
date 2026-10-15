@@ -1311,6 +1311,7 @@ impl FuwaApp {
                 );
             }
             Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
+                let text = self.encode_emoji(&text);
                 let reply_to = crate::ui::dm_view::take_replying(&conversation);
                 self.run(
                     cx,

@@ -3,7 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import { ReactionSchema, type Message, type Reaction, type User } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine } from "@/e2ee/engine";
 import { i18n } from "@/i18n/i18n";
-import { NAMES_SHOWN, reactionKey, sameEmoji, toggled, toggledDm, type EmojiRef, type ReactionLike } from "@/lib/reactions";
+import { NAMES_SHOWN, reactionKey, sameEmoji, toggled, toggledDm, type DmPick, type EmojiRef, type ReactionLike } from "@/lib/reactions";
 import { displayName } from "@/lib/format";
 import { reportUsage } from "@/lib/reports";
 import { FuwaError, toFuwaError } from "./errors";
@@ -149,23 +149,23 @@ export async function clearReactions(instanceKey: string, serverId: string, mess
 }
 
 /**
- * Reacts to a line in a direct message or secure channel (standard emoji
- * only), or takes your reaction off: sent encrypted to the conversation's
- * devices. Shown at once; put back if it couldn't be sent.
+ * Reacts to a line in a direct message or secure channel (a standard emoji,
+ * or a server's, carried with it), or takes your reaction off: sent
+ * encrypted to the conversation's devices. Shown at once; put back if it couldn't be sent.
  */
-export async function reactInConversation(instanceKey: string, conversationId: string, seq: number, emoji: string, on: boolean) {
+export async function reactInConversation(instanceKey: string, conversationId: string, seq: number, pick: DmPick, on: boolean) {
   reportUsage(on ? "dm.react" : "dm.unreact");
   const me = store.get().instances[instanceKey]?.me?.id ?? "";
   updateDms(instanceKey, (d) => {
     const all = d.reactions[conversationId] ?? {};
     const list = all[seq] ?? [];
-    const next = toggledDm(list, emoji, me, on);
+    const next = toggledDm(list, pick, me, on);
     return next === list ? d : { ...d, reactions: { ...d.reactions, [conversationId]: { ...all, [seq]: next } } };
   });
   const dms = dmEngine(instanceKey);
   try {
     if (!dms) throw new Error(i18n().t("system.e2ee.starting"));
-    await dms.send(conversationId, { react: seq, emoji, removed: !on });
+    await dms.send(conversationId, { react: seq, emoji: pick.emoji, custom: pick.custom, removed: !on });
   } catch (err) {
     await dms?.refresh(conversationId).catch(() => {});
     throw new FuwaError({ code: Code.Unknown, message: dmProblem(err) });

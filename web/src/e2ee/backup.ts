@@ -22,6 +22,7 @@ import * as vault from "./vault";
 import { filesOf, toSealedFiles } from "./files";
 import { toVoiceMessage, voiceOf } from "./voice";
 import { isOneEmoji } from "@/lib/reactions";
+import { customField, emojisField, instanceOrigins, toEmojis } from "./emojis";
 
 /**
  * The account's message backup, as this device takes part in it: every line
@@ -89,15 +90,22 @@ function toBackup(i: vault.Item): BackupItem | null {
     locked: i.kind === "thread" && i.content === "locked",
     // A reaction: the message it's on, the emoji, and whether it takes the sender's off.
     reaction: i.reaction
-      ? create(DirectMessageReactionSchema, { sequence: BigInt(i.reaction.target), emoji: i.reaction.emoji, removed: i.reaction.removed })
+      ? create(DirectMessageReactionSchema, {
+          sequence: BigInt(i.reaction.target),
+          emoji: i.reaction.emoji,
+          removed: i.reaction.removed,
+          custom: i.reaction.custom ? toEmojis([i.reaction.custom])[0] : undefined,
+        })
       : undefined,
+    // A text's server emoji, as of its latest edit.
+    emojis: i.deleted ? [] : toEmojis(i.emojis),
     voice: i.voice ? toVoiceMessage(i.voice) : undefined,
     // A deleted line's files are gone from the instance too.
     files: i.deleted ? [] : toSealedFiles(i.files),
   });
 }
 
-function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
+function fromBackup(vaultKey: string, b: BackupItem, origins: ReadonlySet<string>): vault.Item | null {
   const kind = FROM_KIND[b.kind];
   const seq = Number(b.sequence);
   const thread = Number(b.threadSequence);
@@ -109,7 +117,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const voice = kind === "voice" && !b.deleted ? voiceOf(b.voice) : null;
   if (kind === "voice" && !voice && !b.deleted) return null;
   const target = Number(b.reaction?.sequence ?? 0n);
-  if (kind === "reaction" && !(b.reaction && target > 0 && target < seq && isOneEmoji(b.reaction.emoji))) return null;
+  const custom = kind === "reaction" ? customField(b.reaction?.custom, origins) : undefined;
+  if (kind === "reaction" && !(b.reaction && target > 0 && target < seq && (custom || isOneEmoji(b.reaction.emoji)))) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -131,7 +140,10 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
     voice: voice ?? undefined,
     ...(kind === "text" && !b.deleted && b.files.length ? { files: filesOf(b.files) } : {}),
-    ...(kind === "reaction" && b.reaction ? { content: "", replyTo: 0, reaction: { target, emoji: b.reaction.emoji, removed: b.reaction.removed } } : {}),
+    ...(kind === "text" && !b.deleted ? emojisField(b.emojis, b.content, origins) : {}),
+    ...(kind === "reaction" && b.reaction
+      ? { content: "", replyTo: 0, reaction: custom ? { target, emoji: "", removed: b.reaction.removed, custom } : { target, emoji: b.reaction.emoji, removed: b.reaction.removed } }
+      : {}),
   };
 }
 
@@ -332,6 +344,7 @@ export class BackupSync {
     this.show({ status: "restoring", restored: 0, total: Number(backup.parts), problem: null });
     const began = performance.now();
     const touched = new Set<string>();
+    const origins = instanceOrigins(this.key);
     let after = 0n;
     let done = 0;
     let unreadable = 0;
@@ -353,7 +366,7 @@ export class BackupSync {
           let items: vault.Item[];
           try {
             items = fromBinary(BackupPartSchema, plaintext)
-              .items.map((b) => fromBackup(this.vaultKey, b))
+              .items.map((b) => fromBackup(this.vaultKey, b, origins))
               .filter((i): i is vault.Item => i !== null);
           } catch {
             unreadable++;

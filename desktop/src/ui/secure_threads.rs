@@ -302,6 +302,7 @@ impl FuwaApp {
         ALSO.with(|a| a.set(false));
         crate::ui::dm_view::set_problem(&place, None);
         let core = self.core.clone();
+        let text = self.encode_emoji(&text);
         let reply_to = crate::ui::dm_view::take_replying(&place);
         let content = Content::Reply { text, thread: parent, in_channel: also, files: Vec::new(), reply_to };
         self.run(cx, async move { core.send_dm(&key, &channel, content).await }, move |this, result, cx| {

@@ -224,6 +224,12 @@
     public address, never the one sent), and they
     ride in the message's extras as `Message.emojis`, so everyone can draw
     them. No new permission: being in the server is what lets you use them.
+    Encrypted messages (direct messages, secure channels) can't be checked
+    that way: the sender's device carries the emoji inside the encryption
+    (`DirectMessageText.emojis`, `DirectMessageReaction.custom`) and each
+    device keeps only ones with a picture under `/media/` on the
+    conversation's instance (docs/e2ee.md#server-emoji); the server is
+    untouched.
     Threads (`api/threads.rs`, docs/threads.md): a reply is a message with
     `thread_id` (its parent) and `in_channel`; `threads` sums each one up
     and every send or delete of a reply calls `threads::refresh` in the
@@ -1042,7 +1048,8 @@
     sight, driven by arrows from its search box). What it and the `:name:`
     list offer is `lib/emoji-catalog.ts` (hooks and storage) over
     `lib/emoji-search.ts` (names, `~2` for clashes, search, what a message
-    sends along). The standard set is `lib/emoji-data.json`, made from
+    sends along, and the checks on emoji an encrypted message carries,
+    which `e2ee/emojis.ts` applies). The standard set is `lib/emoji-data.json`, made from
     `emojibase-data` by `scripts/emoji-data.mjs` and loaded only when needed;
     nothing about emoji is ever fetched from outside. `EmojiImage.tsx` draws a
     server emoji, holding moving ones still under reduced motion until hovered.

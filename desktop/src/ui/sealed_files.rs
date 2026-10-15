@@ -761,6 +761,7 @@ impl FuwaApp {
         if files.is_empty() {
             return false;
         }
+        let text = self.encode_emoji(&text);
         self.send_files_in(key, id, place, files, text, thread, cx);
         true
     }

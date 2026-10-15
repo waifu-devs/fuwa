@@ -43,11 +43,14 @@ export function ServerLookProvider({ value, children }: { value: ServerLook; chi
 
 export const useServerLook = () => use(LookContext);
 
-const NO_EMOJI: Emoji[] = [];
-const MessageEmojiContext = createContext<Emoji[]>(NO_EMOJI);
+/** What drawing a carried emoji takes. */
+type CarriedLook = Pick<Emoji, "id" | "name" | "url" | "animated">;
 
-/** The emoji from other servers one message brought along. */
-export function MessageEmojis({ value, children }: { value: Emoji[] | undefined; children: ReactNode }) {
+const NO_EMOJI: readonly CarriedLook[] = [];
+const MessageEmojiContext = createContext<readonly CarriedLook[]>(NO_EMOJI);
+
+/** The emoji from other servers one message brought along (in an encrypted one, every server emoji it writes). */
+export function MessageEmojis({ value, children }: { value: readonly CarriedLook[] | undefined; children: ReactNode }) {
   if (!value?.length) return children;
   return <MessageEmojiContext value={value}>{children}</MessageEmojiContext>;
 }

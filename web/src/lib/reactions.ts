@@ -116,8 +116,26 @@ export function isOneEmoji(text: string): boolean {
   return /\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(text);
 }
 
-/** What a direct message's line says about a reaction, as the device kept it. */
-export type DmReactionRef = { target: number; emoji: string; removed: boolean };
+/** A server emoji a direct message's reaction carries (see emoji-search.ts's CarriedEmoji). */
+export type DmCustom = { id: string; serverId: string; name: string; url: string; animated: boolean };
+
+/** What a direct message's line says about a reaction, as the device kept it: a standard emoji, or a server's (`custom`). */
+export type DmReactionRef = { target: number; emoji: string; removed: boolean; custom?: DmCustom };
+
+/** Which emoji you react with in a direct message: a standard one, or a server's. */
+export type DmPick = { emoji: string; custom?: DmCustom };
+
+/** A direct message's reaction as reactions match it: a server emoji by its id. */
+const dmRef = (r: DmPick): EmojiRef => (r.custom ? { emoji: "", emojiId: r.custom.id } : { emoji: r.emoji, emojiId: "" });
+
+/** A reaction's line is one of these: one standard emoji, or a server emoji (checked when it was opened). */
+const validDm = (r: DmPick) => (r.custom ? !!r.custom.id : isOneEmoji(r.emoji));
+
+/** A new tally entry for an emoji. */
+const dmEntry = (r: DmPick): DmReaction =>
+  r.custom
+    ? { emoji: "", emojiId: r.custom.id, emojiName: r.custom.name, animated: r.custom.animated, emojiUrl: r.custom.url, count: 0, me: false, userIds: [] }
+    : { emoji: r.emoji, emojiId: "", emojiName: "", animated: false, count: 0, me: false, userIds: [] };
 
 /** What tallying reads of each line in a conversation. */
 export type TallyLine = { seq: number; senderId: string; kind: string; deleted: boolean; reaction?: DmReactionRef };
@@ -137,18 +155,18 @@ const reactable = (line: TallyLine | undefined) => !!line && (line.kind === "tex
  */
 export function tallyDm(lines: readonly TallyLine[], me: string): Record<number, DmReaction[]> {
   const bySeq = new Map(lines.map((l) => [l.seq, l]));
-  const latest = new Map<string, { target: number; senderId: string; emoji: string; seq: number; on: boolean }>();
+  const latest = new Map<string, { target: number; senderId: string; pick: DmPick; seq: number; on: boolean }>();
   for (const line of [...lines].sort((a, b) => a.seq - b.seq)) {
     const r = line.reaction;
-    if (line.kind !== "reaction" || !r || line.deleted || r.target <= 0 || r.target >= line.seq || !isOneEmoji(r.emoji)) continue;
-    latest.set(`${r.target}\u0000${line.senderId}\u0000${emojiKey(r.emoji)}`, { target: r.target, senderId: line.senderId, emoji: r.emoji, seq: line.seq, on: !r.removed });
+    if (line.kind !== "reaction" || !r || line.deleted || r.target <= 0 || r.target >= line.seq || !validDm(r)) continue;
+    latest.set(`${r.target}\u0000${line.senderId}\u0000${reactionKey(dmRef(r))}`, { target: r.target, senderId: line.senderId, pick: r, seq: line.seq, on: !r.removed });
   }
   const on = [...latest.values()].filter((v) => v.on && reactable(bySeq.get(v.target))).sort((a, b) => a.seq - b.seq);
   const out: Record<number, DmReaction[]> = {};
   for (const v of on) {
     const list = (out[v.target] ??= []);
-    let reaction = list.find((r) => emojiKey(r.emoji) === emojiKey(v.emoji));
-    if (!reaction) list.push((reaction = { emoji: v.emoji, emojiId: "", emojiName: "", animated: false, count: 0, me: false, userIds: [] }));
+    let reaction = list.find((r) => sameEmoji(r, dmRef(v.pick)));
+    if (!reaction) list.push((reaction = dmEntry(v.pick)));
     reaction.userIds.push(v.senderId);
     reaction.count++;
     if (v.senderId === me) reaction.me = true;
@@ -157,12 +175,12 @@ export function tallyDm(lines: readonly TallyLine[], me: string): Record<number,
 }
 
 /** A direct message's reactions with yours put on or taken off, before the device has sent it. */
-export function toggledDm(list: readonly DmReaction[], emoji: string, me: string, on: boolean): DmReaction[] {
-  const template: DmReaction = { emoji, emojiId: "", emojiName: "", animated: false, count: 1, me: true, userIds: [me] };
+export function toggledDm(list: readonly DmReaction[], pick: DmPick, me: string, on: boolean): DmReaction[] {
+  const template: DmReaction = { ...dmEntry(pick), count: 1, me: true, userIds: [me] };
   const next = toggled(list, template, on);
   if (next === list) return next;
   return next.map((r) => {
-    if (emojiKey(r.emoji) !== emojiKey(emoji)) return r;
+    if (!sameEmoji(r, dmRef(pick))) return r;
     const others = r.userIds.filter((id) => id !== me);
     return { ...r, userIds: on ? [...others, me] : others };
   });

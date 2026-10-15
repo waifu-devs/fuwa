@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Emoji, Server } from "@/gen/fuwa/v1/types_pb";
-import { catalogOf, choiceName, encodeEmoji, outsideEmojis, searchCatalog, toned, type StandardGroup } from "./emoji-search.ts";
+import { carriedEmoji, catalogOf, choiceName, emojisToCarry, encodeEmoji, keptEmojis, outsideEmojis, searchCatalog, toned, type StandardGroup } from "./emoji-search.ts";
 
 const server = (id: string, name: string) => ({ id, name, iconUrl: "" }) as Server;
 const emoji = (id: string, serverId: string, name: string, animated = false) =>
@@ -72,4 +72,41 @@ test("skin tones apply only to emoji that have them", () => {
   assert.equal(toned(wave!, 0), "👋");
   assert.equal(toned(wave!, 3), "👋🏽");
   assert.equal(toned(joy!, 3), "😂");
+});
+
+const HOME = new Set(["https://chat.example"]);
+
+test("an encrypted text carries every server's emoji it writes, once each, whichever server is open", () => {
+  const content = "<:wave:E1aaaaaaaaaa> <a:blobcat:E3aaaaaaaaaa> <:wave:E1aaaaaaaaaa> <:gone:Z9zzzzzzzzzz>";
+  assert.deepEqual(
+    emojisToCarry(EMOJIS, content).map((e) => [e.id, e.serverId, e.name, e.animated]),
+    [
+      ["E1aaaaaaaaaa", "S1", "wave", false],
+      ["E3aaaaaaaaaa", "S2", "blobcat", true],
+    ],
+  );
+  assert.deepEqual(emojisToCarry(EMOJIS, "no tokens"), []);
+});
+
+test("carried emoji are kept only with a picture under /media/ on the conversation's instance", () => {
+  const good = emoji("E1aaaaaaaaaa", "S1", "wave");
+  assert.equal(carriedEmoji(good, HOME)?.url, "https://chat.example/media/E1aaaaaaaaaa");
+  assert.equal(carriedEmoji({ ...good, url: "https://tracker.example/media/E1aaaaaaaaaa" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, url: "https://chat.example/api/E1aaaaaaaaaa" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, url: "javascript:alert(1)" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, url: "not a url" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, name: "a" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, name: "bad name" }, HOME), null);
+  assert.equal(carriedEmoji({ ...good, id: "short" }, HOME), null);
+});
+
+test("a text keeps the carried emoji it writes, once each and at most 50", () => {
+  const a = emoji("E1aaaaaaaaaa", "S1", "wave");
+  const b = emoji("E3aaaaaaaaaa", "S2", "blobcat", true);
+  const content = "<:wave:E1aaaaaaaaaa> <a:blobcat:E3aaaaaaaaaa>";
+  assert.deepEqual(keptEmojis([a, a, b, emoji("E4aaaaaaaaaa", "S3", "Wave")], content, HOME).map((e) => e.id), ["E1aaaaaaaaaa", "E3aaaaaaaaaa"]);
+  assert.deepEqual(keptEmojis([a], "plain", HOME), []);
+  const many = Array.from({ length: 60 }, (_, n) => emoji(`E${String(n).padStart(11, "0")}`, "S1", `e${n}`));
+  const all = many.map((e) => `<:${e.name}:${e.id}>`).join("");
+  assert.equal(keptEmojis(many, all, HOME).length, 50);
 });

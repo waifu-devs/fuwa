@@ -250,11 +250,30 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// In a conversation or secure channel: every server's emoji you're in
+    /// on the instance, carried along with what's sent (a secure channel's
+    /// own server first). None elsewhere.
+    pub(crate) fn encrypted_catalog(&self) -> Option<Catalog> {
+        let (key, server) = match self.target()? {
+            Target::Dm { key, .. } => (key, String::new()),
+            Target::Secure { key, server, .. } => (key, server),
+            Target::Channel { .. } => return None,
+        };
+        Some(
+            self.core
+                .shared
+                .read(|s| s.instance(&key).map(|i| Catalog::of(&i.servers, &i.emojis, &server)).unwrap_or_default()),
+        )
+    }
+
     /// The catalog for the open place: a server's emoji and your other
-    /// servers', or none in direct messages.
+    /// servers' (every one's in encrypted places).
     fn emoji_catalog(&self) -> Catalog {
+        if let Some(catalog) = self.encrypted_catalog() {
+            return catalog;
+        }
         match self.target() {
-            // A reaction takes only the message's own server's emoji (and none where it's encrypted).
+            // A reaction takes only the message's own server's emoji.
             // In a channel shown from another server, that server's.
             Some(Target::Channel { .. }) if self.reacting.is_some() => {
                 if self.reacting.as_ref().is_some_and(|r| r.standard_only) {
@@ -303,10 +322,8 @@ impl FuwaApp {
             return layout.clone();
         }
         let servers: Vec<pb::Server> = match self.target() {
-            Some(Target::Channel { key, .. }) => {
-                self.core.shared.read(|s| s.instance(&key).map(|i| i.servers.clone()).unwrap_or_default())
-            }
-            _ => Vec::new(),
+            Some(t) => self.core.shared.read(|s| s.instance(t.key()).map(|i| i.servers.clone()).unwrap_or_default()),
+            None => Vec::new(),
         };
         let searching = !query.trim().trim_matches(':').is_empty();
         let sections = if searching {

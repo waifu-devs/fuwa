@@ -12,7 +12,7 @@ use crate::core::api::Problem;
 use crate::core::dms::{Content, DmError};
 use crate::core::store::InstanceState;
 use crate::core::threads::thread_key;
-use crate::core::vault::{ReactionMark, Signed};
+use crate::core::vault::{EmojiRef, ReactionMark, Signed};
 use crate::core::{Core, reports};
 use crate::pb;
 use crate::rpc;
@@ -174,6 +174,75 @@ pub fn same(a: &str, b: &str) -> bool {
 
 // ───────────────────────── Encrypted places ─────────────────────────
 
+/// What a reaction in an encrypted place is with: a standard emoji, or a
+/// server emoji its sender carried along (`DirectMessageReaction.custom`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reacted {
+    Standard(String),
+    Custom(EmojiRef),
+}
+
+impl Reacted {
+    /// What a mark is with.
+    pub fn of_mark(m: &ReactionMark) -> Self {
+        match &m.custom {
+            Some(e) => Reacted::Custom(e.clone()),
+            None => Reacted::Standard(m.emoji.clone()),
+        }
+    }
+
+    /// Which emoji it is, as reactions are told apart: a server emoji by its id.
+    pub fn key(&self) -> EmojiKey {
+        match self {
+            Reacted::Standard(emoji) => EmojiKey::standard(emoji),
+            Reacted::Custom(e) => EmojiKey::custom(&e.id),
+        }
+    }
+
+    /// As a record carries it: the characters, or the server emoji.
+    pub fn to_pb(&self, sequence: i64, removed: bool) -> pb::DirectMessageReaction {
+        match self {
+            Reacted::Standard(emoji) => {
+                pb::DirectMessageReaction { sequence, emoji: emoji.clone(), removed, custom: None }
+            }
+            Reacted::Custom(e) => {
+                pb::DirectMessageReaction { sequence, emoji: String::new(), removed, custom: Some(e.to_pb()) }
+            }
+        }
+    }
+}
+
+impl From<&str> for Reacted {
+    fn from(emoji: &str) -> Self {
+        Reacted::Standard(emoji.to_owned())
+    }
+}
+
+impl From<&Reacted> for Reacted {
+    fn from(r: &Reacted) -> Self {
+        r.clone()
+    }
+}
+
+/// Which emoji a mark is.
+pub fn mark_key(m: &ReactionMark) -> EmojiKey {
+    match &m.custom {
+        Some(e) => EmojiKey::custom(&e.id),
+        None => EmojiKey::standard(&m.emoji),
+    }
+}
+
+/// What a reaction from someone's device is with, if this device takes it:
+/// one standard emoji, or a server emoji that passes
+/// `core::emoji::valid_carried` against the conversation's instance (`origins`).
+pub fn reacted_of(r: &pb::DirectMessageReaction, origins: &[String]) -> Option<Reacted> {
+    if valid_emoji(&r.emoji) {
+        return Some(Reacted::Standard(r.emoji.clone()));
+    }
+    let custom = r.custom.as_ref().filter(|_| r.emoji.is_empty())?;
+    crate::core::emoji::valid_carried(custom, origins).then(|| Reacted::Custom(EmojiRef::of(custom)))
+}
+
 /// Notes what a record (`seq`) from `user` said about their reaction with
 /// `emoji`: the latest record wins. False when it changes nothing (an older
 /// or repeated record).
@@ -181,21 +250,34 @@ pub fn same(a: &str, b: &str) -> bool {
 pub fn mark(
     marks: &mut Vec<ReactionMark>,
     user: &str,
-    emoji: &str,
+    emoji: impl Into<Reacted>,
     seq: i64,
     removed: bool,
     signed: Option<Signed>,
 ) -> bool {
-    match marks.iter_mut().find(|m| m.user_id == user && same(&m.emoji, emoji)) {
+    let emoji = emoji.into();
+    let key = emoji.key().id();
+    let custom = match &emoji {
+        Reacted::Custom(e) => Some(e.clone()),
+        Reacted::Standard(_) => None,
+    };
+    match marks.iter_mut().find(|m| m.user_id == user && mark_key(m).id() == key) {
         Some(m) if m.seq >= seq => false,
         Some(m) => {
             m.seq = seq;
             m.removed = removed;
             m.signed = signed;
+            if custom.is_some() {
+                m.custom = custom;
+            }
             true
         }
         None => {
-            marks.push(ReactionMark { user_id: user.to_owned(), emoji: emoji.to_owned(), seq, removed, signed });
+            let emoji = match emoji {
+                Reacted::Standard(emoji) => emoji,
+                Reacted::Custom(_) => String::new(),
+            };
+            marks.push(ReactionMark { user_id: user.to_owned(), emoji, custom, seq, removed, signed });
             true
         }
     }
@@ -203,10 +285,10 @@ pub fn mark(
 
 /// Your reactions on their way, put over what's been read back, so they show
 /// at once: each `(emoji, on)` as your latest.
-pub fn with_pending<'a>(
+pub fn with_pending<R: Into<Reacted>>(
     marks: &[ReactionMark],
     me: &str,
-    pending: impl IntoIterator<Item = (&'a str, bool)>,
+    pending: impl IntoIterator<Item = (R, bool)>,
 ) -> Vec<ReactionMark> {
     let mut out = marks.to_vec();
     for (emoji, on) in pending {
@@ -241,7 +323,7 @@ pub fn may_react(i: &InstanceState, server_id: &str, channel_id: &str, user_id: 
 pub struct PendingReaction {
     pub room: String,
     pub sequence: i64,
-    pub emoji: String,
+    pub emoji: Reacted,
     pub on: bool,
     pub nonce: u64,
 }
@@ -254,13 +336,23 @@ pub fn tally(marks: &[ReactionMark], me: &str) -> Vec<pb::Reaction> {
     on.sort_by_key(|m| m.seq);
     let mut out: Vec<pb::Reaction> = Vec::new();
     for m in on {
-        match out.iter_mut().find(|r| same(&r.emoji, &m.emoji)) {
+        let key = mark_key(m);
+        match out.iter_mut().find(|r| key.is(r)) {
             Some(r) => {
                 r.count += 1;
                 r.me |= m.user_id == me;
             }
             None => {
-                out.push(pb::Reaction { emoji: m.emoji.clone(), count: 1, me: m.user_id == me, ..Default::default() })
+                let mut r =
+                    pb::Reaction { emoji: m.emoji.clone(), count: 1, me: m.user_id == me, ..Default::default() };
+                if let Some(e) = &m.custom {
+                    r.emoji = String::new();
+                    r.emoji_id = e.id.clone();
+                    r.emoji_name = e.name.clone();
+                    r.emoji_url = e.url.clone();
+                    r.animated = e.animated;
+                }
+                out.push(r);
             }
         }
     }
@@ -268,8 +360,9 @@ pub fn tally(marks: &[ReactionMark], me: &str) -> Vec<pb::Reaction> {
 }
 
 /// Who has `emoji` on, the earliest first.
-pub fn reactors(marks: &[ReactionMark], emoji: &str) -> Vec<String> {
-    let mut on: Vec<&ReactionMark> = marks.iter().filter(|m| !m.removed && same(&m.emoji, emoji)).collect();
+pub fn reactors(marks: &[ReactionMark], emoji: &EmojiKey) -> Vec<String> {
+    let key = emoji.id();
+    let mut on: Vec<&ReactionMark> = marks.iter().filter(|m| !m.removed && mark_key(m).id() == key).collect();
     on.sort_by_key(|m| m.seq);
     on.into_iter().map(|m| m.user_id.clone()).collect()
 }
@@ -446,18 +539,31 @@ impl Core {
     }
 
     /// Reacts to a message in a conversation or secure channel (`room`), by its
-    /// record, with a standard emoji, or takes the reaction off. It goes inside
-    /// the encryption like a message, and shows once this device reads it back.
-    pub async fn react_dm(&self, key: &str, room: &str, sequence: i64, emoji: &str, on: bool) -> Result<(), DmError> {
-        if !valid_emoji(emoji) {
+    /// record, with a standard emoji or a server emoji (carried along), or
+    /// takes the reaction off. It goes inside the encryption like a message,
+    /// and shows once this device reads it back.
+    pub async fn react_dm(
+        &self,
+        key: &str,
+        room: &str,
+        sequence: i64,
+        emoji: impl Into<Reacted>,
+        on: bool,
+    ) -> Result<(), DmError> {
+        let emoji = emoji.into();
+        let fine = match &emoji {
+            Reacted::Standard(e) => valid_emoji(e),
+            Reacted::Custom(e) => !e.id.is_empty() && !e.url.is_empty(),
+        };
+        if !fine {
             return Err(DmError(crate::core::i18n::t("chattools.reactions.failed")));
         }
         reports::used(if on { "message.react" } else { "message.unreact" });
         // It shows at once, and goes back if it can't be sent; once sent, this device has read it back.
         let nonce = crate::core::dms::new_nonce();
-        let pending = PendingReaction { room: room.to_owned(), sequence, emoji: emoji.to_owned(), on, nonce };
+        let pending = PendingReaction { room: room.to_owned(), sequence, emoji: emoji.clone(), on, nonce };
         self.shared.instance(key, |i| i.dms.reacting.push(pending));
-        let res = self.send_dm(key, room, Content::React { sequence, emoji: emoji.to_owned(), removed: !on }).await;
+        let res = self.send_dm(key, room, Content::React { sequence, emoji, removed: !on }).await;
         self.shared.instance(key, |i| i.dms.reacting.retain(|p| p.nonce != nonce));
         res
     }
@@ -581,7 +687,7 @@ mod tests {
         assert_eq!(t.len(), 2);
         assert_eq!((t[0].emoji.as_str(), t[0].count, t[0].me), ("👍", 2, true));
         assert_eq!((t[1].emoji.as_str(), t[1].count, t[1].me), ("❤️", 1, false));
-        assert_eq!(reactors(&marks, "👍"), vec!["ann".to_owned(), "me".to_owned()]);
+        assert_eq!(reactors(&marks, &EmojiKey::standard("👍")), vec!["ann".to_owned(), "me".to_owned()]);
         // Taken off, then an older "on" arriving late can't put it back.
         assert!(mark(&mut marks, "me", "👍", 9, true, None));
         assert!(!mark(&mut marks, "me", "👍", 8, false, None));
@@ -600,7 +706,7 @@ mod tests {
         assert!(mark(&mut marks, "ann", "👍\u{fe0f}", 3, true, None));
         let t = tally(&marks, "bo");
         assert_eq!((t.len(), t[0].count, t[0].me), (1, 1, true));
-        assert_eq!(reactors(&marks, "👍"), vec!["bo".to_owned()]);
+        assert_eq!(reactors(&marks, &EmojiKey::standard("👍")), vec!["bo".to_owned()]);
         assert!(EmojiKey::standard("👍").is(&pb::Reaction { emoji: "👍\u{fe0f}".into(), ..Default::default() }));
     }
 
@@ -662,5 +768,70 @@ mod tests {
     fn only_emoji_like_text_counts() {
         assert!(valid_emoji("👍") && valid_emoji("👍🏽") && valid_emoji("❤️"));
         assert!(!valid_emoji("") && !valid_emoji("hi") && !valid_emoji("👍 ") && !valid_emoji(&"👍".repeat(9)));
+    }
+
+    fn blob(url: &str) -> EmojiRef {
+        EmojiRef {
+            id: "01J9ZZZZZZZZZZZZZZZZZZZZZZ".into(),
+            server_id: "s".into(),
+            name: "blob".into(),
+            url: url.into(),
+            animated: false,
+        }
+    }
+
+    #[test]
+    fn server_emoji_reactions_are_tallied_by_id() {
+        let mut marks = Vec::new();
+        let one = Reacted::Custom(blob("https://x/media/1.png"));
+        // The same id with a new picture is the same reaction.
+        let again = Reacted::Custom(blob("https://x/media/2.png"));
+        assert!(mark(&mut marks, "ann", &one, 5, false, None));
+        assert!(mark(&mut marks, "me", &again, 6, false, None));
+        assert!(mark(&mut marks, "ann", "👍", 7, false, None));
+        assert!(!mark(&mut marks, "ann", &again, 4, true, None));
+        let t = tally(&marks, "me");
+        assert_eq!(t.len(), 2);
+        assert_eq!(
+            (t[0].emoji_id.as_str(), t[0].emoji_name.as_str(), t[0].count, t[0].me),
+            (one.key().emoji_id.as_str(), "blob", 2, true)
+        );
+        assert_eq!(t[0].emoji_url, "https://x/media/1.png");
+        assert!(t[0].emoji.is_empty());
+        assert_eq!(reactors(&marks, &one.key()), vec!["ann".to_owned(), "me".to_owned()]);
+        // Taken off, latest winning; an older "on" can't put it back.
+        assert!(mark(&mut marks, "me", &one, 9, true, None));
+        assert!(!mark(&mut marks, "me", &one, 8, false, None));
+        let t = tally(&marks, "me");
+        assert_eq!((t[0].count, t[0].me), (1, false));
+        assert!(mark(&mut marks, "ann", &one, 10, true, None));
+        let t = tally(&marks, "me");
+        assert_eq!((t.len(), t[0].emoji.as_str()), (1, "👍"));
+        // Yours on its way shows over it.
+        let shown = with_pending(&marks, "me", [(&one, true)]);
+        assert_eq!(tally(&shown, "me")[1].emoji_id, one.key().emoji_id);
+    }
+
+    #[test]
+    fn only_sound_server_emoji_reactions_are_taken() {
+        let origins = vec!["https://x".to_owned()];
+        let custom = |url: &str| pb::DirectMessageReaction {
+            sequence: 1,
+            emoji: String::new(),
+            removed: false,
+            custom: Some(blob(url).to_pb()),
+        };
+        assert_eq!(
+            reacted_of(&custom("https://x/media/1.png"), &origins),
+            Some(Reacted::Custom(blob("https://x/media/1.png")))
+        );
+        assert_eq!(reacted_of(&custom("https://y/media/1.png"), &origins), None);
+        assert_eq!(reacted_of(&custom("https://x/avatars/1.png"), &origins), None);
+        let standard = pb::DirectMessageReaction { sequence: 1, emoji: "🎉".into(), ..Default::default() };
+        assert_eq!(reacted_of(&standard, &origins), Some(Reacted::Standard("🎉".into())));
+        assert_eq!(reacted_of(&pb::DirectMessageReaction::default(), &origins), None);
+        // What goes out for each.
+        let out = Reacted::Custom(blob("https://x/media/1.png")).to_pb(3, true);
+        assert!(out.emoji.is_empty() && out.removed && out.custom.is_some_and(|c| c.name == "blob"));
     }
 }

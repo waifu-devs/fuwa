@@ -176,6 +176,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
           <>
             <EncryptedMessages
               instanceKey={instanceKey}
+              serverId={serverId}
               id={id}
               me={me}
               userOf={userOf}

@@ -16,6 +16,7 @@ import { displayName } from "@/lib/format";
 import { blockedIds } from "@/lib/friends";
 import { cn } from "@/lib/utils";
 import { type I18n, T, useI18n } from "@/i18n/react";
+import { EMOJI_TOKEN } from "@/lib/emoji";
 
 const NONE: Conversation[] = [];
 
@@ -116,7 +117,7 @@ function preview(t: I18n["t"], items: Item[] | undefined, meId: string | undefin
     const item = items[n]!;
     if (!isMessage(item)) continue;
     if (item.deleted) return t("dms-calls.dm.deleted");
-    const text = lineText(item).replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
+    const text = lineText(item).replace(EMOJI_TOKEN, ":$2:").replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
     return item.senderId === meId ? t("dms-calls.dm.list.youSaid", { text }) : text;
   }
   return "";

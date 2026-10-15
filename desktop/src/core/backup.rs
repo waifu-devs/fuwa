@@ -230,7 +230,7 @@ fn to_backup_all(conversation: &str, i: &Item) -> Vec<pb::BackupItem> {
             at_ms: i.at,
             sender_id: m.user_id.clone(),
             kind: pb::BackupItemKind::Reaction as i32,
-            reaction: Some(pb::DirectMessageReaction { sequence: i.seq, emoji: m.emoji.clone(), removed: m.removed }),
+            reaction: Some(crate::core::reactions::Reacted::of_mark(m).to_pb(i.seq, m.removed)),
             signed: signed_form(&m.signed),
             ..Default::default()
         }));
@@ -238,26 +238,23 @@ fn to_backup_all(conversation: &str, i: &Item) -> Vec<pb::BackupItem> {
     out
 }
 
-/// A reaction record from a backup: the conversation, the message it's to, and what it said.
-fn reaction_from_backup(b: &pb::BackupItem) -> Option<(String, i64, ReactionMark)> {
+/// A reaction record from a backup: the conversation, the message it's to,
+/// and what it said. A server emoji is checked against the instance's
+/// `origins` as when it was first read.
+fn reaction_from_backup(b: &pb::BackupItem, origins: &[String]) -> Option<(String, i64, ReactionMark)> {
     let r = b.reaction.as_ref()?;
     if b.kind != pb::BackupItemKind::Reaction as i32
         || b.conversation_id.is_empty()
         || b.sequence <= 0
         || r.sequence <= 0
         || b.sender_id.is_empty()
-        || !crate::core::reactions::valid_emoji(&r.emoji)
     {
         return None;
     }
-    let mark = ReactionMark {
-        user_id: b.sender_id.clone(),
-        emoji: r.emoji.clone(),
-        seq: b.sequence,
-        removed: r.removed,
-        signed: from_signed(b.signed.clone()),
-    };
-    Some((b.conversation_id.clone(), r.sequence, mark))
+    let mut marks = Vec::new();
+    let emoji = crate::core::reactions::reacted_of(r, origins)?;
+    crate::core::reactions::mark(&mut marks, &b.sender_id, emoji, b.sequence, r.removed, from_signed(b.signed.clone()));
+    Some((b.conversation_id.clone(), r.sequence, marks.pop()?))
 }
 
 fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
@@ -305,10 +302,13 @@ fn to_backup(conversation: &str, i: &Item) -> Option<pb::BackupItem> {
         in_channel: i.in_channel,
         locked: i.kind == ItemKind::Thread && i.content == "locked",
         reaction: None,
+        emojis: if i.deleted { Vec::new() } else { i.emojis.iter().map(|e| e.to_pb()).collect() },
     })
 }
 
-fn from_backup(b: pb::BackupItem) -> Option<(String, Item)> {
+/// A line from a backup; a text's server emoji are checked against the
+/// instance's `origins` as when it was first read.
+fn from_backup(b: pb::BackupItem, origins: &[String]) -> Option<(String, Item)> {
     let kind = match pb::BackupItemKind::try_from(b.kind).ok()? {
         pb::BackupItemKind::Text | pb::BackupItemKind::Voice => ItemKind::Text,
         pb::BackupItemKind::Devices => ItemKind::Devices,
@@ -353,6 +353,7 @@ fn from_backup(b: pb::BackupItem) -> Option<(String, Item)> {
     item.removed = b.removed.into_iter().map(device).collect();
     if !b.deleted {
         item.files = crate::core::sealed_files::files_of(&b.files);
+        item.emojis = crate::core::emoji::checked(&b.emojis, &item.content, origins);
     }
     if !b.deleted {
         item.signed = from_signed(b.signed);
@@ -607,9 +608,11 @@ impl DmEngine {
                         unreadable += 1;
                         continue;
                     };
+                    let origins = self.origins();
                     let reactions: Vec<(String, i64, ReactionMark)> =
-                        decoded.items.iter().filter_map(reaction_from_backup).collect();
-                    let items: Vec<(String, Item)> = decoded.items.into_iter().filter_map(from_backup).collect();
+                        decoded.items.iter().filter_map(|b| reaction_from_backup(b, &origins)).collect();
+                    let items: Vec<(String, Item)> =
+                        decoded.items.into_iter().filter_map(|b| from_backup(b, &origins)).collect();
                     let mut inner = self.inner.lock().await;
                     let mut take: Vec<(String, Item)> = Vec::new();
                     for (conversation, mut item) in items {
@@ -636,10 +639,11 @@ impl DmEngine {
                         if item.kind != ItemKind::Text || item.deleted {
                             continue;
                         }
+                        let emoji = crate::core::reactions::Reacted::of_mark(&m);
                         if crate::core::reactions::mark(
                             &mut item.reactions,
                             &m.user_id,
-                            &m.emoji,
+                            emoji,
                             m.seq,
                             m.removed,
                             m.signed,
@@ -756,10 +760,10 @@ mod tests {
         assert_eq!((r.kind, r.sequence, r.sender_id.as_str()), (pb::BackupItemKind::Reaction as i32, 7, "mika"));
         assert_eq!(r.reaction.as_ref().map(|r| (r.sequence, r.emoji.as_str(), r.removed)), Some((4, "👍", false)));
         // An older app's reader skips it; this one takes it back.
-        assert!(from_backup(r.clone()).is_none());
-        let (c, target, m) = reaction_from_backup(r).unwrap();
+        assert!(from_backup(r.clone(), &[]).is_none());
+        let (c, target, m) = reaction_from_backup(r, &[]).unwrap();
         assert_eq!((c.as_str(), target, m.seq, m.user_id.as_str(), m.removed), ("c", 4, 7, "mika", false));
-        let gone = reaction_from_backup(&out[2]).unwrap().2;
+        let gone = reaction_from_backup(&out[2], &[]).unwrap().2;
         assert!(gone.removed);
         // A deleted message carries none.
         item.deleted = true;
@@ -772,5 +776,35 @@ mod tests {
             let zeros = padding_for(bare);
             assert_eq!((bare + 1 + varint_bytes(zeros) + zeros) % PAD_TO, 0, "{bare}");
         }
+    }
+
+    #[test]
+    fn server_emoji_go_in_and_come_back_checked() {
+        let origins = vec!["https://x".to_owned()];
+        let id = "01J9ZZZZZZZZZZZZZZZZZZZZZZ";
+        let blob = crate::core::vault::EmojiRef {
+            id: id.into(),
+            server_id: "s".into(),
+            name: "blob".into(),
+            url: "https://x/media/b.png".into(),
+            animated: true,
+        };
+        let mut item = Item::new(4, ItemKind::Text, 10, "aoi", "a1");
+        item.content = format!("<a:blob:{id}>");
+        item.emojis = vec![blob.clone()];
+        let custom = crate::core::reactions::Reacted::Custom(blob.clone());
+        crate::core::reactions::mark(&mut item.reactions, "mika", &custom, 7, false, None);
+        let out = to_backup_all("c", &item);
+        assert_eq!(out[0].emojis.len(), 1);
+        let r = out[1].reaction.as_ref().unwrap();
+        assert!(r.emoji.is_empty() && r.custom.as_ref().is_some_and(|c| c.id == id));
+        let (_, back) = from_backup(out[0].clone(), &origins).unwrap();
+        assert_eq!(back.emojis, vec![blob.clone()]);
+        let (_, _, m) = reaction_from_backup(&out[1], &origins).unwrap();
+        assert_eq!(m.custom, Some(blob));
+        // From somewhere else, they stay out.
+        let elsewhere = vec!["https://y".to_owned()];
+        assert!(from_backup(out[0].clone(), &elsewhere).unwrap().1.emojis.is_empty());
+        assert!(reaction_from_backup(&out[1], &elsewhere).is_none());
     }
 }

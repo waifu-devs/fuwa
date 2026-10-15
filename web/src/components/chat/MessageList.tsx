@@ -946,7 +946,7 @@ export function MessageBody({
 }: {
   content: string;
   /** Emoji from other servers the message brought along. */
-  emojis?: Emoji[];
+  emojis?: readonly Pick<Emoji, "id" | "name" | "url" | "animated">[];
   display: MessageDisplay;
   className?: string;
 }) {
