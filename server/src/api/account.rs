@@ -524,6 +524,25 @@ impl AccountService for Api {
         )
     }
 
+    async fn mark_read(&self, request: Request<pb::MarkReadRequest>) -> Result<Response<pb::MarkReadResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                if account.kind == pb::AccountKind::Agent {
+                    return Err(Error::denied("agents don't keep read marks"));
+                }
+                let marks = crate::reads::check(request.into_inner().marks)?;
+                // Only the caller's own devices ever hear of these, so a place
+                // they can't see (or that doesn't exist) is just never shown.
+                let kept = self.app.node()?.mark_read(&account.id, &marks).await?;
+                let moved = kept.iter().filter(|(_, moved)| *moved).map(|(mark, _)| mark.clone()).collect();
+                self.app.reads.publish(&account.id, moved);
+                Ok(pb::MarkReadResponse { marks: kept.into_iter().map(|(mark, _)| mark).collect() })
+            }
+            .await,
+        )
+    }
+
     type ExportDataStream = ExportStream;
 
     async fn export_data(&self, request: Request<pb::ExportDataRequest>) -> Result<Response<ExportStream>, Status> {
@@ -599,6 +618,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
         .await?
         .and_then(|(document, _, _)| serde_json::from_str::<Value>(&document).ok())
         .unwrap_or(Value::Null);
+    let read_marks = node.read_marks_since(&account.id, 0, crate::node::MAX_READ_MARKS).await?;
     let settings = app.settings();
     let head = json!({
         "format": "fuwa.export.v1",
@@ -675,6 +695,12 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             None => None,
         }).collect::<Vec<_>>(),
         "app_settings": app_settings,
+        "read_marks": read_marks.iter().map(|m| json!({
+            "place": m.place,
+            "message_id": (!m.message_id.is_empty()).then_some(&m.message_id),
+            "sequence": (m.sequence > 0).then_some(m.sequence),
+            "at": time(m.at_ms),
+        })).collect::<Vec<_>>(),
     });
     let mut head = serde_json::to_string_pretty(&head).map_err(|err| Error::internal(err.to_string()))?;
     head.truncate(head.trim_end().len() - 1); // the closing brace, reopened for the servers

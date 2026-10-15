@@ -1911,14 +1911,19 @@ impl DmEngine {
 
     /// Notes that you've seen everything in a conversation or secure channel so far.
     pub async fn mark_read(&self, id: &str) {
-        {
+        let moved = {
             let mut inner = self.inner.lock().await;
             let last = inner.vault.items(id).ok().and_then(|items| items.last().map(|i| i.seq)).unwrap_or(0);
             let mut note = inner.vault.note(id);
-            if note.read < last {
+            (note.read < last).then(|| {
                 note.read = last;
                 let _ = inner.vault.write(Change { notes: vec![(id.to_owned(), note)], ..Change::default() });
-            }
+                last
+            })
+        };
+        // And on your other devices (docs/read-marks.md).
+        if let Some(last) = moved {
+            self.note_record_read(id, last);
         }
         if self.secure.lock().contains_key(id) {
             self.shared.instance(&self.key, |i| {
@@ -1964,6 +1969,44 @@ impl DmEngine {
                 return;
             }
             note.thread_read.insert(parent, seq);
+            let _ = inner.vault.write(Change { notes: vec![(id.to_owned(), note)], ..Change::default() });
+        }
+        self.note_record_read(&format!("{id}/{parent}"), seq);
+        self.refresh(id).await;
+    }
+
+    /// This device noted reading a conversation or secure channel (or a
+    /// thread there, "<id>/<record>") up to a record: passed to your other devices.
+    fn note_record_read(&self, place: &str, seq: i64) {
+        if seq > 0
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            crate::core::reads::note(&self.shared, &self.api, &self.key, place, seq, &runtime);
+        }
+    }
+
+    /// Another device of yours read a conversation or secure channel up to
+    /// `seq` (or a thread there, as "<id>/<record it's under>"): noted here as
+    /// if read here, so its unread count goes, without sending it back.
+    pub async fn read_elsewhere(&self, place: &str, seq: i64) {
+        let (id, parent) = crate::core::read_marks::split_place(place);
+        if id.is_empty() || (self.conversation(id).is_none() && !self.secure.lock().contains_key(id)) {
+            return;
+        }
+        {
+            let mut inner = self.inner.lock().await;
+            let mut note = inner.vault.note(id);
+            if parent > 0 {
+                if note.thread_read.get(&parent).copied().unwrap_or(0) >= seq {
+                    return;
+                }
+                note.thread_read.insert(parent, seq);
+            } else {
+                if note.read >= seq {
+                    return;
+                }
+                note.read = seq;
+            }
             let _ = inner.vault.write(Change { notes: vec![(id.to_owned(), note)], ..Change::default() });
         }
         self.refresh(id).await;

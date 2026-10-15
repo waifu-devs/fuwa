@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/account.proto";
 import "fuwa/v1/dm.proto";
 import "fuwa/v1/event.proto";
 import "fuwa/v1/friend.proto";
@@ -72,6 +73,12 @@ message OpenRequest {
   // What's in focus from the start, so catching up from a cursor already
   // sends the channel on screen whole.
   Focus focus = 7;
+  // Also your read marks (AccountService.MarkRead), from every device of
+  // yours, this one's included.
+  bool reads = 8;
+  // With `reads`: first the marks taken at or after this (ms, the newest
+  // `at_ms` the app heard), then `reads_ready`. 0 sends none from before.
+  int64 reads_after = 9;
 }
 
 message OpenResponse {
@@ -85,7 +92,16 @@ message OpenResponse {
     ChannelHeads heads = 6;
     // The focus now in effect.
     Focus focus = 7;
+    // Places you read on some device, as kept now.
+    ReadMarks reads = 8;
   }
+}
+
+message ReadMarks {
+  repeated ReadMark marks = 1;
+  // The marks from before the stream opened (OpenRequest.reads_after) have
+  // all come.
+  bool ready = 2;
 }
 
 // What moved in channels out of focus since the last heads, at most every 2

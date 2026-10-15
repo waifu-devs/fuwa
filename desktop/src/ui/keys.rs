@@ -340,14 +340,15 @@ impl FuwaApp {
 
     fn mark_server_read(&mut self, cx: &mut Context<Self>) {
         let Nav::Server { key, server } = self.nav.clone() else { return };
-        let (cleared, name) = self.core.shared.update(|s| {
-            let Some(i) = s.instances.get_mut(&key) else { return (0, String::new()) };
+        let (ids, name) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&key) else { return (Vec::new(), String::new()) };
             let name = i.servers.iter().find(|sv| sv.id == server).map(|sv| sv.name.clone()).unwrap_or_default();
             let ids: Vec<String> =
                 i.channels.get(&server).map(|c| c.iter().map(|c| c.id.clone()).collect()).unwrap_or_default();
-            let cleared = ids.iter().filter(|id| i.unread.remove(*id).is_some_and(|n| n > 0)).count();
-            (cleared, name)
+            (ids, name)
         });
+        // On your other devices too (read marks).
+        let cleared = self.core.mark_read(&key, &ids);
         let title = match (cleared > 0, name.is_empty()) {
             (true, true) => t("chattools.shortcuts.markedReadThis"),
             (false, true) => t("chattools.shortcuts.nothingUnreadThis"),

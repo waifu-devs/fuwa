@@ -51,6 +51,9 @@
     tickets), notification settings, server arrangements (each person's rail
     order and folders, `AccountService.Get/SetServerArrangement`; the web side
     is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
+    read marks (how far each person read in each channel, thread and
+    conversation, `read_marks`, set with `AccountService.MarkRead` and sent
+    to their live connections through `reads.rs`; docs/read-marks.md),
     the servers admins feature in Browse (`featured_servers`, in order, set
     with `AdminService.SetFeaturedServers`; `DiscoverServers` puts them
     first and names them, and apps draw them big), meta (the install id, the
@@ -632,7 +635,9 @@
     `live-connection` one `LiveService.Open` stream carries DMs, friends and
     presence too), `live.rs` (its Focus: the open channel, the member rows
     in sight and the authors shown; heads, re-reading a channel when it
-    comes into focus), `dms.rs` and `vault.rs` (one MLS
+    comes into focus), `read_marks.rs` and `reads.rs` (read marks, sent
+    and taken like the web's `fuwa/read-marks.ts` and `fuwa/reads.ts`;
+    docs/read-marks.md), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it;
     a `Room` is a direct message or a secure channel, which share

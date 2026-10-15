@@ -11919,6 +11919,79 @@ async fn live_streams_send_whole_messages_only_in_focus() {
     instance.stop().await;
 }
 
+/// Reading a place on one device reaches the person's other devices' live
+/// connections, only forward, and a connection that was away hears what it
+/// missed (docs/read-marks.md).
+#[tokio::test]
+async fn read_marks_reach_every_device() {
+    use pb::open_response::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let mut live = pb::live_service_client::LiveServiceClient::new(instance.channel().await);
+    let (ann, _, _) = sign_up(&mut c, "ann").await;
+    let (bo, _, _) = sign_up(&mut c, "bo").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let bo_phone = sign_in(&mut c, "bo", "correct horse battery").await.unwrap().token;
+    let server = create_server(&mut c, &ann, "Games", true).await;
+    join(&mut c, &bo, &server.id).await;
+    let general = new_channel(&mut c, &ann, &server.id, "general", pb::ChannelType::Text).await;
+    let sent = send(&mut c, &ann, &server.id, &general.id, "hi").await.unwrap();
+
+    let reads = |after: i64| pb::OpenRequest { reads: true, reads_after: after, ..Default::default() };
+    let next_reads = async |stream: &mut tonic::Streaming<pb::OpenResponse>| loop {
+        if let Item::Reads(reads) = next_live(stream).await {
+            return reads;
+        }
+    };
+    let mut phone = live.open(authed(&bo_phone, reads(0))).await.unwrap().into_inner();
+    let ready = next_reads(&mut phone).await;
+    assert!(ready.ready && ready.marks.is_empty(), "nothing from before when asked from 0");
+
+    // Up to now: the instance fills in an id after every message so far.
+    let mark = |place: &str, message_id: &str, sequence: i64| pb::ReadMark {
+        place: place.into(),
+        message_id: message_id.into(),
+        sequence,
+        at_ms: 0,
+    };
+    let mark_read = async |c: &mut Clients, token: &str, marks: Vec<pb::ReadMark>| {
+        c.account.mark_read(authed(token, pb::MarkReadRequest { marks })).await.map(|r| r.into_inner().marks)
+    };
+    let kept = mark_read(&mut c, &bo, vec![mark(&general.id, "", 0)]).await.unwrap();
+    assert!(kept[0].message_id > sent.id && kept[0].at_ms > 0);
+    let heard = next_reads(&mut phone).await;
+    assert_eq!(heard.marks, kept);
+    assert!(!heard.ready);
+
+    // Behind what's kept: nothing moves and nothing is sent. A conversation's
+    // mark goes by sequence.
+    let behind = mark_read(&mut c, &bo, vec![mark(&general.id, &sent.id, 0)]).await.unwrap();
+    assert_eq!(behind, kept);
+    let conversation = "01JZ0000000000000000000000";
+    let five = mark_read(&mut c, &bo, vec![mark(conversation, "", 5)]).await.unwrap();
+    assert_eq!(mark_read(&mut c, &bo, vec![mark(conversation, "", 3)]).await.unwrap(), five);
+    assert_eq!(next_reads(&mut phone).await.marks, five, "the stale marks never went out");
+
+    // Away and back: what came since the last mark heard, then ready.
+    drop(phone);
+    let mut again = live.open(authed(&bo_phone, reads(kept[0].at_ms))).await.unwrap().into_inner();
+    let missed = next_reads(&mut again).await;
+    assert!(missed.ready);
+    let places: Vec<_> = missed.marks.iter().map(|m| m.place.as_str()).collect();
+    assert!(places.contains(&general.id.as_str()) && places.contains(&conversation));
+
+    // Only yours.
+    let mut theirs = live.open(authed(&mika, reads(1))).await.unwrap().into_inner();
+    let none = next_reads(&mut theirs).await;
+    assert!(none.ready && none.marks.is_empty());
+
+    for bad in [vec![], vec![mark("nope", "", 0)], vec![mark(&general.id, &sent.id, 2)]] {
+        assert_eq!(mark_read(&mut c, &bo, bad).await.unwrap_err().code(), Code::InvalidArgument);
+    }
+    instance.stop().await;
+}
+
 /// Someone typing reaches the live connections with that channel in focus,
 /// once per burst, and never moves a head; nobody hears of typing in a
 /// channel they can't see.

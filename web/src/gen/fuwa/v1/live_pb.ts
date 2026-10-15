@@ -4,6 +4,8 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { ReadMark } from "./account_pb";
+import { file_fuwa_v1_account } from "./account_pb";
 import type { WatchResponse } from "./dm_pb";
 import { file_fuwa_v1_dm } from "./dm_pb";
 import type { ServerCursor, SubscribeResponse } from "./event_pb";
@@ -18,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/live.proto.
  */
 export const file_fuwa_v1_live: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2xpdmUucHJvdG8SB2Z1d2EudjEi1gEKC09wZW5SZXF1ZXN0EiYKB3NlcnZlcnMYASADKAsyFS5mdXdhLnYxLlNlcnZlckN1cnNvchIaChJmb2xsb3dfbmV3X3NlcnZlcnMYAiABKAgSFwoPZGlyZWN0X21lc3NhZ2VzGAMgASgIEg8KB2ZyaWVuZHMYBCABKAgSEAoIcHJlc2VuY2UYBSABKAgSKAoIbWVzc2FnZXMYBiABKA4yFi5mdXdhLnYxLk1lc3NhZ2VJbnRlbnQSHQoFZm9jdXMYByABKAsyDi5mdXdhLnYxLkZvY3VzIr8CCgxPcGVuUmVzcG9uc2USFwoNY29ubmVjdGlvbl9pZBgBIAEoCUgAEiwKBmV2ZW50cxgCIAEoCzIaLmZ1d2EudjEuU3Vic2NyaWJlUmVzcG9uc2VIABIxCg9kaXJlY3RfbWVzc2FnZXMYAyABKAsyFi5mdXdhLnYxLldhdGNoUmVzcG9uc2VIABIwCgdmcmllbmRzGAQgASgLMh0uZnV3YS52MS5XYXRjaEZyaWVuZHNSZXNwb25zZUgAEjIKCHByZXNlbmNlGAUgASgLMh4uZnV3YS52MS5XYXRjaFByZXNlbmNlUmVzcG9uc2VIABImCgVoZWFkcxgGIAEoCzIVLmZ1d2EudjEuQ2hhbm5lbEhlYWRzSAASHwoFZm9jdXMYByABKAsyDi5mdXdhLnYxLkZvY3VzSABCBgoEaXRlbSI1CgxDaGFubmVsSGVhZHMSJQoHc2VydmVycxgBIAMoCzIULmZ1d2EudjEuU2VydmVySGVhZHMiWgoLU2VydmVySGVhZHMSEQoJc2VydmVyX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDEiYKCGNoYW5uZWxzGAMgAygLMhQuZnV3YS52MS5DaGFubmVsSGVhZCI6CgtDaGFubmVsSGVhZBISCgpjaGFubmVsX2lkGAEgASgJEhcKD2xhc3RfbWVzc2FnZV9pZBgCIAEoCSIuCgVGb2N1cxITCgtjaGFubmVsX2lkcxgBIAMoCRIQCgh1c2VyX2lkcxgCIAMoCSJECgxGb2N1c1JlcXVlc3QSFQoNY29ubmVjdGlvbl9pZBgBIAEoCRIdCgVmb2N1cxgCIAEoCzIOLmZ1d2EudjEuRm9jdXMiDwoNRm9jdXNSZXNwb25zZSqAAQoNTWVzc2FnZUludGVudBIeChpNRVNTQUdFX0lOVEVOVF9VTlNQRUNJRklFRBAAEhYKEk1FU1NBR0VfSU5URU5UX0FMTBABEhoKFk1FU1NBR0VfSU5URU5UX0ZPQ1VTRUQQAhIbChdNRVNTQUdFX0lOVEVOVF9NRU5USU9OUxADMnwKC0xpdmVTZXJ2aWNlEjUKBE9wZW4SFC5mdXdhLnYxLk9wZW5SZXF1ZXN0GhUuZnV3YS52MS5PcGVuUmVzcG9uc2UwARI2CgVGb2N1cxIVLmZ1d2EudjEuRm9jdXNSZXF1ZXN0GhYuZnV3YS52MS5Gb2N1c1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_dm, file_fuwa_v1_event, file_fuwa_v1_friend, file_fuwa_v1_presence]);
+  fileDesc("ChJmdXdhL3YxL2xpdmUucHJvdG8SB2Z1d2EudjEi+gEKC09wZW5SZXF1ZXN0EiYKB3NlcnZlcnMYASADKAsyFS5mdXdhLnYxLlNlcnZlckN1cnNvchIaChJmb2xsb3dfbmV3X3NlcnZlcnMYAiABKAgSFwoPZGlyZWN0X21lc3NhZ2VzGAMgASgIEg8KB2ZyaWVuZHMYBCABKAgSEAoIcHJlc2VuY2UYBSABKAgSKAoIbWVzc2FnZXMYBiABKA4yFi5mdXdhLnYxLk1lc3NhZ2VJbnRlbnQSHQoFZm9jdXMYByABKAsyDi5mdXdhLnYxLkZvY3VzEg0KBXJlYWRzGAggASgIEhMKC3JlYWRzX2FmdGVyGAkgASgDIuQCCgxPcGVuUmVzcG9uc2USFwoNY29ubmVjdGlvbl9pZBgBIAEoCUgAEiwKBmV2ZW50cxgCIAEoCzIaLmZ1d2EudjEuU3Vic2NyaWJlUmVzcG9uc2VIABIxCg9kaXJlY3RfbWVzc2FnZXMYAyABKAsyFi5mdXdhLnYxLldhdGNoUmVzcG9uc2VIABIwCgdmcmllbmRzGAQgASgLMh0uZnV3YS52MS5XYXRjaEZyaWVuZHNSZXNwb25zZUgAEjIKCHByZXNlbmNlGAUgASgLMh4uZnV3YS52MS5XYXRjaFByZXNlbmNlUmVzcG9uc2VIABImCgVoZWFkcxgGIAEoCzIVLmZ1d2EudjEuQ2hhbm5lbEhlYWRzSAASHwoFZm9jdXMYByABKAsyDi5mdXdhLnYxLkZvY3VzSAASIwoFcmVhZHMYCCABKAsyEi5mdXdhLnYxLlJlYWRNYXJrc0gAQgYKBGl0ZW0iPAoJUmVhZE1hcmtzEiAKBW1hcmtzGAEgAygLMhEuZnV3YS52MS5SZWFkTWFyaxINCgVyZWFkeRgCIAEoCCI1CgxDaGFubmVsSGVhZHMSJQoHc2VydmVycxgBIAMoCzIULmZ1d2EudjEuU2VydmVySGVhZHMiWgoLU2VydmVySGVhZHMSEQoJc2VydmVyX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDEiYKCGNoYW5uZWxzGAMgAygLMhQuZnV3YS52MS5DaGFubmVsSGVhZCI6CgtDaGFubmVsSGVhZBISCgpjaGFubmVsX2lkGAEgASgJEhcKD2xhc3RfbWVzc2FnZV9pZBgCIAEoCSIuCgVGb2N1cxITCgtjaGFubmVsX2lkcxgBIAMoCRIQCgh1c2VyX2lkcxgCIAMoCSJECgxGb2N1c1JlcXVlc3QSFQoNY29ubmVjdGlvbl9pZBgBIAEoCRIdCgVmb2N1cxgCIAEoCzIOLmZ1d2EudjEuRm9jdXMiDwoNRm9jdXNSZXNwb25zZSqAAQoNTWVzc2FnZUludGVudBIeChpNRVNTQUdFX0lOVEVOVF9VTlNQRUNJRklFRBAAEhYKEk1FU1NBR0VfSU5URU5UX0FMTBABEhoKFk1FU1NBR0VfSU5URU5UX0ZPQ1VTRUQQAhIbChdNRVNTQUdFX0lOVEVOVF9NRU5USU9OUxADMnwKC0xpdmVTZXJ2aWNlEjUKBE9wZW4SFC5mdXdhLnYxLk9wZW5SZXF1ZXN0GhUuZnV3YS52MS5PcGVuUmVzcG9uc2UwARI2CgVGb2N1cxIVLmZ1d2EudjEuRm9jdXNSZXF1ZXN0GhYuZnV3YS52MS5Gb2N1c1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_account, file_fuwa_v1_dm, file_fuwa_v1_event, file_fuwa_v1_friend, file_fuwa_v1_presence]);
 
 /**
  * @generated from message fuwa.v1.OpenRequest
@@ -70,6 +72,22 @@ export type OpenRequest = Message<"fuwa.v1.OpenRequest"> & {
    * @generated from field: fuwa.v1.Focus focus = 7;
    */
   focus?: Focus | undefined;
+
+  /**
+   * Also your read marks (AccountService.MarkRead), from every device of
+   * yours, this one's included.
+   *
+   * @generated from field: bool reads = 8;
+   */
+  reads: boolean;
+
+  /**
+   * With `reads`: first the marks taken at or after this (ms, the newest
+   * `at_ms` the app heard), then `reads_ready`. 0 sends none from before.
+   *
+   * @generated from field: int64 reads_after = 9;
+   */
+  readsAfter: bigint;
 };
 
 /**
@@ -132,6 +150,14 @@ export type OpenResponse = Message<"fuwa.v1.OpenResponse"> & {
      */
     value: Focus;
     case: "focus";
+  } | {
+    /**
+     * Places you read on some device, as kept now.
+     *
+     * @generated from field: fuwa.v1.ReadMarks reads = 8;
+     */
+    value: ReadMarks;
+    case: "reads";
   } | { case: undefined; value?: undefined };
 };
 
@@ -141,6 +167,31 @@ export type OpenResponse = Message<"fuwa.v1.OpenResponse"> & {
  */
 export const OpenResponseSchema: GenMessage<OpenResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_live, 1);
+
+/**
+ * @generated from message fuwa.v1.ReadMarks
+ */
+export type ReadMarks = Message<"fuwa.v1.ReadMarks"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.ReadMark marks = 1;
+   */
+  marks: ReadMark[];
+
+  /**
+   * The marks from before the stream opened (OpenRequest.reads_after) have
+   * all come.
+   *
+   * @generated from field: bool ready = 2;
+   */
+  ready: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ReadMarks.
+ * Use `create(ReadMarksSchema)` to create a new message.
+ */
+export const ReadMarksSchema: GenMessage<ReadMarks> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_live, 2);
 
 /**
  * What moved in channels out of focus since the last heads, at most every 2
@@ -160,7 +211,7 @@ export type ChannelHeads = Message<"fuwa.v1.ChannelHeads"> & {
  * Use `create(ChannelHeadsSchema)` to create a new message.
  */
 export const ChannelHeadsSchema: GenMessage<ChannelHeads> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 2);
+  messageDesc(file_fuwa_v1_live, 3);
 
 /**
  * @generated from message fuwa.v1.ServerHeads
@@ -191,7 +242,7 @@ export type ServerHeads = Message<"fuwa.v1.ServerHeads"> & {
  * Use `create(ServerHeadsSchema)` to create a new message.
  */
 export const ServerHeadsSchema: GenMessage<ServerHeads> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 3);
+  messageDesc(file_fuwa_v1_live, 4);
 
 /**
  * @generated from message fuwa.v1.ChannelHead
@@ -215,7 +266,7 @@ export type ChannelHead = Message<"fuwa.v1.ChannelHead"> & {
  * Use `create(ChannelHeadSchema)` to create a new message.
  */
 export const ChannelHeadSchema: GenMessage<ChannelHead> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 4);
+  messageDesc(file_fuwa_v1_live, 5);
 
 /**
  * @generated from message fuwa.v1.Focus
@@ -242,7 +293,7 @@ export type Focus = Message<"fuwa.v1.Focus"> & {
  * Use `create(FocusSchema)` to create a new message.
  */
 export const FocusSchema: GenMessage<Focus> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 5);
+  messageDesc(file_fuwa_v1_live, 6);
 
 /**
  * @generated from message fuwa.v1.FocusRequest
@@ -264,7 +315,7 @@ export type FocusRequest = Message<"fuwa.v1.FocusRequest"> & {
  * Use `create(FocusRequestSchema)` to create a new message.
  */
 export const FocusRequestSchema: GenMessage<FocusRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 6);
+  messageDesc(file_fuwa_v1_live, 7);
 
 /**
  * @generated from message fuwa.v1.FocusResponse
@@ -277,7 +328,7 @@ export type FocusResponse = Message<"fuwa.v1.FocusResponse"> & {
  * Use `create(FocusResponseSchema)` to create a new message.
  */
 export const FocusResponseSchema: GenMessage<FocusResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_live, 7);
+  messageDesc(file_fuwa_v1_live, 8);
 
 /**
  * @generated from enum fuwa.v1.MessageIntent

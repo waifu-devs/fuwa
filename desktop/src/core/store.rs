@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::calls;
 use crate::core::dms::DmState;
+use crate::core::read_marks;
 use crate::core::threads;
 use crate::pb::{self, event::Payload};
 
@@ -109,6 +110,9 @@ pub struct InstanceState {
     pub followed: HashMap<String, HashSet<String>>,
     /// Per thread you follow: replies from others that came while it wasn't open.
     pub thread_unread: HashMap<String, u32>,
+    /// Per channel or thread: the newest message you read there, on this
+    /// device or another (`read_marks.rs`). Messages up to it don't count as unread.
+    pub read_marks: HashMap<String, String>,
     /// Your friends, requests and blocks.
     pub friends: crate::core::friends::FriendsState,
     /// Who's online here and what they're doing, by user id (`presence::people`),
@@ -172,6 +176,7 @@ impl InstanceState {
             thread_parents: HashMap::new(),
             followed: HashMap::new(),
             thread_unread: HashMap::new(),
+            read_marks: HashMap::new(),
             friends: Default::default(),
             people: None,
             pins: HashMap::new(),
@@ -596,7 +601,10 @@ pub fn apply_event(
                     upsert_message(&mut replies.items, message.clone());
                 }
                 let fresh = created && !seen && !mine && focus_thread != Some(message.thread_id.as_str());
-                if fresh && i.followed.get(sid).is_some_and(|f| f.contains(&message.thread_id)) {
+                if fresh
+                    && i.followed.get(sid).is_some_and(|f| f.contains(&message.thread_id))
+                    && !read_marks::read_already(i, &message.thread_id, &message.id)
+                {
                     *i.thread_unread.entry(message.thread_id.clone()).or_default() += 1;
                 }
                 // Replies stay in their thread unless also sent to the channel.
@@ -616,7 +624,13 @@ pub fn apply_event(
                 known = loaded.items.iter().any(|m| m.id == message.id);
                 upsert_message(&mut loaded.items, message.clone());
             }
-            if created && !known && !mine && focus != Some(message.channel_id.as_str()) {
+            // Read up to there already, here or on another device (`read_marks.rs`).
+            if created
+                && !known
+                && !mine
+                && focus != Some(message.channel_id.as_str())
+                && !read_marks::read_already(i, &message.channel_id, &message.id)
+            {
                 *i.unread.entry(message.channel_id.clone()).or_default() += 1;
                 return Outcome::Unread { channel_id: message.channel_id.clone() };
             }
@@ -894,6 +908,24 @@ mod tests {
         let ids: Vec<_> = i.messages["c"].items.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["01", "02", "03"]);
         assert_eq!(i.unread["c"], 1);
+    }
+
+    #[test]
+    fn messages_read_on_another_device_dont_count() {
+        let mut i = InstanceState::new("k", "https://k");
+        i.me = Some(pb::User { id: "me".into(), ..Default::default() });
+        i.followed.insert("s".into(), HashSet::from(["01".to_owned()]));
+        i.read_marks.insert("c".into(), "05".into());
+        i.read_marks.insert("01".into(), "06".into());
+        let created = |m| event("s", Payload::MessageCreated(pb::MessageCreated { message: Some(m) }));
+        let reply = |id: &str| pb::Message { thread_id: "01".into(), ..message(id, "c", "them") };
+        assert_eq!(apply_event(&mut i, &created(message("04", "c", "them")), None, None), Outcome::Nothing);
+        apply_event(&mut i, &created(reply("06")), None, None);
+        assert!(i.unread.is_empty() && i.thread_unread.is_empty());
+        // What came after the marks counts.
+        apply_event(&mut i, &created(message("07", "c", "them")), None, None);
+        apply_event(&mut i, &created(reply("08")), None, None);
+        assert_eq!((i.unread["c"], i.thread_unread["01"]), (1, 1));
     }
 
     #[test]
