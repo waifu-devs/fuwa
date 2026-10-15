@@ -89,6 +89,8 @@ export type Prefs = {
   shareReports: boolean;
   /** Others see a typing line while you write (lib/typing.ts); off, nothing about it is sent. */
   sendTyping: boolean;
+  /** The gacha's charge, burst, flips and chimes (lib/sounds.ts `gachaCue`). */
+  gachaSounds: boolean;
   /** Voice and audio. Device ids are this browser's; "" is the system default. */
   inputDevice: string;
   outputDevice: string;
@@ -172,6 +174,7 @@ export const DEFAULT_PREFS: Prefs = {
   developerMode: false,
   shareReports: true,
   sendTyping: true,
+  gachaSounds: true,
   inputDevice: "",
   outputDevice: "",
   inputVolume: 100,
@@ -280,6 +283,7 @@ function sanitize(p: Prefs): Prefs {
         : {},
     shareReports: p.shareReports !== false,
     sendTyping: p.sendTyping !== false,
+    gachaSounds: p.gachaSounds !== false,
     syncSettings: p.syncSettings !== false,
     othersEffects: p.othersEffects !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},

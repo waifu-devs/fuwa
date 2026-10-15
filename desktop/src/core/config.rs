@@ -427,6 +427,8 @@ pub struct Prefs {
     /// Others see a typing line while you write a message (`core::typing`);
     /// off, nothing says you're typing. The web's `sendTyping`.
     pub send_typing: bool,
+    /// The gacha's charge, burst, flips and chimes (`core::sounds::play_gacha`). The web's `gachaSounds`.
+    pub gacha_sounds: bool,
     /// The announcement closed on each instance, by its id, so it stays closed until a new one.
     pub closed_announcements: std::collections::BTreeMap<String, String>,
     /// Fetches and checks new versions of the app in the background, for
@@ -588,6 +590,7 @@ impl Default for Prefs {
             custom_keybinds: Vec::new(),
             share_reports: true,
             send_typing: true,
+            gacha_sounds: true,
             closed_announcements: Default::default(),
             auto_update: true,
             shared_notes_closed: Default::default(),

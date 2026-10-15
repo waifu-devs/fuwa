@@ -456,6 +456,18 @@
   "economy.gacha.dropsFrom": "Sale en {banners}",
   "economy.gacha.guaranteed": "Garantizado",
   "economy.gacha.tryLuck": "Probar suerte",
+  "economy.gacha.banners": "Banners",
+  "economy.gacha.topPrizes": "Premios top",
+  "economy.gacha.youHave": "Tienes {amount}",
+  "economy.gacha.opening": "Abriendo {banner}…",
+  "economy.gacha.skip": "Saltar",
+  "economy.gacha.soundsOn": "Sonidos del gacha activados",
+  "economy.gacha.soundsOff": "Sonidos del gacha desactivados",
+  "economy.gacha.stars": {
+    "one": "{count} estrella",
+    "other": "{count} estrellas"
+  },
+  "economy.gacha.pityMeter": "{done} de {total}",
   "economy.give": "Dar",
   "economy.giveAbout": "Lo que des o quites queda en el registro de auditoría, con tu motivo.",
   "economy.giveAmount": "Dar {amount}",

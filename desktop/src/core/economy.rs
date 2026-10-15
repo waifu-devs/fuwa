@@ -168,6 +168,85 @@ pub fn percent(rate: i32) -> String {
     format!("{text}%")
 }
 
+/// How grand a tier's moment is, 0 to 3, as the web's `rarity`: the rarest
+/// tier is 3, the pity tier and any rarer 2, the commonest 0, the rest 1.
+pub fn rarity(b: &pb::GachaBanner, tier_id: &str) -> u8 {
+    let n = b.tiers.len();
+    let Some(at) = b.tiers.iter().position(|t| t.id == tier_id) else { return 0 };
+    if n == 1 {
+        return 1;
+    }
+    if at == 0 {
+        return 3;
+    }
+    let pity = b.tiers.iter().position(|t| !b.pity_tier_id.is_empty() && t.id == b.pity_tier_id);
+    if pity.is_some_and(|p| at <= p) {
+        return 2;
+    }
+    if at == n - 1 { 0 } else { 1 }
+}
+
+/// The stars a tier's cards wear: the commonest one, one more for each tier rarer, at most five.
+pub fn stars(b: &pb::GachaBanner, tier_id: &str) -> usize {
+    b.tiers.iter().position(|t| t.id == tier_id).map_or(1, |at| (b.tiers.len() - at).min(5))
+}
+
+/// The rarest tier among what dropped (its index, rarest 0), so the pack glows its color before it opens.
+pub fn best_tier(b: &pb::GachaBanner, results: &[pb::GachaResult]) -> usize {
+    let best = results.iter().filter_map(|r| b.tiers.iter().position(|t| t.id == r.tier_id)).min();
+    best.unwrap_or(b.tiers.len().saturating_sub(1))
+}
+
+/// When each part of a pull's reveal happens, in milliseconds from the pull (the web's `revealPlan`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealPlan {
+    pub burst: u64,
+    pub deal: u64,
+    pub flips: Vec<u64>,
+    pub done: u64,
+}
+
+/// The web's `REVEAL`: the pack charges, bursts, the cards are dealt face down
+/// (`deal` apart), settle, then turn `flip` apart, waiting `suspense` before
+/// a rare one and `linger` after the rarest.
+pub mod reveal {
+    pub const CHARGE: u64 = 1300;
+    pub const BURST: u64 = 350;
+    pub const DEAL: u64 = 60;
+    pub const SETTLE: u64 = 320;
+    pub const FLIP: u64 = 220;
+    pub const SUSPENSE: u64 = 380;
+    pub const LINGER: u64 = 320;
+}
+
+/// Plays the reveal to one clock with the web; reduced motion shows every card at once.
+pub fn reveal_plan(rarities: &[u8], reduced: bool) -> RevealPlan {
+    if reduced {
+        return RevealPlan { burst: 0, deal: 0, flips: vec![0; rarities.len()], done: 0 };
+    }
+    let burst = reveal::CHARGE;
+    let deal = burst + reveal::BURST;
+    let mut at = deal + rarities.len() as u64 * reveal::DEAL + reveal::SETTLE;
+    let flips = rarities
+        .iter()
+        .enumerate()
+        .map(|(n, r)| {
+            if n > 0 {
+                at += reveal::FLIP;
+            }
+            if *r >= 2 {
+                at += reveal::SUSPENSE;
+            }
+            let flip = at;
+            if *r >= 3 {
+                at += reveal::LINGER;
+            }
+            flip
+        })
+        .collect();
+    RevealPlan { burst, deal, flips, done: at + reveal::FLIP }
+}
+
 /// The colors tiers without their own take, by rarity (0 rarest), as the web picks them.
 pub const TIER_COLORS: [u32; 5] = [0xf59e0b, 0xa855f7, 0x3b82f6, 0x10b981, 0x64748b];
 
@@ -1305,6 +1384,31 @@ mod tests {
         assert_eq!(tier_color(&b.tiers[0], 0), TIER_COLORS[0]);
         assert_eq!(tier_color(&b.tiers[1], 1), 0x123456);
         assert_eq!(tier_color(&b.tiers[0], 99), TIER_COLORS[4]);
+    }
+
+    #[test]
+    fn the_reveal_ranks_tiers_gives_them_stars_and_plays_to_the_webs_clock() {
+        let tier = |id: &str| pb::GachaTier { id: id.into(), ..Default::default() };
+        let b = pb::GachaBanner {
+            tiers: vec![tier("legendary"), tier("epic"), tier("rare"), tier("common")],
+            pity_tier_id: "epic".into(),
+            ..Default::default()
+        };
+        let ids = ["legendary", "epic", "rare", "common"];
+        assert_eq!(ids.map(|id| rarity(&b, id)), [3, 2, 1, 0]);
+        assert_eq!(ids.map(|id| stars(&b, id)), [4, 3, 2, 1]);
+        assert_eq!(rarity(&pb::GachaBanner { pity_tier_id: String::new(), ..b.clone() }, "epic"), 1);
+        assert_eq!(rarity(&b, "gone"), 0);
+        assert_eq!(rarity(&pb::GachaBanner { tiers: vec![tier("only")], ..Default::default() }, "only"), 1);
+        let got = |id: &str| pb::GachaResult { tier_id: id.into(), ..Default::default() };
+        assert_eq!(best_tier(&b, &[got("common"), got("epic"), got("rare")]), 1);
+        assert_eq!(best_tier(&b, &[]), 3);
+        // The same numbers as web/src/lib/gacha.test.ts.
+        assert_eq!(
+            reveal_plan(&[0, 3, 0], false),
+            RevealPlan { burst: 1300, deal: 1650, flips: vec![2150, 2750, 3290], done: 3510 }
+        );
+        assert_eq!(reveal_plan(&[0, 3], true), RevealPlan { burst: 0, deal: 0, flips: vec![0, 0], done: 0 });
     }
 
     #[test]

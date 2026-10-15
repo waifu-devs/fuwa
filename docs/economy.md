@@ -161,6 +161,16 @@ the prizes and refunds in it. Deleting a banner keeps its pulls in the log.
 Managing banners takes Manage Economy, and a role prize Manage Roles and a
 rank above the role, as listing it would.
 
+Both apps open a pull the same way, to one clock (`revealPlan` in
+`web/src/lib/gacha.ts`, `reveal_plan` in the desktop's `core/economy.rs`,
+tested to the same numbers): the pack charges up in the best tier's color,
+bursts, the cards are dealt face down and turn one by one, a rarer card
+pausing and trembling first, a legendary one throwing rays. Skip (or
+Escape) turns them all at once; reduced motion shows them turned. Each step
+has a sound made on the spot (`gachaCue` in `lib/sounds.ts`,
+`play_gacha` in `core/sounds.rs`, the same voices), switched by the synced
+`gachaSounds` setting (docs/app-settings.md) and the app's volume.
+
 ## Moving currency
 
 - **Transfers** (`Transfer`): a member sends some of a transferable

@@ -222,6 +222,189 @@ fn play_with(sound: Sound, pick: Option<SoundPick>, volume: u8, device: &str) {
     }
 }
 
+// ───────────────────────── The gacha ─────────────────────────
+
+/// The gacha's sounds, the web's `GACHA_CUES` voice for voice: the pack
+/// charges up, bursts, each card flips with a tick, and its tier answers with
+/// a chime that grows grander with rarity (`economy::rarity`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GachaCue {
+    Charge,
+    Burst,
+    Flip,
+    Common,
+    Rare,
+    Epic,
+    Legendary,
+    Tap,
+}
+
+impl GachaCue {
+    /// The chime for a card of this rarity (0 to 3).
+    pub fn rarity(rank: u8) -> Self {
+        match rank {
+            0 => GachaCue::Common,
+            1 => GachaCue::Rare,
+            2 => GachaCue::Epic,
+            _ => GachaCue::Legendary,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    Sine,
+    Triangle,
+    Noise,
+}
+
+/// One voice of a gacha sound: a pitch that may sweep `from` to `to` (or a
+/// hiss of noise), starting `at` seconds in, rising over `attack` and dying
+/// away by `length`, at `gain` of the tunes' loudness.
+#[derive(Clone, Copy, Debug)]
+struct Voice {
+    kind: Kind,
+    from: f32,
+    to: f32,
+    at: f32,
+    length: f32,
+    attack: f32,
+    gain: f32,
+}
+
+const fn glide(kind: Kind, from: f32, to: f32, at: f32, length: f32, attack: f32, gain: f32) -> Voice {
+    Voice { kind, from, to, at, length, attack, gain }
+}
+
+const fn note(kind: Kind, freq: f32, at: f32, length: f32, gain: f32) -> Voice {
+    Voice { kind, from: freq, to: freq, at, length, attack: 0.012, gain }
+}
+
+const fn hiss(at: f32, length: f32, attack: f32, gain: f32) -> Voice {
+    Voice { kind: Kind::Noise, from: 0.0, to: 0.0, at, length, attack, gain }
+}
+
+use Kind::{Sine, Triangle};
+
+const CHARGE: &[Voice] = &[
+    glide(Sine, 196.0, 784.0, 0.0, 1.3, 1.15, 0.9),
+    glide(Triangle, 392.0, 1568.0, 0.05, 1.25, 1.1, 0.35),
+    hiss(0.2, 1.1, 1.0, 0.12),
+];
+const BURST: &[Voice] = &[
+    hiss(0.0, 0.5, 0.004, 0.7),
+    glide(Sine, 160.0, 45.0, 0.0, 0.4, 0.004, 1.0),
+    glide(Triangle, 1046.5, 2093.0, 0.02, 0.25, 0.01, 0.3),
+];
+const FLIP: &[Voice] = &[hiss(0.0, 0.07, 0.002, 0.35), glide(Triangle, 1800.0, 1100.0, 0.0, 0.06, 0.002, 0.3)];
+const COMMON: &[Voice] = &[note(Sine, 659.25, 0.03, 0.18, 1.0)];
+const RARE: &[Voice] = &[note(Triangle, 783.99, 0.03, 0.22, 1.0), note(Triangle, 1174.66, 0.1, 0.26, 1.0)];
+const EPIC: &[Voice] = &[
+    note(Sine, 659.25, 0.03, 0.3, 1.0),
+    note(Sine, 830.61, 0.1, 0.3, 1.0),
+    note(Sine, 987.77, 0.17, 0.3, 1.0),
+    note(Sine, 1318.51, 0.24, 0.4, 1.0),
+];
+const LEGENDARY: &[Voice] = &[
+    note(Triangle, 523.25, 0.03, 0.45, 0.9),
+    note(Triangle, 659.25, 0.1, 0.45, 0.9),
+    note(Triangle, 783.99, 0.17, 0.45, 0.9),
+    note(Triangle, 1046.5, 0.24, 0.45, 0.9),
+    note(Triangle, 1318.51, 0.31, 0.45, 0.9),
+    note(Triangle, 1567.98, 0.38, 0.45, 0.9),
+    note(Sine, 2093.0, 0.45, 0.9, 0.35),
+    note(Sine, 2637.02, 0.52, 0.9, 0.3),
+    hiss(0.4, 0.6, 0.3, 0.08),
+];
+const TAP: &[Voice] = &[note(Sine, 1046.5, 0.0, 0.07, 0.6)];
+
+fn voices(cue: GachaCue) -> &'static [Voice] {
+    match cue {
+        GachaCue::Charge => CHARGE,
+        GachaCue::Burst => BURST,
+        GachaCue::Flip => FLIP,
+        GachaCue::Common => COMMON,
+        GachaCue::Rare => RARE,
+        GachaCue::Epic => EPIC,
+        GachaCue::Legendary => LEGENDARY,
+        GachaCue::Tap => TAP,
+    }
+}
+
+/// The cues as samples at `rate`, played together: each voice rises linearly
+/// over its attack, then dies away exponentially to 0.0001 by its length, as
+/// the web's gain ramps do, while its pitch sweeps exponentially.
+fn render_cues(cues: &[GachaCue], rate: u32, volume: f32) -> Vec<f32> {
+    let rate_f = rate as f32;
+    let all: Vec<Voice> = cues.iter().flat_map(|c| voices(*c).iter().copied()).collect();
+    let total = all.iter().map(|v| v.at + v.length).fold(0.0f32, f32::max) + 0.03;
+    let mut out = vec![0.0f32; (total * rate_f) as usize];
+    // A fixed seed: the hiss sounds the same every time, and tests can count on it.
+    let mut seed = 0x2545_f491u32;
+    for v in all {
+        let peak = 0.18 * volume * v.gain;
+        let start = (v.at * rate_f) as usize;
+        let len = (v.length * rate_f) as usize;
+        let mut phase = 0.0f32;
+        for i in 0..len {
+            let t = i as f32 / rate_f;
+            let wave = match v.kind {
+                Kind::Noise => {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+                }
+                kind => {
+                    let freq = v.from * (v.to / v.from).powf(t / v.length);
+                    phase = (phase + freq / rate_f).fract();
+                    if kind == Kind::Sine {
+                        (phase * std::f32::consts::TAU).sin()
+                    } else {
+                        4.0 * (phase - (phase + 0.5).floor()).abs() - 1.0
+                    }
+                }
+            };
+            let gain = if t < v.attack {
+                peak * t / v.attack
+            } else {
+                let k = (t - v.attack) / (v.length - v.attack).max(0.001);
+                peak * (0.0001f32 / peak.max(0.0001)).powf(k)
+            };
+            if let Some(slot) = out.get_mut(start + i) {
+                *slot += wave * gain;
+            }
+        }
+    }
+    out
+}
+
+/// How many gacha sounds are playing: a pull's flips come quickly, so they get their own room.
+static GACHA_PLAYING: AtomicUsize = AtomicUsize::new(0);
+
+/// Plays gacha cues together at `volume` (0 to 100) on the speakers named
+/// `device`. Whether they should play at all (`Prefs::gacha_sounds`, streamer
+/// mode) is for the caller to decide.
+pub fn play_gacha(cues: &[GachaCue], volume: u8, device: &str) {
+    if volume == 0 || cues.is_empty() || GACHA_PLAYING.load(Ordering::Relaxed) >= 6 {
+        return;
+    }
+    let (cues, device) = (cues.to_vec(), device.to_owned());
+    GACHA_PLAYING.fetch_add(1, Ordering::Relaxed);
+    let spawned = std::thread::Builder::new().name("fuwa-gacha-sound".into()).spawn(move || {
+        if let Some(device) = output_device(&device)
+            && let Ok(config) = device.default_output_config()
+        {
+            let samples = render_cues(&cues, config.sample_rate(), f32::from(volume) / 100.0);
+            play_samples(&device, &config, samples);
+        }
+        GACHA_PLAYING.fetch_sub(1, Ordering::Relaxed);
+    });
+    if spawned.is_err() {
+        GACHA_PLAYING.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 // ───────────────────────── Picks and files ─────────────────────────
 
 /// The longest a sound file plays, in seconds: past this it's cut short.
@@ -421,17 +604,17 @@ fn decode_any(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
 }
 
 /// What a pick plays: a sound file of yours (decoded once), or a built-in tune.
-enum Voice {
+enum Sounding {
     Tune(&'static Tune),
     File(Arc<Clip>),
 }
 
-fn voice_of(sound: Sound, pick: Option<&SoundPick>) -> Voice {
-    let Some(pick) = pick else { return Voice::Tune(tune(sound)) };
+fn voice_of(sound: Sound, pick: Option<&SoundPick>) -> Sounding {
+    let Some(pick) = pick else { return Sounding::Tune(tune(sound)) };
     if !pick.file.is_empty() && valid_file_name(&pick.file) {
         let cached = CLIPS.lock().get(&pick.file).cloned();
         if let Some(clip) = cached {
-            return Voice::File(clip);
+            return Sounding::File(clip);
         }
         let dir = PICKS.lock().dir.clone();
         let read = std::fs::metadata(dir.join(&pick.file))
@@ -443,13 +626,13 @@ fn voice_of(sound: Sound, pick: Option<&SoundPick>) -> Voice {
             Some(clip) => {
                 let clip = Arc::new(clip);
                 CLIPS.lock().insert(pick.file.clone(), clip.clone());
-                return Voice::File(clip);
+                return Sounding::File(clip);
             }
             // Gone or broken: its own tune rather than nothing.
             None => tracing::debug!("a sound file couldn't be read"),
         }
     }
-    Voice::Tune(tune_by_id(&pick.tune).unwrap_or_else(|| tune(sound)))
+    Sounding::Tune(tune_by_id(&pick.tune).unwrap_or_else(|| tune(sound)))
 }
 
 /// The output device by name, or the system's when there's no such device.
@@ -604,16 +787,22 @@ fn play_now(sound: Sound, pick: Option<&SoundPick>, volume: f32, device: &str) {
     let voice = voice_of(sound, pick);
     let Some(device) = output_device(device) else { return };
     let Ok(config) = device.default_output_config() else { return };
-    let samples = Arc::new(match voice {
-        Voice::Tune(tune) => render(tune, config.sample_rate(), volume),
-        Voice::File(clip) => clip.render(config.sample_rate(), volume, sound.longest()),
-    });
+    let samples = match voice {
+        Sounding::Tune(tune) => render(tune, config.sample_rate(), volume),
+        Sounding::File(clip) => clip.render(config.sample_rate(), volume, sound.longest()),
+    };
+    play_samples(&device, &config, samples);
+}
+
+/// Plays samples on `device` until they've all gone out.
+fn play_samples(device: &cpal::Device, config: &cpal::SupportedStreamConfig, samples: Vec<f32>) {
+    let samples = Arc::new(samples);
     let seconds = samples.len() as f32 / config.sample_rate() as f32;
     let stream = match config.sample_format() {
-        SampleFormat::F32 => stream::<f32>(&device, config.config(), samples),
-        SampleFormat::I16 => stream::<i16>(&device, config.config(), samples),
-        SampleFormat::U16 => stream::<u16>(&device, config.config(), samples),
-        SampleFormat::I32 => stream::<i32>(&device, config.config(), samples),
+        SampleFormat::F32 => stream::<f32>(device, config.config(), samples),
+        SampleFormat::I16 => stream::<i16>(device, config.config(), samples),
+        SampleFormat::U16 => stream::<u16>(device, config.config(), samples),
+        SampleFormat::I32 => stream::<i32>(device, config.config(), samples),
         _ => None,
     };
     let Some(stream) = stream else { return };
@@ -650,6 +839,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gacha_cues_ring_out_grow_grander_and_stay_quiet_enough() {
+        let len = |cues: &[GachaCue]| render_cues(cues, 48_000, 1.0).len();
+        // The charge lasts as long as the reveal's (economy::reveal::CHARGE).
+        assert!(len(&[GachaCue::Charge]) >= 48_000 * 13 / 10);
+        assert!(len(&[GachaCue::Common]) < len(&[GachaCue::Rare]));
+        assert!(len(&[GachaCue::Rare]) < len(&[GachaCue::Epic]));
+        assert!(len(&[GachaCue::Epic]) < len(&[GachaCue::Legendary]));
+        for rank in 0..4 {
+            let samples = render_cues(&[GachaCue::Flip, GachaCue::rarity(rank)], 48_000, 1.0);
+            assert!(samples.iter().all(|s| s.abs() <= 0.18 * 4.0));
+            assert!(samples.last().unwrap().abs() < 0.001);
+        }
+        assert!(render_cues(&[GachaCue::Burst], 48_000, 0.0).iter().all(|s| *s == 0.0));
+    }
 
     #[test]
     fn tunes_ring_out_and_stay_quiet_enough() {
@@ -726,7 +931,7 @@ mod tests {
         assert_eq!(pick.name, "Ding Dong.WAV");
         assert!(valid_file_name(&pick.file) && pick.file.ends_with(".wav"));
         assert!(store.join(&pick.file).exists());
-        assert!(matches!(voice_of(Sound::Message, Some(&pick)), Voice::File(_)));
+        assert!(matches!(voice_of(Sound::Message, Some(&pick)), Sounding::File(_)));
         // Nothing uses it: swept.
         sweep(&store, &BTreeMap::new());
         assert!(!store.join(&pick.file).exists());

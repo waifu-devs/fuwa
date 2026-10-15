@@ -44,6 +44,7 @@ export const SYNCED = [
   "developerMode",
   "shareReports",
   "sendTyping",
+  "gachaSounds",
   "inputMode",
   "pttRelease",
   "userVolumes",

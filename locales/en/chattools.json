@@ -456,6 +456,18 @@
   "economy.gacha.dropsFrom": "Drops from {banners}",
   "economy.gacha.guaranteed": "Guaranteed",
   "economy.gacha.tryLuck": "Try your luck",
+  "economy.gacha.banners": "Banners",
+  "economy.gacha.topPrizes": "Top prizes",
+  "economy.gacha.youHave": "You have {amount}",
+  "economy.gacha.opening": "Opening {banner}…",
+  "economy.gacha.skip": "Skip",
+  "economy.gacha.soundsOn": "Gacha sounds on",
+  "economy.gacha.soundsOff": "Gacha sounds off",
+  "economy.gacha.stars": {
+    "one": "{count} star",
+    "other": "{count} stars"
+  },
+  "economy.gacha.pityMeter": "{done} of {total}",
   "economy.give": "Give",
   "economy.giveAbout": "Currency given or taken is in the audit log, with your reason.",
   "economy.giveAmount": "Give {amount}",
