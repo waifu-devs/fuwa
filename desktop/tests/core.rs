@@ -809,7 +809,8 @@ fn two_people_talk_in_a_server_and_in_private() {
     let alice = Core::start(Paths::under(home_a.path())).unwrap();
     // Until it's opened, only its last message is in memory.
     until(&alice, "the conversation's last message", |s| {
-        s.instance(&key).unwrap().dms.items.get(&conversation).is_some_and(|items| items.len() == 1)
+        // The instance comes back from disk a moment after the app starts.
+        s.instance(&key).and_then(|i| i.dms.items.get(&conversation)).is_some_and(|items| items.len() == 1)
     });
     alice.set_focus(Some(Focus { instance: key.clone(), channel: conversation.clone(), thread: None }));
     said(&alice, "got it");
