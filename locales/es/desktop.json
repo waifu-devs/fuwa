@@ -501,5 +501,12 @@
   "economy.send.have": "Tienes {amount}",
   "economy.send.sending": "Enviando…",
   "economy.send.sent": "¡Enviado!",
-  "economy.audit.value.changed": "cambiado"
+  "economy.audit.value.changed": "cambiado",
+  "media.play": "Reproducir",
+  "media.pause": "Pausar",
+  "media.mute": "Silenciar",
+  "media.unmute": "Activar sonido",
+  "media.cantPlay": "La app no puede reproducir este tipo de archivo. Guárdalo para reproducirlo.",
+  "media.broken": "No se pudo leer este archivo.",
+  "media.noSpeakers": "No se pudieron abrir los altavoces."
 }

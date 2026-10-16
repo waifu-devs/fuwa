@@ -81,6 +81,8 @@ pub struct ModViewView {
     resolution: Entity<InputState>,
     /// A case's status being changed to this.
     acting: Option<Status>,
+    /// Deleting the case's message: asked to be sure, then on its way.
+    deleting: Option<bool>,
     member: Option<member::MemberPage>,
     note: Entity<TextareaState>,
     /// Finding someone: what's typed and what came back.
@@ -150,6 +152,7 @@ impl ModViewView {
             case_loading: false,
             resolution,
             acting: None,
+            deleting: None,
             member: None,
             note,
             finder,
@@ -245,6 +248,7 @@ impl ModViewView {
         }
         self.picked = Some(id.clone());
         self.case = None;
+        self.deleting = None;
         self.case_loading = true;
         self.resolution.update(cx, |s, cx| s.set_value("", window, cx));
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
@@ -1027,13 +1031,109 @@ impl ModViewView {
                 ),
             );
         }
-        if case.subject_id != facts.me {
-            let shortcuts = self.moderation_buttons(&case.subject_id, "mv-case", p, cx);
-            actions = actions.when_some(shortcuts, |el, row| el.child(row));
+        let delete = read.and_then(|r| r.message.as_ref()).filter(|m| {
+            self.core.shared.read(|s| {
+                s.instance(&self.key).is_some_and(|i| i.access(&self.server).has_in(&m.channel_id, P::ManageMessages))
+            })
+        });
+        let shortcuts = if case.subject_id != facts.me {
+            self.moderation_buttons(&case.subject_id, "mv-case", p, cx)
+        } else {
+            None
+        };
+        if shortcuts.is_some() || delete.is_some() {
+            let mut row = div().flex().flex_wrap().gap(px(6.0)).when_some(shortcuts, |el, row| el.child(row));
+            if let Some(message) = delete {
+                row = row.child(self.delete_buttons(message, window, p, cx));
+            }
+            actions = actions.child(row);
         }
         col = col.child(actions);
         motion::rise(col, SharedString::from(format!("mv-case-in-{}", case.id)), Duration::ZERO, 10.0)
             .into_any_element()
+    }
+
+    /// Deleting the case's message, for who may manage messages where it is:
+    /// asked once more, the web's "Delete it" and Cancel in its place.
+    fn delete_buttons(
+        &self,
+        message: &pb::Message,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match self.deleting {
+            None => {
+                button("mv-delete", t("chattools.modview.deleteMessage"), Some("trash-2"), Look::DangerOutline, true, p)
+                    .rounded(radius_xl())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.deleting = Some(false);
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }
+            Some(going) => {
+                let (channel, id) = (message.channel_id.clone(), message.id.clone());
+                div()
+                    .flex()
+                    .gap(px(4.0))
+                    .child(
+                        button(
+                            "mv-delete-sure",
+                            t("chattools.modview.deleteSure"),
+                            Some("trash-2"),
+                            Look::Destructive,
+                            false,
+                            p,
+                        )
+                        .rounded(radius_xl())
+                        .when(going, |el| el.opacity(0.6).child(spinner("mv-delete-spin", 14.0, window)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.delete_message(&channel, &id, cx))),
+                    )
+                    .child(
+                        button("mv-delete-cancel", t("common.cancel"), None, Look::Ghost, false, p)
+                            .rounded(radius_xl())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.deleting = None;
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
+    /// Deletes the case's message, then reads the case again (it now says the message is gone).
+    fn delete_message(&mut self, channel: &str, id: &str, cx: &mut Context<Self>) {
+        if self.deleting == Some(true) {
+            return;
+        }
+        self.deleting = Some(true);
+        self.error = None;
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        let (channel, id) = (channel.to_owned(), id.to_owned());
+        let case = self.picked.clone().unwrap_or_default();
+        self.run(
+            cx,
+            async move {
+                core.delete_message(&key, &sid, &channel, &id).await?;
+                core.mod_case(&key, &sid, &case).await
+            },
+            move |this, result, cx| {
+                this.deleting = None;
+                match result {
+                    Ok(res) => {
+                        if this.picked.as_ref() == res.mod_case.as_ref().map(|c| &c.id) {
+                            this.case = Some(res);
+                        }
+                        cx.emit(ModViewEvent::Toast { icon: "trash-2", title: t("chattools.modview.deleted") });
+                    }
+                    Err(err) => this.error = Some(err.message),
+                }
+                cx.notify();
+            },
+        );
+        cx.notify();
     }
 
     /// Time out, kick and ban, each only when you may (the moderation dialog asks for the rest).

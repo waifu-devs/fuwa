@@ -643,8 +643,10 @@ impl FuwaApp {
         if stale {
             let (core, k, sid, of) = (self.core.clone(), key.to_owned(), server.id.clone(), of.clone());
             let state = state.clone();
-            self.run(cx, async move { core.list_applications(&k, &sid).await }, move |_, result, cx| {
+            self.run(cx, async move { core.list_applications(&k, &sid).await }, move |this, result, cx| {
                 if let Ok(list) = result {
+                    // For the server menu's Applications too.
+                    this.waiting_applications.insert(of.clone(), list.len());
                     state.update(cx, |w, cx| {
                         if w.of == of {
                             w.count = list.len();
@@ -797,6 +799,8 @@ impl FuwaApp {
                 !voice && kind != pb::ChannelType::Secure && a.has_in(&c.id, pb::Permission::CreateInvite),
             )
         });
+        // Hidden from @everyone (whose role has the server's id): a padlock on its icon.
+        let locked = crate::core::permissions::is_private(c, server);
         let group = SharedString::from(format!("row-g|{}", c.id));
         // The web's row shortcuts: invite grows (`hover:scale-110`), the gear turns (`hover:rotate-45`).
         let row_action = |id: String, name: &str, show: bool, group: SharedString, grow: bool| {
@@ -887,6 +891,31 @@ impl FuwaApp {
                     })
                     .child(icon(glyph).size(px(18.0)).text_color(color)),
             )
+            // The web's ChannelGlyph: a padlock in a little round of the background, popping in.
+            .when(locked, |el| {
+                let label: SharedString = t("workspace.sidebar.privateChannel").into();
+                el.child(
+                    div()
+                        .id(SharedString::from(format!("row-lock|{}", c.id)))
+                        .absolute()
+                        .left(px(8.0 + 18.0 - 6.0))
+                        .top(px((ROW - 2.0) / 2.0 + 9.0 - 8.0))
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+                        .child(popped(
+                            div()
+                                .size(px(10.0))
+                                .rounded_full()
+                                .bg(p.background)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(icon("lock").size(px(8.0)).text_color(color)),
+                            SharedString::from(format!("row-lock-in|{}", c.id)),
+                            0.0,
+                            0.0,
+                        )),
+                )
+            })
             .child(
                 div()
                     .min_w_0()

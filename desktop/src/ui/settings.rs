@@ -36,9 +36,19 @@ use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_butto
 pub enum SettingsEvent {
     Close,
     Prefs,
-    SignIn { key: String },
+    SignIn {
+        key: String,
+    },
     AddInstance,
-    Toast { icon: &'static str, title: String },
+    Toast {
+        icon: &'static str,
+        title: String,
+    },
+    /// A server's shop, over settings: a locked effect or decoration is sold there.
+    Shop {
+        key: String,
+        server: String,
+    },
 }
 
 /// Every section, by what the web calls it.

@@ -82,6 +82,8 @@ pub struct ShopView {
     ledger_more: bool,
     ledger_loading: bool,
     ledger_read: bool,
+    /// The history of one currency only (empty for all), as the web's `LedgerList` picks.
+    ledger_currency: String,
     ledger_scroll: UniformListScrollHandle,
     /// Sending: the currency, who to, and what's typed.
     send_currency: Option<String>,
@@ -166,6 +168,7 @@ impl ShopView {
             ledger_more: false,
             ledger_loading: false,
             ledger_read: false,
+            ledger_currency: String::new(),
             ledger_scroll: UniformListScrollHandle::new(),
             send_currency: None,
             send_to: None,
@@ -244,11 +247,18 @@ impl ShopView {
         let before = if older { self.ledger.last().map(|e| e.id.clone()).unwrap_or_default() } else { String::new() };
         self.ledger_loading = true;
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        let currency = self.ledger_currency.clone();
+        let asked = currency.clone();
         self.run(
             cx,
-            async move { core.ledger(&key, &sid, "", "", &[], &before, eco::PAGE).await },
+            async move { core.ledger(&key, &sid, &currency, "", &[], &before, eco::PAGE).await },
             move |this, result, cx| {
                 this.ledger_loading = false;
+                // Another currency was picked meanwhile: its own page is on the way.
+                if this.ledger_currency != asked {
+                    this.load_ledger(false, cx);
+                    return;
+                }
                 match result {
                     Ok(page) => {
                         if !older {
@@ -1051,6 +1061,63 @@ impl ShopView {
         if !self.ledger_read && !self.ledger_loading {
             self.load_ledger(false, cx);
         }
+        let list = self.ledger_list(f, p, window, cx);
+        // With more than one currency, which one's history (the web's chips).
+        if f.economy.currencies.len() < 2 {
+            return list;
+        }
+        let mut chips = div().flex().flex_wrap().gap(px(6.0));
+        let all = std::iter::once((String::new(), t("chattools.economy.allCurrencies"), None));
+        for (id, name, currency) in
+            all.chain(f.economy.currencies.iter().map(|c| (c.id.clone(), c.name.clone(), Some(c))))
+        {
+            let on = self.ledger_currency == id;
+            let hover = alpha(p.primary, 0.3);
+            chips = chips.child(
+                div()
+                    .id(SharedString::from(format!("ledger-cur-{id}")))
+                    .h(px(30.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .rounded_full()
+                    .border_1()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .map(|el| {
+                        if on {
+                            el.border_color(alpha(p.primary, 0.6)).bg(alpha(p.primary, 0.1))
+                        } else {
+                            el.border_color(p.border).hover(move |s| s.border_color(hover))
+                        }
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.ledger_currency != id {
+                            this.ledger_currency = id.clone();
+                            this.ledger.clear();
+                            this.ledger_more = false;
+                            this.ledger_read = false;
+                            this.load_ledger(false, cx);
+                        }
+                    }))
+                    .when_some(currency, |el, c| el.child(currency_icon(c, &f.emojis, 14.0)))
+                    .child(name),
+            );
+        }
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(div().flex_none().child(chips))
+            .child(list)
+            .into_any_element()
+    }
+
+    fn ledger_list(&mut self, f: &Facts, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.ledger.is_empty() {
             return if self.ledger_loading || !self.ledger_read {
                 crate::ui::server_settings::shimmer_rows(6, p).into_any_element()

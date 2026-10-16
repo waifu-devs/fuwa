@@ -117,6 +117,12 @@ fn no_servers(hint_key: &str, p: &Palette) -> AnyElement {
 }
 
 impl SettingsView {
+    /// Opens the shop of the server whose profile is open, where its locked items are sold.
+    pub(crate) fn locked_to_shop(&mut self, cx: &mut Context<Self>) {
+        let (Some(key), Some(server)) = (self.account.key.clone(), self.servers.server.clone()) else { return };
+        cx.emit(crate::ui::settings::SettingsEvent::Shop { key, server });
+    }
+
     pub(crate) fn server_profiles_page(
         &mut self,
         p: &Palette,

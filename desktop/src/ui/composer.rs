@@ -132,6 +132,16 @@ pub fn format_duration(seconds: i64) -> String {
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
+/// The same, clipped for a chip, the web's `shortDuration`: "30s", "5m", "1h", "7d".
+pub fn short_duration(seconds: i64) -> String {
+    match seconds {
+        s if s >= 86_400 && s % 86_400 == 0 => format!("{}d", s / 86_400),
+        s if s >= 3_600 && s % 3_600 == 0 => format!("{}h", s / 3_600),
+        s if s >= 60 && s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
 /// The composer's tools whose pickers open above them, lined up on their right edges.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {

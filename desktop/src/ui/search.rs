@@ -1146,10 +1146,21 @@ impl FuwaApp {
                                     .bg(p.muted)
                                     .text_xs()
                                     .text_color(p.muted_foreground)
-                                    .child(icon("paperclip").size(px(12.0)).flex_none())
+                                    .child(
+                                        icon(if a.spoiler { "eye-off" } else { "paperclip" })
+                                            .size(px(12.0))
+                                            .flex_none(),
+                                    )
                                     // A spoiler's name stays hidden here: it's shown only in the message.
                                     .child(div().truncate().child(if a.spoiler {
                                         t("chat.files.spoilerBadge")
+                                    } else if let Some(voice) = &a.voice {
+                                        let s = voice.duration_ms / 1000;
+                                        let length = format!("{}:{:02}", s / 60, s % 60);
+                                        crate::core::i18n::t_with(
+                                            "chattools.search.voiceMessage",
+                                            &[("duration", crate::core::i18n::Arg::Str(&length))],
+                                        )
                                     } else {
                                         crate::core::attachments::short_name(&a.filename, 32)
                                     }))

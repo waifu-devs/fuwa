@@ -43,6 +43,8 @@ const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("polls.rs", 2),
     ("profile_card.rs", 2),
     ("rail.rs", 1),
+    // "See who reacted": a dialog's own list.
+    ("reactions.rs", 1),
     ("recordings.rs", 1),
     ("screen_share.rs", 1),
     ("search.rs", 2),

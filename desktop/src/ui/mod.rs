@@ -44,6 +44,7 @@ mod keys;
 mod leaving;
 mod live_tiles;
 mod math;
+mod media;
 mod members;
 mod mentions;
 mod menu_items;

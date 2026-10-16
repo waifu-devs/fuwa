@@ -383,7 +383,7 @@ fn decode_any(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
     use symphonia::core::probe::Hint;
 
     let source = MediaSourceStream::new(Box::new(std::io::Cursor::new(bytes.to_vec())), Default::default());
-    let probed = symphonia::default::get_probe()
+    let probed = crate::core::media::PROBE
         .format(&Hint::new(), source, &FormatOptions::default(), &MetadataOptions::default())
         .ok()?;
     let mut format = probed.format;

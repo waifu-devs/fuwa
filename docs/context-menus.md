@@ -123,16 +123,19 @@ polls in the composer's `insert`.
 
 The desktop app draws the same menus itself (`desktop/src/ui/context_menu.rs`
 for opening, keys, submenus, asking first and motion; `menu_items.rs` for
-what each holds), with the same sections and checks. Differences: right-click
-on a picture in a message adds its items, but links inside a message's text
-don't (the text view doesn't say which link was clicked); categories have no
-Collapse, as the desktop sidebar doesn't fold them; "Edit server profile" and
-"Change nickname" wait for the desktop's server profiles; and the message box
+what each holds), with the same sections and checks. Right-click on a
+picture in a message adds its items, and on a link its Open link and Copy
+link: the text view says which link only when the button comes up, so a
+message with links opens its menu then rather than on the press. Join lines
+and AutoMod alerts have their own menus (Wave, Copy ID, Delete; Copy ID,
+Delete alert), a join line's with the person's own menu as a submenu, since
+the name in the line doesn't take a right-click of its own. The message box
 keeps the system's own menu (Cut, Copy, Paste, Select all) with Emoji and
 Timestamp added. Shift+F10 and the Menu key open the menu of what the pointer
-is over, or of the open channel or conversation. A message's `react` row has
-no "See who reacted" (hovering a reaction says who), and the keyboard skips its
-emoji buttons: "Add reaction" is the way in from the keys.
+is over, or of the open channel or conversation. The keyboard skips the
+`react` row's emoji buttons: "Add reaction" is the way in from the keys. A
+reaction's own menu (right-click on it, with Manage Messages) has See who
+reacted, opened on that emoji, above "Remove all *emoji*".
 
 Mod View (on instances with `mod-view`) adds, on the desktop: "Report
 message" in a message's `manage` (others' plain messages in the server's own
@@ -146,4 +149,5 @@ The economy (on instances with `economy`, docs/economy.md) adds, on the
 desktop: "Give currency" in someone's `moderate`, after Ban and before
 Report (Grant Currency, in a server with currencies), which opens the same
 dialog as the profile card's: give or take, the currency, the amount and a
-reason for the audit log.
+reason for the audit log; and "Shop" at the end of a server's `primary`
+(a server with currencies), which opens its shop.

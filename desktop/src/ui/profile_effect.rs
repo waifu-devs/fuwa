@@ -455,7 +455,8 @@ impl SettingsView {
                         .when(open, |el| {
                             el.cursor_pointer().hover(|s| s.translate_y(px(-3.0))).active(|s| s.scale(0.95))
                         })
-                        .when(!open, |el| el.cursor_not_allowed())
+                        // A locked one is sold in the server's shop: it opens there (the web's `onLocked`).
+                        .when(!open, |el| el.cursor_pointer().hover(|s| s.translate_y(px(-3.0))))
                         .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                             if *on {
                                 this.state.effect_hover = Some(hover_on.clone());
@@ -465,9 +466,7 @@ impl SettingsView {
                             cx.notify();
                         }))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if open {
-                                pick(this, pick_id.clone(), cx)
-                            }
+                            if open { pick(this, pick_id.clone(), cx) } else { this.locked_to_shop(cx) }
                         }))
                         .child(card)
                         .child(

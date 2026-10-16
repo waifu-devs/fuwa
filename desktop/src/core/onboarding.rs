@@ -21,8 +21,6 @@ pub const LABEL_MAX: usize = 50;
 pub const OPTION_DESCRIPTION_MAX: usize = 100;
 pub const MAX_PICKS: usize = 5;
 pub const HELLO_MAX: usize = 200;
-/// What the hello box starts with when the step doesn't say.
-pub const HELLO: &str = "Hi everyone! 👋";
 /// How long after joining someone still counts as new.
 const NEW_FOR_MS: i64 = 7 * 86_400_000;
 
@@ -154,21 +152,23 @@ pub fn go_here_first(
     out
 }
 
-/// A new step of a kind, as the editor adds it.
+/// A new step of a kind, as the editor adds it: its title and hello in the
+/// app's language, as the web's `newStep` writes them.
 pub fn new_step(kind: i32, first_text_channel: Option<&str>) -> pb::OnboardingStep {
+    use super::i18n::t;
     match kind {
-        RULES => pb::OnboardingStep { kind, title: "Our rules".into(), ..Default::default() },
+        RULES => pb::OnboardingStep { kind, title: t("serversettings.onboarding.titleRules"), ..Default::default() },
         SAY_HELLO => pb::OnboardingStep {
             kind,
-            title: "Say hello".into(),
+            title: t("serversettings.onboarding.kindHello"),
             skippable: true,
             channel_id: first_text_channel.unwrap_or_default().to_owned(),
-            hello: HELLO.into(),
+            hello: t("join.onboarding.hello"),
             ..Default::default()
         },
         _ => pb::OnboardingStep {
             kind: PICK,
-            title: "What are you into?".into(),
+            title: t("serversettings.onboarding.titlePick"),
             multiple: true,
             options: vec![new_option()],
             ..Default::default()

@@ -273,7 +273,11 @@ pub fn markdown(
     let written = source.clone();
     gpui_kit::component::text::TextView::markdown(id, source)
         .markdown_extensions(crate::ui::math::extensions())
-        .on_link_click(move |url, _, window, cx| {
+        .on_link_click(move |url, ev, window, cx| {
+            // A right-click is for a menu, never for following the link.
+            if ev.is_right_click() {
+                return;
+            }
             let masked = crate::core::links::masked_in(&written, url);
             open_written(url, masked, window, cx)
         })
@@ -285,8 +289,11 @@ pub fn markdown_masked(
     id: impl Into<gpui_kit::ElementId>,
     source: impl Into<gpui_kit::SharedString>,
 ) -> gpui_kit::component::text::TextView {
-    gpui_kit::component::text::TextView::markdown(id, source)
-        .on_link_click(|url, _, window, cx| open_written(url, true, window, cx))
+    gpui_kit::component::text::TextView::markdown(id, source).on_link_click(|url, ev, window, cx| {
+        if !ev.is_right_click() {
+            open_written(url, true, window, cx)
+        }
+    })
 }
 
 /// Opens a link from someone's words: when it's safe to, and for a masked

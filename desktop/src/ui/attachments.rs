@@ -25,7 +25,7 @@ use crate::ui::theme::{Palette, alpha, radius_xl};
 use crate::ui::widgets::icon;
 
 /// The most room one picture takes in a message.
-const MEDIA_BOX: (f32, f32) = (420.0, 320.0);
+pub(crate) const MEDIA_BOX: (f32, f32) = (420.0, 320.0);
 /// Pictures side by side, when a message has more than one.
 const TILE: f32 = 200.0;
 
@@ -240,8 +240,33 @@ pub(crate) fn attachments_view(
         out = out.child(grid);
     }
     for (n, file) in rest.into_iter().enumerate() {
-        let card = file_card(&format!("{mid}|{n}"), file, p, this, key);
-        out = out.child(enter(card, SharedString::from(format!("file-in|{mid}|{n}")), shown_pictures + n, animate));
+        let id = format!("{mid}|{n}");
+        let look = attachments::look_of(&file.content_type);
+        let here = attachments::on_instance(&file.url, instance);
+        let sid = spoiler_id(file).to_owned();
+        let covered = spoilers::file_shown(&sid, file.spoiler);
+        let card: AnyElement = if look == Look::Video && here {
+            // A covered video is its box under the cover, nothing of it loaded.
+            div()
+                .relative()
+                .self_start()
+                .max_w_full()
+                .child(crate::ui::media::video(mid, n, file, p, this, key))
+                .when(covered != spoilers::Shown::Revealed, |el| {
+                    el.child(spoilers::picture_cover(&id, &sid, covered == spoilers::Shown::Fading, p))
+                })
+                .into_any_element()
+        } else if look == Look::Audio && here && file.voice.is_none() && covered == spoilers::Shown::Revealed {
+            crate::ui::media::audio(mid, n, file, p, this, key)
+        } else {
+            file_card(&id, file, p, this, key).into_any_element()
+        };
+        out = out.child(enter(
+            div().child(card),
+            SharedString::from(format!("file-in|{mid}|{n}")),
+            shown_pictures + n,
+            animate,
+        ));
     }
     out.into_any_element()
 }
@@ -263,26 +288,15 @@ fn file_card(
     this: &WeakEntity<FuwaApp>,
     key: &str,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let (this, key, url, name, bytes) =
-        (this.clone(), key.to_owned(), file.url.clone(), file.filename.clone(), file.size);
     let (hover_bg, hover_fg) = (p.muted, p.primary);
     let (spoiler, sid) = (file.spoiler, spoiler_id(file).to_owned());
     let covered = spoilers::file_shown(&sid, spoiler) == spoilers::Shown::Covered;
-    let name_line: AnyElement = if covered {
-        div()
-            .flex()
-            .text_sm()
-            .font_weight(FontWeight::BOLD)
-            .child(spoilers::covered_name(&file.filename, p))
-            .into_any_element()
-    } else {
-        div()
-            .text_sm()
-            .font_weight(FontWeight::BOLD)
-            .truncate()
-            .child(attachments::short_name(&file.filename, 40))
-            .into_any_element()
-    };
+    let name_line: AnyElement = div()
+        .flex()
+        .text_sm()
+        .font_weight(FontWeight::BOLD)
+        .child(spoilers::covered_name(&file.filename, p))
+        .into_any_element();
     let button = div()
         .id(SharedString::from(format!("save|{id}")))
         .size(px(32.0))
@@ -293,19 +307,29 @@ fn file_card(
         .justify_center()
         .cursor_pointer()
         .text_color(p.muted_foreground)
-        .hover(move |s| s.bg(hover_bg).text_color(hover_fg));
-    // The web's download button: muted, the muted fill and the primary on hover.
-    let button = if covered {
-        button
-            .child(icon("eye").size(px(16.0)))
-            .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.attachments.spoiler")).build(window, cx))
+        .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+        .child(icon("eye").size(px(16.0)))
+        .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chat.attachments.spoiler")).build(window, cx));
+    let line: AnyElement = if covered {
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(name_line)
+                    .child(div().text_xs().text_color(p.muted_foreground).child(t("chat.files.spoilerBadge"))),
+            )
+            .child(button)
+            .into_any_element()
     } else {
-        button
-            .child(icon("download").size(px(16.0)))
-            .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
-            .on_click(move |_, _, cx| {
-                let _ = this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
-            })
+        file_line(id, file, p, this, key)
     };
     div()
         .id(SharedString::from(format!("file|{id}")))
@@ -336,14 +360,61 @@ fn file_card(
                 .hover(|s| s.rotate(radians((-8.0f32).to_radians())).scale(1.06))
                 .child(badge(if covered { "" } else { &file.filename }, 40.0)),
         )
-        .child(div().flex_1().min_w_0().flex().flex_col().child(name_line).child(
-            div().text_xs().text_color(p.muted_foreground).child(if covered {
-                t("chat.files.spoilerBadge")
-            } else {
-                attachments::format_bytes(file.size)
-            }),
-        ))
+        .child(line)
+}
+
+/// A file's name and size, with its save button (the web's `FileLine`).
+pub(crate) fn file_line(
+    id: &str,
+    file: &pb::Attachment,
+    p: &Palette,
+    this: &WeakEntity<FuwaApp>,
+    key: &str,
+) -> AnyElement {
+    let (this, key, url, name, bytes) =
+        (this.clone(), key.to_owned(), file.url.clone(), file.filename.clone(), file.size);
+    let (hover_bg, hover_fg) = (p.muted, p.primary);
+    // The web's download button: muted, the muted fill and the primary on hover.
+    let button = div()
+        .id(SharedString::from(format!("save|{id}")))
+        .size(px(32.0))
+        .flex_none()
+        .rounded(crate::ui::theme::radius_lg())
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(p.muted_foreground)
+        .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+        .child(icon("download").size(px(16.0)))
+        .tooltip(|window, cx| crate::ui::overlay::Tip::new("Save").build(window, cx))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let _ = this.update(cx, |this, cx| this.save_file(key.clone(), url.clone(), name.clone(), bytes, cx));
+        });
+    div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .truncate()
+                        .child(attachments::short_name(&file.filename, 40)),
+                )
+                .child(div().text_xs().text_color(p.muted_foreground).child(attachments::format_bytes(file.size))),
+        )
         .child(button)
+        .into_any_element()
 }
 
 impl FuwaApp {
