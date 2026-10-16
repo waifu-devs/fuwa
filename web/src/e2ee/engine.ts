@@ -8,6 +8,7 @@ import { store, updateDms, updateInstance, without, type DmMember, type FuwaStat
 import { onDirectMessage, onSecureMessage } from "@/lib/notify";
 import { onDmPinEvent } from "@/fuwa/pins";
 import { onDmTypingEvent } from "@/fuwa/typing";
+import { noteRecordRead } from "@/fuwa/reads";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -1355,12 +1356,16 @@ export class DmEngine {
   /** Notes that you've seen everything in a conversation so far. */
   async markRead(id: string) {
     const last = store.get().instances[this.key]?.dms.items[id]?.at(-1)?.seq ?? 0;
+    let moved = false;
     await exclusive(this.lock, async () => {
       const note = await vault.loadNote(this.vaultKey, id);
       if (note.read >= last) return;
       await vault.write(this.vaultKey, { notes: [{ ...note, read: last }] });
       this.tell(id);
+      moved = true;
     });
+    // And on your other devices (docs/read-marks.md).
+    if (moved) noteRecordRead(this.key, id, last);
     if (this.secure.has(id)) updateInstance(this.key, (i) => (i.unread[id] ? { ...i, unread: { ...i.unread, [id]: 0 } } : i));
     else updateDms(this.key, (d) => (d.unread[id] ? { ...d, unread: { ...d.unread, [id]: 0 } } : d));
   }
@@ -1387,13 +1392,41 @@ export class DmEngine {
 
   /** Notes that you've seen a secure channel's thread up to `seq`. */
   async markThreadRead(id: string, parent: number, seq: number) {
+    let moved = false;
     await exclusive(this.lock, async () => {
       const note = await vault.loadNote(this.vaultKey, id);
       if ((note.threadRead?.[parent] ?? 0) >= seq) return;
       await vault.write(this.vaultKey, { notes: [{ ...note, threadRead: { ...note.threadRead, [parent]: seq } }] });
       this.tell(id);
+      moved = true;
     });
+    if (moved) noteRecordRead(this.key, `${id}/${parent}`, seq);
     await this.refresh(id);
+  }
+
+  /**
+   * Another device of yours read a conversation or secure channel up to
+   * `seq` (or a thread there, as "<id>/<record it's under>"): noted here as
+   * if read here, so its unread count goes (docs/read-marks.md).
+   */
+  async readElsewhere(place: string, seq: number) {
+    const [id, under] = place.split("/");
+    const parent = Number(under ?? 0);
+    if (!id || (!this.conversations.has(id) && !this.secure.has(id))) return;
+    let moved = false;
+    await exclusive(this.lock, async () => {
+      const note = await vault.loadNote(this.vaultKey, id);
+      if (parent > 0) {
+        if ((note.threadRead?.[parent] ?? 0) >= seq) return;
+        await vault.write(this.vaultKey, { notes: [{ ...note, threadRead: { ...note.threadRead, [parent]: seq } }] });
+      } else {
+        if (note.read >= seq) return;
+        await vault.write(this.vaultKey, { notes: [{ ...note, read: seq }] });
+      }
+      this.tell(id);
+      moved = true;
+    });
+    if (moved) await this.refresh(id);
   }
 
   // ───────────────────────── Showing it ─────────────────────────

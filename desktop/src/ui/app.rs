@@ -505,6 +505,8 @@ impl FuwaApp {
             }),
             // Ambient loops run only while the window is in front.
             cx.observe_window_activation(window, |this, window, cx| {
+                // Coming back to the window reads what's on screen (read marks, `core/reads.rs`).
+                this.core.window_active(window.is_window_active());
                 // A text field's caret blinks on in the background (every blink draws its
                 // part again), so it lets go of focus there and takes it back on return.
                 if window.is_window_active() {

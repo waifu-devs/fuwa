@@ -1253,6 +1253,8 @@ impl pb::live_service_server::LiveService for Events {
             friends: req.friends,
             presence: req.presence,
             focus: Some(first.clone()),
+            reads: req.reads,
+            reads_after: req.reads_after,
             ..Default::default()
         };
         let mut directory = gateway.live_client().open(forward_metadata(&metadata, upstream)).await?.into_inner();

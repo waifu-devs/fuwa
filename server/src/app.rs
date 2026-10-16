@@ -57,6 +57,9 @@ pub struct App {
     pub presence: crate::presence::Presence,
     /// Live connections open here (`LiveService`), for Focus to find.
     pub connections: Arc<crate::live::Connections>,
+    /// Each account's live connections that hear its read marks, where
+    /// `node` is (docs/read-marks.md).
+    pub reads: crate::reads::Reads,
     /// The servers whose files are here: all of them, or a shard's share.
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -237,6 +240,7 @@ impl App {
             index,
             presence: crate::presence::Presence::with_large(large_server_members, on_screen_members),
             connections: Arc::default(),
+            reads: Default::default(),
             servers,
             hub,
             limiter: SignInLimiter::default(),

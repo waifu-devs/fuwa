@@ -231,13 +231,19 @@ impl Core {
 
     /// Marks a thread as open beside its channel and clears its unread count; `None` when it closes.
     pub fn focus_thread(&self, key: &str, thread_id: Option<&str>) {
-        self.shared.update(|s| {
-            let Some(focus) = s.focus.as_mut().filter(|f| f.instance == key) else { return };
+        let moved = self.shared.update(|s| {
+            let Some(focus) = s.focus.as_mut().filter(|f| f.instance == key) else { return false };
+            let moved = focus.thread.as_deref() != thread_id;
             focus.thread = thread_id.map(str::to_owned);
             if let (Some(i), Some(id)) = (s.instances.get_mut(key), thread_id) {
                 i.thread_unread.remove(id);
             }
+            moved
         });
+        // Read here, so your other devices stop showing it unread.
+        if moved && thread_id.is_some() {
+            self.note_focus_read();
+        }
     }
 }
 
