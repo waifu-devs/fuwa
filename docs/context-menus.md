@@ -130,9 +130,10 @@ Collapse, as the desktop sidebar doesn't fold them; "Edit server profile" and
 "Change nickname" wait for the desktop's server profiles; and the message box
 keeps the system's own menu (Cut, Copy, Paste, Select all) with Emoji and
 Timestamp added. Shift+F10 and the Menu key open the menu of what the pointer
-is over, or of the open channel or conversation. A message's `react` row has
-no "See who reacted" (hovering a reaction says who), and the keyboard skips its
-emoji buttons: "Add reaction" is the way in from the keys.
+is over, or of the open channel or conversation. The keyboard skips the
+`react` row's emoji buttons: "Add reaction" is the way in from the keys. A
+reaction's own menu (right-click on it, with Manage Messages) has See who
+reacted, opened on that emoji, above "Remove all *emoji*".
 
 Mod View (on instances with `mod-view`) adds, on the desktop: "Report
 message" in a message's `manage` (others' plain messages in the server's own

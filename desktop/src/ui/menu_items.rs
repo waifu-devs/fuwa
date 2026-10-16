@@ -139,6 +139,15 @@ impl FuwaApp {
                         }),
                     ));
                 }
+                // Who reacted with each emoji, as the web's "See who reacted".
+                if m.reactions.as_ref().is_some_and(|b| !b.chips.is_empty()) && !m.editing {
+                    let id = m.id.clone();
+                    react.push(Item::act(
+                        t("chattools.reactions.viewAll"),
+                        "face-slightly-smiling",
+                        run(move |this, window, cx| this.open_reactions(id.clone(), None, window, cx)),
+                    ));
+                }
                 let can_thread = m.thread.can_thread && !m.editing && !m.keeping_out;
                 let can_edit = m.mine && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
                 let mut primary = Vec::new();
@@ -320,7 +329,13 @@ impl FuwaApp {
                 )
                 .danger()
                 .confirm(title.clone(), &body, &title);
-                Built::of(vec![vec![clear]])
+                let (id, emoji) = (msg.clone(), chip.key.clone());
+                let view = Item::act(
+                    t("chattools.reactions.viewAll"),
+                    "face-slightly-smiling",
+                    run(move |this, window, cx| this.open_reactions(id.clone(), Some(emoji.clone()), window, cx)),
+                );
+                Built::of(vec![vec![view], vec![clear]])
             }
         }
     }
