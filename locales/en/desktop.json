@@ -620,7 +620,6 @@
   "economy.listing.priceRange": "The price is from 1 to 1,000,000,000,000.",
   "economy.listing.deleteAsk": "Delete this listing? What people already bought stays theirs.",
   "economy.listing.gachaOnly": "Gacha only",
-  "economy.listing.gachaOnlyHint": "Members can't buy it; it only drops from gacha banners that list it. Banners are set up in the web app.",
   "economy.edit": "Edit",
   "economy.delete": "Delete",
   "economy.finances.none": "Make a currency on the Economy page to see its finances.",

@@ -893,6 +893,473 @@ impl ListingDraft {
     }
 }
 
+// ── The banner editor ────────────────────────────────────────────────────
+// Like the web's `lib/gacha.ts`: the draft holds what's typed, and
+// `BannerDraft::value` checks it and makes the banner to send.
+
+/// A rate's whole: 100% in millionths.
+pub const WHOLE: i32 = 1_000_000;
+pub const BANNER_NAME_MAX: usize = 60;
+pub const BANNER_DESCRIPTION_MAX: usize = 500;
+pub const TIERS_MAX: usize = 10;
+pub const TIER_NAME_MAX: usize = 32;
+pub const PRIZES_MAX: usize = 100;
+const MULTI_MAX: i64 = 100;
+const WEIGHT_MAX: i64 = 1_000_000;
+const PITY_MAX: i64 = 10_000;
+const MAX_PULLS: i64 = 1_000_000;
+const PRIZE_MAX: i64 = 1_000_000_000;
+
+/// The colors a tier can take from the editor's swatches: the defaults, then a few more.
+pub const TIER_SWATCHES: [u32; 10] =
+    [0xf59e0b, 0xa855f7, 0x3b82f6, 0x10b981, 0x64748b, 0xef4444, 0xec4899, 0x06b6d4, 0x84cc16, 0xf97316];
+
+/// A whole number someone typed, from `min` to `max`, with any spaces or grouping marks; None otherwise.
+fn whole(text: &str, min: i64, max: i64) -> Option<i64> {
+    let plain: String = text.chars().filter(|c| !c.is_whitespace() && !matches!(c, ',' | '_' | '\'')).collect();
+    if plain.is_empty() || !plain.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    plain.parse::<i64>().ok().filter(|n| (min..=max).contains(n))
+}
+
+/// A percentage someone typed ("0.6", "12,5 %") in millionths, or None when it
+/// isn't 0 to 100 with at most four decimals.
+pub fn parse_percent(text: &str) -> Option<i32> {
+    let plain: String =
+        text.chars().filter(|c| !c.is_whitespace() && *c != '%').collect::<String>().replacen(',', ".", 1);
+    let (int, frac) = plain.split_once('.').unwrap_or((&plain, ""));
+    let digits = |s: &str| s.chars().all(|c| c.is_ascii_digit());
+    if (int.is_empty() && frac.is_empty()) || !digits(int) || !digits(frac) || frac.len() > 4 {
+        return None;
+    }
+    if plain.contains('.') && frac.is_empty() {
+        return None;
+    }
+    let int: i64 = if int.is_empty() { 0 } else { int.parse().ok()? };
+    let frac: i64 = format!("{frac:0<4}").parse().ok()?;
+    let rate = int.checked_mul(10_000)?.checked_add(frac)?;
+    (0..=i64::from(WHOLE)).contains(&rate).then_some(rate as i32)
+}
+
+/// A moment as the editor's date boxes show it, on this computer's clock: "2026-10-16 18:30".
+pub fn local_input(at: i64) -> String {
+    use chrono::{Local, TimeZone as _};
+    if at == 0 {
+        return String::new();
+    }
+    Local.timestamp_millis_opt(at).single().map(|d| d.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
+}
+
+/// What a date box holds, as a moment; None when it's empty or not a date and time.
+pub fn from_local_input(text: &str) -> Option<i64> {
+    use chrono::{Local, NaiveDateTime, TimeZone as _};
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let at = NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M")
+        .or_else(|_| NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M"))
+        .ok()?;
+    Local.from_local_datetime(&at).earliest().map(|d| d.timestamp_millis())
+}
+
+fn timestamp(at: i64) -> prost_types::Timestamp {
+    prost_types::Timestamp { seconds: at.div_euclid(1000), nanos: (at.rem_euclid(1000) * 1_000_000) as i32 }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TierDraft {
+    pub id: String,
+    pub name: String,
+    pub color: Option<u32>,
+    pub rate: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrizeDraft {
+    /// The saved prize's id, or "new:N" for one added here.
+    pub id: String,
+    pub tier_id: String,
+    /// A listing, or empty for an amount of `currency_id`.
+    pub listing_id: String,
+    pub currency_id: String,
+    pub amount: String,
+    pub weight: String,
+}
+
+/// A banner being made or changed, as typed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BannerDraft {
+    pub name: String,
+    pub description: String,
+    /// The box or card pack's picture, uploaded for the server; empty for none.
+    pub art_url: String,
+    pub currency_id: String,
+    pub price: String,
+    /// Empty for no multi-pull.
+    pub multi: String,
+    /// Empty for the single price times the count.
+    pub multi_price: String,
+    pub tiers: Vec<TierDraft>,
+    pub prizes: Vec<PrizeDraft>,
+    /// Empty for no pity.
+    pub pity_pulls: String,
+    pub pity_tier_id: String,
+    pub duplicates: pb::GachaDuplicates,
+    pub refund_currency_id: String,
+    pub refund_amount: String,
+    /// Empty for no limit.
+    pub max_pulls: String,
+    /// On this computer's clock, as `local_input` writes it; empty for none.
+    pub starts_at: String,
+    pub ends_at: String,
+    pub available: bool,
+    pub position: String,
+}
+
+/// What's wrong with a banner draft: the words to show, and which tier or prize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BannerProblem {
+    pub key: &'static str,
+    pub index: Option<usize>,
+}
+
+impl BannerProblem {
+    fn at(key: &'static str, index: usize) -> Self {
+        Self { key, index: Some(index) }
+    }
+
+    fn of(key: &'static str) -> Self {
+        Self { key, index: None }
+    }
+
+    /// Whether it's about the tiers (their names, rates or how many).
+    pub fn tiers(&self) -> bool {
+        self.key.contains(".tier") || self.key.ends_with("ratesTotal")
+    }
+
+    /// Whether it's about one prize.
+    pub fn prize(&self) -> bool {
+        self.key.contains(".prize") && !self.key.ends_with(".prizes")
+    }
+
+    pub fn empty_tier(&self) -> bool {
+        self.key.ends_with("emptyTier")
+    }
+}
+
+fn text_of(n: i64) -> String {
+    if n == 0 { String::new() } else { n.to_string() }
+}
+
+/// A rate in millionths as the editor types it: "3", "0.6".
+fn rate_text(rate: i32) -> String {
+    percent(rate).trim_end_matches('%').to_owned()
+}
+
+impl BannerDraft {
+    /// A new banner: three tiers (their names given), a 10-pull and no prizes, hidden.
+    pub fn new(currency_id: &str, position: usize, names: [String; 3]) -> Self {
+        let [a, b, c] = names;
+        let tiers = vec![
+            TierDraft { id: "t1".into(), name: a, color: Some(TIER_COLORS[0]), rate: "3".into() },
+            TierDraft { id: "t2".into(), name: b, color: Some(TIER_COLORS[1]), rate: "17".into() },
+            TierDraft { id: "t3".into(), name: c, color: Some(TIER_COLORS[2]), rate: "80".into() },
+        ];
+        Self {
+            name: String::new(),
+            description: String::new(),
+            art_url: String::new(),
+            currency_id: currency_id.to_owned(),
+            price: "100".into(),
+            multi: "10".into(),
+            multi_price: String::new(),
+            tiers,
+            prizes: Vec::new(),
+            pity_pulls: String::new(),
+            pity_tier_id: "t1".into(),
+            duplicates: pb::GachaDuplicates::Keep,
+            refund_currency_id: currency_id.to_owned(),
+            refund_amount: String::new(),
+            max_pulls: String::new(),
+            starts_at: String::new(),
+            ends_at: String::new(),
+            available: false,
+            position: position.to_string(),
+        }
+    }
+
+    pub fn of(b: &pb::GachaBanner) -> Self {
+        let duplicates = match pb::GachaDuplicates::try_from(b.duplicates) {
+            Ok(pb::GachaDuplicates::Unspecified) | Err(_) => pb::GachaDuplicates::Keep,
+            Ok(d) => d,
+        };
+        Self {
+            name: b.name.clone(),
+            description: b.description.clone(),
+            art_url: b.art_url.clone(),
+            currency_id: b.currency_id.clone(),
+            price: b.pull_price.to_string(),
+            multi: text_of(b.multi_pull.into()),
+            multi_price: text_of(b.multi_pull_price),
+            tiers: b
+                .tiers
+                .iter()
+                .map(|t| TierDraft {
+                    id: t.id.clone(),
+                    name: t.name.clone(),
+                    color: t.color.map(|c| c as u32),
+                    rate: rate_text(t.rate),
+                })
+                .collect(),
+            prizes: b
+                .prizes
+                .iter()
+                .map(|p| PrizeDraft {
+                    id: p.id.clone(),
+                    tier_id: p.tier_id.clone(),
+                    listing_id: p.listing_id.clone(),
+                    currency_id: p.currency_id.clone(),
+                    amount: text_of(p.amount),
+                    weight: p.weight.to_string(),
+                })
+                .collect(),
+            pity_pulls: text_of(b.pity_pulls.into()),
+            pity_tier_id: if b.pity_tier_id.is_empty() {
+                b.tiers.first().map(|t| t.id.clone()).unwrap_or_default()
+            } else {
+                b.pity_tier_id.clone()
+            },
+            duplicates,
+            refund_currency_id: if b.refund_currency_id.is_empty() {
+                b.currency_id.clone()
+            } else {
+                b.refund_currency_id.clone()
+            },
+            refund_amount: text_of(b.refund_amount),
+            max_pulls: text_of(b.max_pulls.into()),
+            starts_at: local_input(ms(b.starts_at.as_ref())),
+            ends_at: local_input(ms(b.ends_at.as_ref())),
+            available: b.available,
+            position: b.position.to_string(),
+        }
+    }
+
+    /// A new tier's id: short, and not one the banner has.
+    pub fn new_tier_id(&self) -> String {
+        (self.tiers.len() + 1..)
+            .map(|n| format!("t{n}"))
+            .find(|id| !self.tiers.iter().any(|t| t.id == *id))
+            .unwrap_or_default()
+    }
+
+    /// Adds a tier at the end (the commonest), at 0%.
+    pub fn add_tier(&mut self) {
+        if self.tiers.len() < TIERS_MAX {
+            let id = self.new_tier_id();
+            self.tiers.push(TierDraft { id, name: String::new(), color: None, rate: "0".into() });
+        }
+    }
+
+    /// Takes a tier out, with its prizes; pity moves to the rarest tier left if it was on it.
+    pub fn remove_tier(&mut self, at: usize) {
+        if self.tiers.len() <= 1 || at >= self.tiers.len() {
+            return;
+        }
+        let gone = self.tiers.remove(at);
+        self.prizes.retain(|p| p.tier_id != gone.id);
+        if self.pity_tier_id == gone.id {
+            self.pity_tier_id = self.tiers.first().map(|t| t.id.clone()).unwrap_or_default();
+        }
+    }
+
+    /// Moves a tier one place rarer.
+    pub fn raise_tier(&mut self, at: usize) {
+        if at > 0 && at < self.tiers.len() {
+            self.tiers.swap(at - 1, at);
+        }
+    }
+
+    /// Adds a prize to a tier: a listing, or (`None`) some of a currency. Returns its id.
+    pub fn add_prize(&mut self, tier_id: &str, listing_id: Option<&str>, n: usize) -> Option<String> {
+        if self.prizes.len() >= PRIZES_MAX {
+            return None;
+        }
+        let id = format!("new:{n}");
+        self.prizes.push(PrizeDraft {
+            id: id.clone(),
+            tier_id: tier_id.to_owned(),
+            listing_id: listing_id.unwrap_or_default().to_owned(),
+            currency_id: if listing_id.is_some() { String::new() } else { self.currency_id.clone() },
+            amount: if listing_id.is_some() { String::new() } else { "10".into() },
+            weight: "1".into(),
+        });
+        Some(id)
+    }
+
+    /// The sum of the tiers' rates as typed, in millionths; None when one isn't a percentage.
+    pub fn rates_total(&self) -> Option<i32> {
+        self.tiers.iter().try_fold(0i32, |sum, t| Some(sum + parse_percent(&t.rate)?))
+    }
+
+    /// Each prize's chance as the draft stands, in millionths (0 where a number isn't one yet).
+    pub fn chances(&self) -> HashMap<String, i32> {
+        let mut out = HashMap::new();
+        for tier in &self.tiers {
+            let rate = i64::from(parse_percent(&tier.rate).unwrap_or(0));
+            let in_tier: Vec<&PrizeDraft> = self.prizes.iter().filter(|p| p.tier_id == tier.id).collect();
+            let weights: Vec<i64> = in_tier.iter().map(|p| whole(&p.weight, 1, WEIGHT_MAX).unwrap_or(0)).collect();
+            let total: i64 = weights.iter().sum();
+            for (p, w) in in_tier.iter().zip(&weights) {
+                out.insert(p.id.clone(), if total > 0 { (rate * w / total) as i32 } else { 0 });
+            }
+        }
+        out
+    }
+
+    /// The banner to send for the draft, or the first thing that's wrong with it.
+    pub fn value(&self, id: &str, server_id: &str) -> Result<pb::GachaBanner, BannerProblem> {
+        use BannerProblem as B;
+        let name = self.name.trim();
+        if name.is_empty() || name.chars().count() > BANNER_NAME_MAX {
+            return Err(B::of("serversettings.economy.gacha.problem.name"));
+        }
+        if self.currency_id.is_empty() {
+            return Err(B::of("serversettings.economy.problem.currency"));
+        }
+        let price = whole(&self.price, 1, MOST_PRICE).ok_or(B::of("serversettings.economy.problem.price"))?;
+        let multi = if self.multi.trim().is_empty() {
+            0
+        } else {
+            whole(&self.multi, 2, MULTI_MAX).ok_or(B::of("serversettings.economy.gacha.problem.multi"))?
+        };
+        let multi_price = if multi == 0 || self.multi_price.trim().is_empty() {
+            0
+        } else {
+            whole(&self.multi_price, 1, MOST_PRICE).ok_or(B::of("serversettings.economy.gacha.problem.multiPrice"))?
+        };
+        if self.tiers.is_empty() || self.tiers.len() > TIERS_MAX {
+            return Err(B::of("serversettings.economy.gacha.problem.tiers"));
+        }
+        let mut tiers = Vec::new();
+        for (i, t) in self.tiers.iter().enumerate() {
+            let tier_name = t.name.trim();
+            if tier_name.is_empty() || tier_name.chars().count() > TIER_NAME_MAX {
+                return Err(B::at("serversettings.economy.gacha.problem.tierName", i));
+            }
+            let rate = parse_percent(&t.rate).ok_or(B::at("serversettings.economy.gacha.problem.tierRate", i))?;
+            tiers.push(pb::GachaTier {
+                id: t.id.clone(),
+                name: tier_name.to_owned(),
+                color: t.color.map(|c| c as i32),
+                rate,
+            });
+        }
+        if tiers.iter().map(|t| t.rate).sum::<i32>() != WHOLE {
+            return Err(B::of("serversettings.economy.gacha.problem.ratesTotal"));
+        }
+        if self.prizes.is_empty() || self.prizes.len() > PRIZES_MAX {
+            return Err(B::of("serversettings.economy.gacha.problem.prizes"));
+        }
+        let mut prizes = Vec::new();
+        for (i, p) in self.prizes.iter().enumerate() {
+            if p.listing_id.is_empty() && p.currency_id.is_empty() {
+                return Err(B::at("serversettings.economy.gacha.problem.prizeWhat", i));
+            }
+            let amount = if p.listing_id.is_empty() {
+                whole(&p.amount, 1, PRIZE_MAX).ok_or(B::at("serversettings.economy.gacha.problem.prizeAmount", i))?
+            } else {
+                0
+            };
+            let weight =
+                whole(&p.weight, 1, WEIGHT_MAX).ok_or(B::at("serversettings.economy.gacha.problem.prizeWeight", i))?;
+            prizes.push(pb::GachaPrize {
+                id: if p.id.starts_with("new:") { String::new() } else { p.id.clone() },
+                tier_id: p.tier_id.clone(),
+                listing_id: p.listing_id.clone(),
+                currency_id: if p.listing_id.is_empty() { p.currency_id.clone() } else { String::new() },
+                amount,
+                weight: weight as i32,
+                chance: 0,
+            });
+        }
+        if let Some(i) = tiers.iter().position(|t| t.rate > 0 && !prizes.iter().any(|p| p.tier_id == t.id)) {
+            return Err(B::at("serversettings.economy.gacha.problem.emptyTier", i));
+        }
+        let pity_problem = B::of("serversettings.economy.gacha.problem.pity");
+        let pity = if self.pity_pulls.trim().is_empty() {
+            0
+        } else {
+            whole(&self.pity_pulls, 1, PITY_MAX).ok_or(pity_problem)?
+        };
+        if pity > 0 && !tiers.iter().any(|t| t.id == self.pity_tier_id) {
+            return Err(pity_problem);
+        }
+        let refunds = self.duplicates == pb::GachaDuplicates::Refund;
+        let refund_problem = B::of("serversettings.economy.gacha.problem.refund");
+        let refund = if refunds { whole(&self.refund_amount, 1, PRIZE_MAX).ok_or(refund_problem)? } else { 0 };
+        if refunds && self.refund_currency_id.is_empty() {
+            return Err(refund_problem);
+        }
+        let max_pulls = if self.max_pulls.trim().is_empty() {
+            0
+        } else {
+            whole(&self.max_pulls, 1, MAX_PULLS).ok_or(B::of("serversettings.economy.gacha.problem.maxPulls"))?
+        };
+        let dates = B::of("serversettings.economy.gacha.problem.dates");
+        let starts = from_local_input(&self.starts_at);
+        let ends = from_local_input(&self.ends_at);
+        if (!self.starts_at.trim().is_empty() && starts.is_none())
+            || (!self.ends_at.trim().is_empty() && ends.is_none())
+        {
+            return Err(dates);
+        }
+        if let (Some(s), Some(e)) = (starts, ends)
+            && e <= s
+        {
+            return Err(dates);
+        }
+        let position = self.position.trim();
+        let position = if position.is_empty() { Some(0) } else { position.parse::<i64>().ok() }
+            .filter(|n| n.abs() <= 1_000_000)
+            .ok_or(B::of("serversettings.economy.problem.position"))?;
+        Ok(pb::GachaBanner {
+            id: id.to_owned(),
+            server_id: server_id.to_owned(),
+            name: name.to_owned(),
+            description: self.description.trim().to_owned(),
+            currency_id: self.currency_id.clone(),
+            pull_price: price,
+            multi_pull: multi as i32,
+            multi_pull_price: multi_price,
+            tiers,
+            prizes,
+            pity_pulls: pity as i32,
+            pity_tier_id: if pity > 0 { self.pity_tier_id.clone() } else { String::new() },
+            duplicates: self.duplicates as i32,
+            refund_currency_id: if refunds { self.refund_currency_id.clone() } else { String::new() },
+            refund_amount: refund,
+            max_pulls: max_pulls as i32,
+            starts_at: starts.map(timestamp),
+            ends_at: ends.map(timestamp),
+            available: self.available,
+            position: position as i32,
+            created_at: None,
+            art_url: self.art_url.clone(),
+        })
+    }
+}
+
+/// Listings that can be prizes: every one, gacha-only first, then as the shop lists them.
+pub fn prize_listings(listings: &[pb::ShopListing]) -> Vec<&pb::ShopListing> {
+    let mut list: Vec<&pb::ShopListing> = listings.iter().collect();
+    list.sort_by(|a, b| {
+        b.gacha_only.cmp(&a.gacha_only).then(a.position.cmp(&b.position)).then_with(|| a.id.cmp(&b.id))
+    });
+    list
+}
+
 /// Who a grant goes to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantTo {
@@ -1256,6 +1723,67 @@ impl Core {
         )
         .await?;
         self.shared.instance(key, |i| economy_of(i, server_id).listings.retain(|l| l.id != listing_id));
+        Ok(())
+    }
+
+    /// Makes a gacha banner (Manage Economy).
+    pub async fn create_banner(
+        &self,
+        key: &str,
+        server_id: &str,
+        banner: pb::GachaBanner,
+    ) -> Result<pb::GachaBanner, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.economy(),
+            create_gacha_banner(pb::CreateGachaBannerRequest { server_id: server_id.into(), banner: Some(banner) })
+        )
+        .await?;
+        let banner = res.banner.ok_or_else(|| Problem::new(Code::Internal, "The instance sent no banner."))?;
+        self.put_banner(key, server_id, &banner);
+        Ok(banner)
+    }
+
+    /// Saves a banner whole: its tiers and prizes are replaced by the ones sent.
+    pub async fn update_banner(
+        &self,
+        key: &str,
+        server_id: &str,
+        banner: pb::GachaBanner,
+    ) -> Result<pb::GachaBanner, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.economy(),
+            update_gacha_banner(pb::UpdateGachaBannerRequest { server_id: server_id.into(), banner: Some(banner) })
+        )
+        .await?;
+        let banner = res.banner.ok_or_else(|| Problem::new(Code::Internal, "The instance sent no banner."))?;
+        self.put_banner(key, server_id, &banner);
+        Ok(banner)
+    }
+
+    /// Keeps a banner the instance answered with, before its event arrives.
+    fn put_banner(&self, key: &str, server_id: &str, banner: &pb::GachaBanner) {
+        self.shared.instance(key, |i| {
+            let e = economy_of(i, server_id);
+            let mut list = e.banners.clone();
+            list.retain(|b| b.id != banner.id);
+            list.push(banner.clone());
+            banners_updated(e, &list);
+        });
+    }
+
+    pub async fn delete_banner(&self, key: &str, server_id: &str, banner_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(
+            api.economy(),
+            delete_gacha_banner(pb::DeleteGachaBannerRequest {
+                server_id: server_id.into(),
+                banner_id: banner_id.into(),
+            })
+        )
+        .await?;
+        self.shared.instance(key, |i| economy_of(i, server_id).banners.retain(|b| b.id != banner_id));
         Ok(())
     }
 
@@ -1633,5 +2161,163 @@ mod tests {
         assert_eq!(parse_amount(" -50 "), Some(-50));
         assert_eq!(parse_amount("12a"), None);
         assert_eq!(parse_amount(""), None);
+    }
+
+    fn saved_banner() -> pb::GachaBanner {
+        pb::GachaBanner {
+            id: "B".into(),
+            name: "Stars".into(),
+            currency_id: "C".into(),
+            pull_price: 100,
+            multi_pull: 10,
+            multi_pull_price: 900,
+            tiers: vec![
+                pb::GachaTier { id: "t1".into(), name: "Legendary".into(), color: None, rate: 30_000 },
+                pb::GachaTier { id: "t2".into(), name: "Common".into(), color: Some(0x3b82f6), rate: 970_000 },
+            ],
+            prizes: vec![
+                pb::GachaPrize {
+                    id: "p1".into(),
+                    tier_id: "t1".into(),
+                    listing_id: "L1".into(),
+                    weight: 1,
+                    ..Default::default()
+                },
+                pb::GachaPrize {
+                    id: "p2".into(),
+                    tier_id: "t2".into(),
+                    currency_id: "C".into(),
+                    amount: 50,
+                    weight: 3,
+                    ..Default::default()
+                },
+                pb::GachaPrize {
+                    id: "p3".into(),
+                    tier_id: "t2".into(),
+                    currency_id: "C".into(),
+                    amount: 5,
+                    weight: 1,
+                    ..Default::default()
+                },
+            ],
+            pity_pulls: 50,
+            pity_tier_id: "t1".into(),
+            duplicates: pb::GachaDuplicates::Keep as i32,
+            max_pulls: 30,
+            starts_at: Some(prost_types::Timestamp { seconds: 1_792_000_020, nanos: 0 }),
+            available: true,
+            position: 2,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn percentages_read_as_people_type_them() {
+        assert_eq!(parse_percent("3"), Some(30_000));
+        assert_eq!(parse_percent("0.6"), Some(6_000));
+        assert_eq!(parse_percent("12,5 %"), Some(125_000));
+        assert_eq!(parse_percent(".5"), Some(5_000));
+        assert_eq!(parse_percent("100"), Some(WHOLE));
+        for bad in ["", "abc", "100.5", "-1", "0.00001", "1e2", "1.", "."] {
+            assert_eq!(parse_percent(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_new_banner_starts_with_three_tiers_and_nothing_to_win() {
+        let draft = BannerDraft::new("C", 2, ["L".into(), "R".into(), "C".into()]);
+        assert_eq!(draft.tiers.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["L", "R", "C"]);
+        assert_eq!(draft.rates_total(), Some(WHOLE));
+        assert_eq!(draft.position, "2");
+        assert!(!draft.available);
+        let named = BannerDraft { name: "Stars".into(), ..draft.clone() };
+        assert_eq!(named.value("", "S").unwrap_err().key, "serversettings.economy.gacha.problem.prizes");
+        assert_eq!(draft.new_tier_id(), "t4");
+        let mut gapped = draft.clone();
+        gapped.tiers.retain(|t| t.id != "t1");
+        assert_eq!(gapped.new_tier_id(), "t4");
+        gapped.tiers.retain(|t| t.id == "t2");
+        assert_eq!(gapped.new_tier_id(), "t3");
+    }
+
+    #[test]
+    fn a_saved_banner_round_trips_through_the_editor() {
+        let saved = saved_banner();
+        let draft = BannerDraft::of(&saved);
+        assert_eq!(draft, BannerDraft::of(&saved));
+        assert_eq!(draft.tiers[0].rate, "3");
+        let b = draft.value("B", "S").unwrap();
+        assert_eq!((b.id.as_str(), b.server_id.as_str()), ("B", "S"));
+        assert_eq!((b.pull_price, b.multi_pull, b.multi_pull_price), (100, 10, 900));
+        assert_eq!(b.tiers, saved.tiers);
+        assert_eq!(b.prizes, saved.prizes);
+        assert_eq!((b.pity_pulls, b.pity_tier_id.as_str(), b.max_pulls), (50, "t1", 30));
+        assert_eq!(b.starts_at, saved.starts_at);
+        assert_eq!(b.ends_at, None);
+        assert_eq!(b.position, 2);
+    }
+
+    #[test]
+    fn the_editor_shows_chances_and_sends_new_prizes_without_an_id() {
+        let mut draft = BannerDraft::of(&saved_banner());
+        let chances = draft.chances();
+        assert_eq!((chances["p1"], chances["p2"], chances["p3"]), (30_000, 727_500, 242_500));
+        let id = draft.add_prize("t1", None, 1).unwrap();
+        draft.prizes.last_mut().unwrap().amount = "500".into();
+        assert_eq!(draft.chances()[&id], 15_000);
+        draft.prizes[0].weight = "x".into();
+        assert_eq!(draft.chances()[&id], 30_000);
+        draft.prizes[0].weight = "1".into();
+        let b = draft.value("", "S").unwrap();
+        assert_eq!(b.prizes.last().unwrap().id, "");
+        assert_eq!(b.prizes.last().unwrap().currency_id, "C");
+        assert_eq!(b.id, "");
+    }
+
+    #[test]
+    fn the_editor_names_the_first_thing_wrong() {
+        let good = BannerDraft::of(&saved_banner());
+        let wrong = |f: &dyn Fn(&mut BannerDraft)| {
+            let mut d = good.clone();
+            f(&mut d);
+            d.value("B", "S").err().map(|p| (p.key.rsplit('.').next().unwrap(), p.index))
+        };
+        assert_eq!(wrong(&|d| d.name = "  ".into()), Some(("name", None)));
+        assert_eq!(wrong(&|d| d.currency_id.clear()), Some(("currency", None)));
+        assert_eq!(wrong(&|d| d.price = "0".into()), Some(("price", None)));
+        assert_eq!(wrong(&|d| d.multi = "1".into()), Some(("multi", None)));
+        assert_eq!(wrong(&|d| d.tiers[1].name.clear()), Some(("tierName", Some(1))));
+        assert_eq!(wrong(&|d| d.tiers[0].rate = "x".into()), Some(("tierRate", Some(0))));
+        assert_eq!(wrong(&|d| d.tiers[0].rate = "4".into()), Some(("ratesTotal", None)));
+        assert_eq!(wrong(&|d| d.prizes[2].weight = "0".into()), Some(("prizeWeight", Some(2))));
+        assert_eq!(wrong(&|d| d.prizes[1].amount.clear()), Some(("prizeAmount", Some(1))));
+        assert_eq!(wrong(&|d| d.prizes.retain(|p| p.tier_id != "t1")), Some(("emptyTier", Some(0))));
+        assert_eq!(wrong(&|d| d.pity_pulls = "0".into()), Some(("pity", None)));
+        assert_eq!(wrong(&|d| d.duplicates = pb::GachaDuplicates::Refund), Some(("refund", None)));
+        assert_eq!(wrong(&|d| d.max_pulls = "-3".into()), Some(("maxPulls", None)));
+        assert_eq!(wrong(&|d| d.ends_at = d.starts_at.clone()), Some(("dates", None)));
+        assert_eq!(wrong(&|d| d.starts_at = "soon".into()), Some(("dates", None)));
+        assert_eq!(wrong(&|d| d.position = "x".into()), Some(("position", None)));
+        // A tier at 0% may stay empty, and taking a tier out takes its prizes and moves pity.
+        let mut d = good.clone();
+        d.add_tier();
+        assert_eq!(d.tiers[2].id, "t3");
+        assert_eq!(d.value("B", "S").unwrap_err().key, "serversettings.economy.gacha.problem.tierName");
+        d.tiers[2].name = "Dust".into();
+        assert!(d.value("B", "S").is_ok());
+        d.remove_tier(0);
+        assert_eq!(d.pity_tier_id, "t2");
+        assert!(d.prizes.iter().all(|p| p.tier_id == "t2"));
+        d.raise_tier(1);
+        assert_eq!(d.tiers[0].id, "t3");
+    }
+
+    #[test]
+    fn date_boxes_read_back_what_they_show() {
+        let at = 1_792_000_020_000;
+        assert_eq!(from_local_input(&local_input(at)), Some(at));
+        assert_eq!(local_input(0), "");
+        assert_eq!(from_local_input(" "), None);
+        assert_eq!(from_local_input("tomorrow"), None);
     }
 }

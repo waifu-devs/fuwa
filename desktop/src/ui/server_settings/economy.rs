@@ -5,14 +5,17 @@
 //! reactions, a daily cap, a streak bonus for the daily reward); then the
 //! shop's listings: a role (only harmless ones below you, with Manage
 //! Roles), a profile item or anything else by name, each with its price,
-//! stock, place and whether it's on sale. One thing is edited at a time,
-//! in place, saved from the floating bar.
+//! stock, place and whether it's on sale; and, with the `gacha` feature,
+//! the gacha banners (gacha.rs). One thing is edited at a time, in place,
+//! saved from the floating bar.
+
+mod gacha;
 
 use super::pages::{boxed, focused, label};
 use super::roles::switch;
 use super::*;
 use crate::core::economy::{
-    self as eco, ACTIONS, CurrencyDraft, ListingDraft, amount_text, has_cooldown, listing_name,
+    self as eco, ACTIONS, BannerDraft, CurrencyDraft, ListingDraft, amount_text, has_cooldown, listing_name,
 };
 use crate::pb::{CurrencyAction as Action, ShopListingKind as Kind};
 use crate::ui::economy::{currency_icon, gold, money};
@@ -23,6 +26,15 @@ use crate::ui::theme::radius_xl;
 pub(super) enum Editor {
     Currency { id: Option<String>, before: CurrencyDraft, draft: CurrencyDraft },
     Listing { id: Option<String>, before: ListingDraft, draft: ListingDraft },
+    Banner { id: Option<String>, before: Box<BannerDraft>, draft: Box<BannerDraft> },
+}
+
+/// What a delete is asked about.
+#[derive(Clone, Copy)]
+enum Thing {
+    Currency,
+    Listing,
+    Banner,
 }
 
 pub(super) struct Economy {
@@ -40,6 +52,8 @@ pub(super) struct Economy {
     /// A currency or listing asked about before it's deleted, and one going.
     asking: Option<String>,
     deleting: Option<String>,
+    /// The banner editor's boxes and pickers.
+    banner: gacha::Boxes,
 }
 
 /// The number boxes the editors use.
@@ -101,6 +115,7 @@ impl Economy {
             saving: false,
             asking: None,
             deleting: None,
+            banner: gacha::Boxes::default(),
         };
         (economy, subscriptions)
     }
@@ -160,7 +175,8 @@ impl ServerSettingsView {
                 }
                 draft.position = typed_number(get("position")).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
             }
-            None => {}
+            // The banner editor's boxes write to it themselves (gacha.rs).
+            Some(Editor::Banner { .. }) | None => {}
         }
         self.error = None;
         cx.notify();
@@ -198,7 +214,7 @@ impl ServerSettingsView {
                 values.push(("position".into(), draft.position.to_string()));
                 (draft.name.clone(), draft.description.clone())
             }
-            None => return,
+            Some(Editor::Banner { .. }) | None => return,
         };
         for (key, value) in values {
             if let Some(state) = self.economy.number(&key).cloned() {
@@ -307,6 +323,21 @@ impl ServerSettingsView {
                     }
                 }
             }
+            Some(Editor::Banner { id, draft, .. }) => {
+                let banner = match draft.value(id.as_deref().unwrap_or_default(), &sid) {
+                    Ok(banner) => banner,
+                    Err(problem) => {
+                        self.error = Some(t(problem.key));
+                        cx.notify();
+                        return;
+                    }
+                };
+                if id.is_none() {
+                    Box::pin(async move { core.create_banner(&key, &sid, banner).await.map(|_| ()) })
+                } else {
+                    Box::pin(async move { core.update_banner(&key, &sid, banner).await.map(|_| ()) })
+                }
+            }
             None => return,
         };
         self.economy.saving = true;
@@ -325,7 +356,7 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    fn delete_economy_thing(&mut self, id: String, currency: bool, cx: &mut Context<Self>) {
+    fn delete_economy_thing(&mut self, id: String, thing: Thing, cx: &mut Context<Self>) {
         self.economy.asking = None;
         self.economy.deleting = Some(id.clone());
         let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
@@ -333,10 +364,10 @@ impl ServerSettingsView {
         self.run(
             cx,
             async move {
-                if currency {
-                    core.delete_currency(&key, &sid, &id).await
-                } else {
-                    core.delete_listing(&key, &sid, &id).await
+                match thing {
+                    Thing::Currency => core.delete_currency(&key, &sid, &id).await,
+                    Thing::Listing => core.delete_listing(&key, &sid, &id).await,
+                    Thing::Banner => core.delete_banner(&key, &sid, &id).await,
                 }
             },
             move |this, result, cx| {
@@ -344,9 +375,11 @@ impl ServerSettingsView {
                 match result {
                     Ok(()) => {
                         let open = match &this.economy.editor {
-                            Some(Editor::Currency { id: Some(id), .. } | Editor::Listing { id: Some(id), .. }) => {
-                                *id == gone
-                            }
+                            Some(
+                                Editor::Currency { id: Some(id), .. }
+                                | Editor::Listing { id: Some(id), .. }
+                                | Editor::Banner { id: Some(id), .. },
+                            ) => *id == gone,
                             _ => false,
                         };
                         if open {
@@ -376,6 +409,7 @@ impl ServerSettingsView {
         let pending = match &self.economy.editor {
             Some(Editor::Currency { id, before, draft }) => Some(if id.is_none() { 1 } else { draft.changes(before) }),
             Some(Editor::Listing { id, before, draft }) => Some(if id.is_none() { 1 } else { draft.changes(before) }),
+            Some(Editor::Banner { id, before, draft }) => Some(usize::from(id.is_none() || before != draft)),
             None => None,
         };
         if let Some(n) = pending.filter(|n| *n > 0) {
@@ -493,18 +527,15 @@ impl ServerSettingsView {
                 10.0,
             ));
         }
-        page.child(shop).into_any_element()
+        page = page.child(shop);
+        if self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("gacha"))) {
+            page = page.child(self.banners_section(&economy, &emojis, &roles, &items, p, window, cx));
+        }
+        page.into_any_element()
     }
 
     /// Asked before deleting: what goes with it, Cancel and Delete.
-    fn economy_asking(
-        &self,
-        id: &str,
-        words: String,
-        currency: bool,
-        p: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn economy_asking(&self, id: &str, words: String, thing: Thing, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let id = id.to_owned();
         div()
             .flex()
@@ -521,7 +552,7 @@ impl ServerSettingsView {
             })))
             .child(
                 danger_button("eco-ask-yes", t("desktop.economy.delete"), p)
-                    .on_click(cx.listener(move |this, _, _, cx| this.delete_economy_thing(id.clone(), currency, cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| this.delete_economy_thing(id.clone(), thing, cx))),
             )
             .into_any_element()
     }
@@ -632,7 +663,7 @@ impl ServerSettingsView {
                 el.child(self.economy_asking(
                     &c.id,
                     t_with("desktop.economy.currency.deleteAsk", &[("name", Arg::Str(&c.name))]),
-                    true,
+                    Thing::Currency,
                     p,
                     cx,
                 ))
@@ -1122,7 +1153,7 @@ impl ServerSettingsView {
                     )),
             )
             .when(asking, |el| {
-                el.child(self.economy_asking(&l.id, t("desktop.economy.listing.deleteAsk"), false, p, cx))
+                el.child(self.economy_asking(&l.id, t("desktop.economy.listing.deleteAsk"), Thing::Listing, p, cx))
             })
             .into_any_element()
     }
@@ -1384,7 +1415,7 @@ impl ServerSettingsView {
                     },
                 )),
         );
-        // Won only from gacha banners: set up on the web, members pull for it in the shop.
+        // Won only from gacha banners (set up below), members pull for it in the shop.
         let gacha = self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("gacha")));
         if gacha || draft.gacha_only {
             form = form.child(
@@ -1405,7 +1436,7 @@ impl ServerSettingsView {
                                 div()
                                     .text_sm()
                                     .text_color(p.muted_foreground)
-                                    .child(t("desktop.economy.listing.gachaOnlyHint")),
+                                    .child(t("serversettings.economy.gachaOnlyHint")),
                             ),
                     )
                     .child(switch(
