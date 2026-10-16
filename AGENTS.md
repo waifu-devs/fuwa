@@ -262,7 +262,8 @@
     `components/board/`. Desktop: `core/board.rs` (the same `between`,
     events, and the calls, shown at once) and `ui/board.rs` (the board in
     place of the message list; a card's comments are drawn by the thread
-    panel's `thread_rows` and `reply_box`).
+    panel's `thread_rows` and `reply_box`; its columns and labels are set
+    up in `ui/board_settings.rs`, the web's `BoardSettingsDialog.tsx`).
     Polls (`api/polls.rs`): a message can carry a poll (`Message.poll`),
     kept in the server file's `polls` (question, answers and the tally, which
     every vote rewrites, so votes at once clash and run again and the counts

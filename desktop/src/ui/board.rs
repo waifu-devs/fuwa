@@ -59,6 +59,8 @@ pub struct BoardUi {
     pub confirm_delete: bool,
     /// Where a card being dragged would land: (column, the card it goes above, "" for the bottom).
     pub drop: Option<(String, String)>,
+    /// The board's settings, while that dialog is open.
+    pub settings: Option<crate::ui::board_settings::BoardSettings>,
 }
 
 impl BoardUi {
@@ -123,6 +125,7 @@ impl BoardUi {
                 due,
                 confirm_delete: false,
                 drop: None,
+                settings: None,
             },
             subs,
         )
@@ -181,7 +184,7 @@ fn color_of(c: i32) -> Option<Rgba> {
 }
 
 /// A label as a small chip in its colour.
-fn label_chip(label: &pb::BoardLabel, p: &Palette) -> gpui_kit::Div {
+pub(crate) fn label_chip(label: &pb::BoardLabel, p: &Palette) -> gpui_kit::Div {
     let color = color_of(label.color).unwrap_or(p.muted_foreground);
     div()
         .flex_none()
@@ -279,6 +282,8 @@ struct Seen {
     add: bool,
     /// Delete anyone's card.
     delete_any: bool,
+    /// Set up its columns and labels (Manage Channels).
+    set_up: bool,
     attach: bool,
     /// Everyone the board names, by id.
     people: std::collections::HashMap<String, pb::User>,
@@ -307,6 +312,7 @@ impl FuwaApp {
                 manage,
                 add: manage && access.has_in(channel, pb::Permission::SendMessages) && !access.pending,
                 delete_any: access.has_in(channel, pb::Permission::ManageMessages),
+                set_up: access.has_in(channel, pb::Permission::ManageChannels),
                 attach: access.has_in(channel, pb::Permission::AttachFiles),
                 board,
                 people,
@@ -864,6 +870,18 @@ impl FuwaApp {
                 header_button("board-archived", "archive", on, -8.0, &p)
                     .tooltip(|window, cx| crate::ui::overlay::Tip::new(t("chattools.board.archived")).build(window, cx))
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_archived(window, cx)))
+            })
+            .when(seen.set_up && seen.board.loaded, |el| {
+                let (key, server, channel) = (key.to_owned(), server.to_owned(), channel.id.clone());
+                el.child(
+                    header_button("board-settings", "settings-2", false, 0.0, &p)
+                        .tooltip(|window, cx| {
+                            crate::ui::overlay::Tip::new(t("chattools.board.settings")).build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_board_settings(&key, &server, &channel, window, cx)
+                        })),
+                )
             });
 
         let body = if let (Some(error), false) = (&seen.board.error, seen.board.loaded) {

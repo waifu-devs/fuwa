@@ -19,6 +19,17 @@ use crate::rpc;
 pub const TITLE_MAX: usize = 200;
 pub const ASSIGNEES_MAX: usize = 10;
 pub const BODY_MAX: usize = 4000;
+/// What a board's settings take, as the web's `lib/board.ts`.
+pub const COLUMN_NAME_MAX: usize = 50;
+pub const LABEL_NAME_MAX: usize = 30;
+pub const COLUMNS_MAX: usize = 20;
+pub const LABELS_MAX: usize = 50;
+pub const CARD_LIMIT_MAX: i32 = 10_000;
+/// The colors the board's settings offer for columns and labels.
+pub const PALETTE: [i32; 12] = [
+    0xf06292, 0xb388ff, 0x7986cb, 0x4fc3f7, 0x4db6ac, 0x81c784, 0xdce775, 0xffd54f, 0xffb74d, 0xff8a65, 0xa1887f,
+    0x90a4ae,
+];
 /// Archived cards asked for at a time.
 const PAGE: i32 = 50;
 
@@ -580,6 +591,33 @@ impl Core {
             }
         });
         res.map(|_| ())
+    }
+}
+
+impl Core {
+    /// Sets a board's columns and labels whole (Manage Channels): a column left
+    /// out must hold no cards, a label left out comes off every card.
+    pub async fn set_board(
+        &self,
+        key: &str,
+        server: &str,
+        channel: &str,
+        columns: Vec<pb::BoardColumn>,
+        labels: Vec<pb::BoardLabel>,
+    ) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.boards(),
+            set_board(pb::SetBoardRequest { server_id: server.into(), channel_id: channel.into(), columns, labels })
+        )
+        .await?;
+        self.shared.instance(key, |i| {
+            if let Some(board) = i.boards.get_mut(channel) {
+                board.columns = res.columns;
+                board.labels = res.labels;
+            }
+        });
+        Ok(())
     }
 }
 

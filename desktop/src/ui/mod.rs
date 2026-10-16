@@ -10,6 +10,7 @@ mod backdrop;
 mod banner;
 mod banners;
 pub(crate) mod board;
+pub(crate) mod board_settings;
 mod call_bar;
 mod call_parts;
 pub(crate) mod chat;

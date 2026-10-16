@@ -706,7 +706,7 @@ impl FuwaApp {
     #[allow(clippy::too_many_arguments)]
     fn create_channel_panel(
         &mut self,
-        _key: &str,
+        key: &str,
         _server: &str,
         _parent: &str,
         kind: pb::ChannelType,
@@ -716,7 +716,7 @@ impl FuwaApp {
     ) -> gpui_kit::Div {
         use pb::ChannelType as K;
         let focused = gpui_kit::Focusable::focus_handle(self.dialog_input.read(cx), cx).is_focused(window);
-        const KINDS: [(K, &str, &str, &str); 5] = [
+        const KINDS: [(K, &str, &str, &str); 6] = [
             (K::Text, "hash", "workspace.createChannel.type.text", "workspace.createChannel.type.textHint"),
             (
                 K::Announcement,
@@ -730,6 +730,7 @@ impl FuwaApp {
                 "workspace.createChannel.type.secure",
                 "workspace.createChannel.type.secureHint",
             ),
+            (K::Board, "square-kanban", "workspace.createChannel.type.board", "workspace.createChannel.type.boardHint"),
             (K::Voice, "volume-2", "workspace.createChannel.type.voice", "workspace.createChannel.type.voiceHint"),
             (
                 K::Category,
@@ -738,13 +739,16 @@ impl FuwaApp {
                 "workspace.createChannel.type.categoryHint",
             ),
         ];
+        // Boards only where the instance has them.
+        let boards = self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("boards")));
+        let kinds: Vec<_> = KINDS.into_iter().filter(|(k, ..)| boards || *k != K::Board).collect();
         let category = kind == K::Category;
         let busy = self.dialog_busy;
         let named = !self.dialog_input.read(cx).value().trim().is_empty();
         // The choice's highlight glides to the one picked (`layoutId="channel-type"`): where
         // each sits is measured as it's drawn, and until then the picked one lights itself.
         let spots = window.use_keyed_state("channel-kinds", cx, |_, _| Vec::<(f32, f32)>::new());
-        let spot = KINDS.iter().position(|(k, ..)| *k == kind).and_then(|n| spots.read(cx).get(n).copied());
+        let spot = kinds.iter().position(|(k, ..)| *k == kind).and_then(|n| spots.read(cx).get(n).copied());
         let glider = spot.map(|(top, h)| {
             let top = motion::follow("channel-kind-glide", top, window, cx);
             // `bg-primary/10 ring-2 ring-primary/40`. Opaque: GPUI fills under a
@@ -773,7 +777,7 @@ impl FuwaApp {
                 window.request_animation_frame();
             }
         });
-        let choices = choices.children(KINDS.into_iter().enumerate().map(|(n, (k, glyph, label, hint))| {
+        let choices = choices.children(kinds.into_iter().enumerate().map(|(n, (k, glyph, label, hint))| {
             let on = k == kind;
             let hover = alpha(p.primary, 0.4);
             div()
@@ -850,6 +854,7 @@ impl FuwaApp {
             K::Category => None,
             K::Voice => Some("volume-2"),
             K::Secure => Some("shield-check"),
+            K::Board => Some("square-kanban"),
             _ => Some("hash"),
         };
         let input = Input::new(&self.dialog_input).appearance(false).when_some(mark, |el, mark| {
