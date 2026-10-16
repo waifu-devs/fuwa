@@ -31,6 +31,7 @@ pub mod emoji;
 pub mod fonts;
 pub mod foreground;
 pub mod friends;
+pub mod gacha_share;
 pub mod gifs;
 pub mod history;
 pub mod hotkeys;

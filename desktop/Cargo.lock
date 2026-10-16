@@ -3243,6 +3243,7 @@ dependencies = [
  "ratex-render",
  "ratex-types",
  "raw-window-handle",
+ "resvg 0.46.0",
  "ring",
  "rustls",
  "serde",

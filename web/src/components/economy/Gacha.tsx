@@ -1,13 +1,17 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
+  CheckIcon,
   ChevronDownIcon,
   ClockIcon,
   DicesIcon,
+  DownloadIcon,
+  HashIcon,
   LoaderCircleIcon,
   PackageIcon,
   PercentIcon,
   RotateCcwIcon,
   ShieldCheckIcon,
+  Share2Icon,
   ShieldIcon,
   SparklesIcon,
   TicketIcon,
@@ -17,8 +21,16 @@ import {
 import { AnimatePresence, m as motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Balance, Currency, GachaBanner, GachaProgress, GachaPull, GachaResult, Role, ShopListing } from "@/gen/fuwa/v1/types_pb";
-import { economyMessage, pull } from "@/fuwa/economy";
+import { economyMessage, pull, shareHere, sharePull } from "@/fuwa/economy";
 import { useAccess, useInstance, useMyMember } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
+import { useSaveImage } from "@/components/chat/GachaShareCard";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ChannelType, Permission as P } from "@/gen/fuwa/v1/types_pb";
+import { displayName } from "@/lib/format";
+import { cardsOfPull } from "@/lib/gacha-share";
+import { hasIn } from "@/lib/permissions";
+import { toast } from "@/lib/ui";
 import { Amount, CurrencyIcon, listingName } from "@/components/economy/shared";
 import { Count } from "@/components/motion";
 import { T, useI18n } from "@/i18n/react";
@@ -776,6 +788,8 @@ function Show({
                 <Amount instanceKey={instanceKey} currency={currency} value={price} className="text-sm font-bold text-white/80" iconClassName="size-3.5" />
               </button>
             )}
+            <ShareButton instanceKey={instanceKey} serverId={serverId} pullId={shown.id} />
+            <SaveButton banner={banner} pull={shown} instanceKey={instanceKey} />
             <button
               type="button"
               onClick={onClose}
@@ -788,6 +802,79 @@ function Show({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+const FOOT_BUTTON = "flex h-12 items-center gap-2 rounded-2xl bg-white/10 px-5 font-extrabold backdrop-blur transition hover:bg-white/20 active:scale-95 disabled:opacity-60";
+
+/** Shows the pull in one of the server's channels you can post in (Message.gacha). */
+function ShareButton({ instanceKey, serverId, pullId }: { instanceKey: string; serverId: string; pullId: string }) {
+  const { t } = useI18n();
+  const access = useAccess(instanceKey, serverId);
+  const all = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
+  const [sending, setSending] = useState(false);
+  const [sharedIn, setSharedIn] = useState<string | null>(null);
+  const channels = useMemo(
+    () => (all ?? []).filter((c) => (c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT) && !c.shared && !access.pending && hasIn(access, c.id, P.SEND_MESSAGES)),
+    [all, access],
+  );
+  if (!shareHere(instanceKey)) return null;
+  async function share(channelId: string, name: string) {
+    setSending(true);
+    try {
+      await sharePull(instanceKey, serverId, channelId, pullId);
+      setSharedIn(name);
+      toast(t("chattools.economy.gacha.sharedIn", { channel: name }));
+    } catch (err) {
+      toast(economyMessage(err));
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" disabled={sending} className={FOOT_BUTTON}>
+          {sending ? <LoaderCircleIcon className="size-4 animate-spin" /> : sharedIn ? <CheckIcon className="size-4" /> : <Share2Icon className="size-4" />}
+          {t("chattools.economy.gacha.share")}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" side="top" className="z-[70] max-h-72 w-60">
+        <DropdownMenuLabel>{t("chattools.economy.gacha.shareIn")}</DropdownMenuLabel>
+        {channels.length ? (
+          channels.map((c) => (
+            <DropdownMenuItem key={c.id} onSelect={() => void share(c.id, c.name)}>
+              <HashIcon className="size-4 text-muted-foreground" />
+              <span className="truncate">{c.name}</span>
+            </DropdownMenuItem>
+          ))
+        ) : (
+          <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("chattools.economy.gacha.noChannels")}</p>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Saves a picture of the pull's cards. */
+function SaveButton({ instanceKey, banner, pull: shown }: { instanceKey: string; banner: GachaBanner; pull: GachaPull }) {
+  const { t } = useI18n();
+  const me = useFuwa((s) => s.instances[instanceKey]?.me);
+  const save = useSaveImage();
+  const [saving, setSaving] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={saving}
+      onClick={() => {
+        setSaving(true);
+        void save(cardsOfPull(shown, banner), displayName(me ?? undefined)).finally(() => setSaving(false));
+      }}
+      className={FOOT_BUTTON}
+    >
+      {saving ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4" />}
+      {t("chattools.economy.gacha.saveImage")}
+    </button>
   );
 }
 

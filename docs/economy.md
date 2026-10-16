@@ -171,6 +171,17 @@ has a sound made on the spot (`gachaCue` in `lib/sounds.ts`,
 `play_gacha` in `core/sounds.rs`, the same voices), switched by the synced
 `gachaSounds` setting (docs/app-settings.md) and the app's volume.
 
+Once the cards are turned, a pull can be shown off. **Share** posts it in a
+text channel you can write in (`SendMessageRequest.gacha_pull_id`, the
+`gacha-share` feature): the server copies your pull, as it kept it, into the
+message (`Message.gacha`, a `GachaShare`), ranking each card by its banner
+as the apps do, so what's shown is what was drawn and stays so if the banner
+changes. Only your own pulls can be shared, and not in channels shared
+between servers yet. Chat shows it as the pull's little cards. **Save
+image** (on the results and on a shared pull) saves a PNG of the cards,
+laid out the same in both apps (`lib/gacha-share.ts`, `core/gacha_share.rs`,
+tested against one file, `web/src/lib/gacha-share.test.svg`).
+
 ## Moving currency
 
 - **Transfers** (`Transfer`): a member sends some of a transferable

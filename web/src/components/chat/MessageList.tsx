@@ -85,6 +85,7 @@ import { MessageButtons, UsedCommand } from "@/components/chat/Commands";
 import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
 import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { GifMessage } from "@/components/chat/GifMessage";
+import { GachaShareCard } from "@/components/chat/GachaShareCard";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -1248,6 +1249,7 @@ function MessageContent({
       <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
       {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
       {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
+      {message.gacha && <GachaShareCard message={message} instanceKey={instanceKey} />}
       <MessageButtons message={message} />
     </>
   );

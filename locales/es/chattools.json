@@ -468,6 +468,20 @@
     "other": "{count} estrellas"
   },
   "economy.gacha.pityMeter": "{done} de {total}",
+  "economy.gacha.share": "Compartir",
+  "economy.gacha.shareIn": "Compartir en un canal",
+  "economy.gacha.sharedIn": "Compartido en #{channel}",
+  "economy.gacha.noChannels": "Aquí no hay ningún canal donde puedas escribir.",
+  "economy.gacha.saveImage": "Guardar imagen",
+  "economy.gacha.imageFailed": "No se pudo guardar la imagen.",
+  "economy.gacha.sharedHeader": {
+    "one": "Tiró en {banner}",
+    "other": "Tiró {count} veces en {banner}"
+  },
+  "economy.gacha.imageSubtitle": {
+    "one": "La tirada de {name}",
+    "other": "{name} · {count} tiradas"
+  },
   "economy.give": "Dar",
   "economy.giveAbout": "Lo que des o quites queda en el registro de auditoría, con tu motivo.",
   "economy.giveAmount": "Dar {amount}",

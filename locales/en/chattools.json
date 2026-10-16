@@ -468,6 +468,20 @@
     "other": "{count} stars"
   },
   "economy.gacha.pityMeter": "{done} of {total}",
+  "economy.gacha.share": "Share",
+  "economy.gacha.shareIn": "Share in a channel",
+  "economy.gacha.sharedIn": "Shared in #{channel}",
+  "economy.gacha.noChannels": "There's no channel here you can post in.",
+  "economy.gacha.saveImage": "Save image",
+  "economy.gacha.imageFailed": "Couldn't save the picture.",
+  "economy.gacha.sharedHeader": {
+    "one": "Pulled on {banner}",
+    "other": "Pulled {count} times on {banner}"
+  },
+  "economy.gacha.imageSubtitle": {
+    "one": "{name}'s pull",
+    "other": "{name} · {count} pulls"
+  },
   "economy.give": "Give",
   "economy.giveAbout": "Currency given or taken is in the audit log, with your reason.",
   "economy.giveAmount": "Give {amount}",

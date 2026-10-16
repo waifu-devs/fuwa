@@ -353,6 +353,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         voice: None,
         attachments: Vec::new(),
         gif: None,
+        gacha: None,
         thread: ThreadBits::default(),
         agent: None,
         pinned: false,

@@ -410,6 +410,23 @@ impl ShopView {
                     .filter(|u| u.id != me)
                     .collect(),
                 economy,
+                my_name: i.display_name(Some(&self.server), &me),
+                channels: {
+                    let access = i.access(&self.server);
+                    i.channels
+                        .get(&self.server)
+                        .into_iter()
+                        .flatten()
+                        .filter(|c| {
+                            matches!(
+                                pb::ChannelType::try_from(c.r#type),
+                                Ok(pb::ChannelType::Text | pb::ChannelType::Announcement)
+                            ) && c.shared.is_none()
+                                && access.has_in(&c.id, pb::Permission::SendMessages)
+                        })
+                        .map(|c| (c.id.clone(), c.name.clone()))
+                        .collect()
+                },
                 me,
             }
         })
@@ -436,6 +453,10 @@ struct Facts {
     /// Everyone here but you, for Send.
     members: Vec<pb::User>,
     me: String,
+    /// Your name here, for a pull's picture.
+    my_name: String,
+    /// Where a pull can be shared: the text channels you can post in (id, name).
+    channels: Vec<(String, String)>,
 }
 
 /// A countdown to a moment `ms` away: "5h 12m", "12m".
@@ -958,6 +979,8 @@ impl ShopView {
                 emojis: f.emojis.clone(),
                 members: Vec::new(),
                 me: f.me.clone(),
+                my_name: String::new(),
+                channels: Vec::new(),
             });
             uniform_list(
                 "shop-listings",

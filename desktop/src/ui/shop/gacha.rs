@@ -49,6 +49,12 @@ pub(super) struct Show {
     cues: Vec<(u64, Vec<GachaCue>)>,
     heard: usize,
     skipped: bool,
+    /// Sharing it: the channels are showing, it's being sent, where it went.
+    share_open: bool,
+    sharing: bool,
+    shared_in: Option<String>,
+    /// What went wrong sharing or saving it.
+    note: Option<String>,
 }
 
 impl Show {
@@ -62,7 +68,20 @@ impl Show {
             cues.extend(plan.flips.iter().zip(&ranks).map(|(at, r)| (*at, vec![GachaCue::Flip, GachaCue::rarity(*r)])));
             cues
         };
-        Self { pull, banner, at: Instant::now(), ranks, plan, cues, heard: 0, skipped: false }
+        Self {
+            pull,
+            banner,
+            at: Instant::now(),
+            ranks,
+            plan,
+            cues,
+            heard: 0,
+            skipped: false,
+            share_open: false,
+            sharing: false,
+            shared_in: None,
+            note: None,
+        }
     }
 
     fn elapsed(&self) -> u64 {
@@ -1039,6 +1058,55 @@ impl ShopView {
                         }),
                 );
             }
+            if self.core.share_here(&self.key) {
+                let icon_name = if show.shared_in.is_some() { "check" } else { "share-2" };
+                footer = footer.child(
+                    div()
+                        .id("shop-gacha-share")
+                        .h(px(48.0))
+                        .px(px(20.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .rounded(radius_2xl())
+                        .bg(white(if show.share_open { 0.2 } else { 0.1 }))
+                        .font_weight(FontWeight::EXTRA_BOLD)
+                        .cursor_pointer()
+                        .hover(|s| s.bg(white(0.2)))
+                        .active(|s| s.scale(0.95))
+                        .child(if show.sharing {
+                            spinner("shop-gacha-share-spin", 16.0, window)
+                        } else {
+                            icon(icon_name).size(px(16.0)).into_any_element()
+                        })
+                        .child(t("chattools.economy.gacha.share"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(show) = this.show.as_mut() {
+                                show.share_open = !show.share_open;
+                                show.note = None;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            footer = footer.child(
+                div()
+                    .id("shop-gacha-save")
+                    .h(px(48.0))
+                    .px(px(20.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(radius_2xl())
+                    .bg(white(0.1))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(white(0.2)))
+                    .active(|s| s.scale(0.95))
+                    .child(icon("download").size(px(16.0)))
+                    .child(t("chattools.economy.gacha.saveImage"))
+                    .on_click(cx.listener(|this, _, _, cx| this.save_image(cx))),
+            );
             footer = footer.child(
                 div()
                     .id("shop-gacha-done")
@@ -1059,8 +1127,15 @@ impl ShopView {
                         cx.notify();
                     })),
             );
+            let mut end = div().relative().flex().flex_col().items_center().gap(px(10.0));
+            if show.share_open {
+                end = end.child(self.share_picker(show, f, cx));
+            }
+            if let Some(note) = &show.note {
+                end = end.child(div().text_sm().text_color(white(0.8)).child(note.clone()));
+            }
             night = night.child(motion::rise(
-                footer,
+                end.child(footer),
                 SharedString::from(format!("shop-gacha-end-{}", show.pull.id)),
                 Duration::ZERO,
                 16.0,
@@ -1081,6 +1156,99 @@ impl ShopView {
             )
             .into_any_element(),
         )
+    }
+
+    /// The channels a pull can be shared in, as chips over the buttons.
+    fn share_picker(&self, show: &Show, f: &Facts, cx: &mut Context<Self>) -> AnyElement {
+        let mut chips = div().flex().flex_wrap().justify_center().gap(px(6.0)).max_w(px(560.0));
+        if f.channels.is_empty() {
+            chips = chips.child(div().text_sm().text_color(white(0.7)).child(t("chattools.economy.gacha.noChannels")));
+        }
+        for (id, name) in &f.channels {
+            let (id, name) = (id.clone(), name.clone());
+            chips = chips.child(
+                div()
+                    .id(SharedString::from(format!("shop-gacha-share-in|{id}")))
+                    .h(px(32.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .rounded_full()
+                    .bg(white(0.12))
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(white(0.24)))
+                    .active(|s| s.scale(0.95))
+                    .child(icon("hash").size(px(14.0)).text_color(white(0.6)))
+                    .child(name.clone())
+                    .when(!show.sharing, |el| {
+                        el.on_click(cx.listener(move |this, _, _, cx| this.share_in(id.clone(), name.clone(), cx)))
+                    }),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(white(0.6))
+                    .child(t("chattools.economy.gacha.shareIn")),
+            )
+            .child(chips)
+            .into_any_element()
+    }
+
+    pub(super) fn share_in(&mut self, channel_id: String, name: String, cx: &mut Context<Self>) {
+        let Some(show) = self.show.as_mut().filter(|s| !s.sharing) else { return };
+        show.sharing = true;
+        show.note = None;
+        let pull_id = show.pull.id.clone();
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        let shared = pull_id.clone();
+        self.run(
+            cx,
+            async move { core.share_pull(&key, &sid, &channel_id, &shared).await },
+            move |this, result, cx| {
+                if let Some(show) = this.show.as_mut().filter(|s| s.pull.id == pull_id) {
+                    show.sharing = false;
+                    match result {
+                        Ok(()) => {
+                            show.share_open = false;
+                            show.note =
+                                Some(t_with("chattools.economy.gacha.sharedIn", &[("channel", Arg::Str(&name))]));
+                            show.shared_in = Some(name);
+                        }
+                        Err(err) => show.note = Some(err.message),
+                    }
+                }
+                cx.notify();
+            },
+        );
+        cx.notify();
+    }
+
+    fn save_image(&mut self, cx: &mut Context<Self>) {
+        let Some(show) = &self.show else { return };
+        let cards = crate::core::gacha_share::cards_of_pull(&show.pull, &show.banner);
+        let pull_id = show.pull.id.clone();
+        let task = crate::ui::gacha_share::save_image(&cards, &self.facts().my_name, cx);
+        cx.spawn(async move |this, cx| {
+            if let Some(why) = task.await {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(show) = this.show.as_mut().filter(|s| s.pull.id == pull_id) {
+                        show.note = Some(why);
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     pub(super) fn skip_show(&mut self, cx: &mut Context<Self>) {
