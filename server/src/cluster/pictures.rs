@@ -1,4 +1,4 @@
-//! A split instance's server pictures (icons, emoji, webhooks' pictures)
+//! A split instance's server pictures (icons, banners, emoji, webhooks' pictures)
 //! live with their server, so they're kept in its region (docs/regions.md).
 //!
 //! Uploads arrive at the directory, as every upload does, and are served
@@ -506,28 +506,41 @@ fn unused(used: Result<bool>) -> bool {
     }
 }
 
-/// Whether the server links to the file: its icon, an emoji, a webhook's
-/// picture or a message's attachment.
+/// Whether the server links to the file: its icon or banner, an emoji, a
+/// profile item's picture or one of an effect's own pictures, a webhook's
+/// picture, a gacha banner's art or a message's attachment.
 pub(crate) async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
-    let used = async {
-        let sdb = app.servers.get(server_id).await?;
-        let conn = sdb.read()?;
-        // Ids are letters and digits only, so nothing in one is a wildcard.
-        let link = format!("%/media/{media_id}");
-        crate::db::query_one(
-            &conn,
-            "SELECT 1 FROM server WHERE icon_url LIKE ?1
-             UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
-             UNION ALL SELECT 1 FROM profile_items WHERE picture_url LIKE ?1
-             UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1
-             UNION ALL SELECT 1 FROM attachments WHERE media_id = ?2 LIMIT 1",
-            (link.as_str(), media_id),
-            |r| r.get::<i64>(0),
-        )
-        .await
+    let sdb = app.servers.get(server_id).await?;
+    let conn = sdb.read()?;
+    // Ids are letters and digits only, so nothing in one is a wildcard.
+    let link = format!("%/media/{media_id}");
+    // An effect's pictures are a JSON list, so its link ends at a quote.
+    let in_json = format!("%/media/{media_id}\"%");
+    let found = crate::db::query_one(
+        &conn,
+        "SELECT 1 FROM server WHERE icon_url LIKE ?1 OR banner_url LIKE ?1
+         UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
+         UNION ALL SELECT 1 FROM profile_items WHERE picture_url LIKE ?1 OR pictures LIKE ?3
+         UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1
+         UNION ALL SELECT 1 FROM attachments WHERE media_id = ?2 LIMIT 1",
+        (link.as_str(), media_id, in_json.as_str()),
+        |r| r.get::<i64>(0),
+    )
+    .await?;
+    if found.is_some() {
+        return Ok(true);
     }
-    .await;
-    used.map(|found| found.is_some())
+    // A gacha banner is kept whole, as a protobuf, so its art is read out of it.
+    let banners = crate::db::query_all(&conn, "SELECT banner FROM gacha_banners", (), |r| r.get::<Vec<u8>>(0)).await?;
+    let tail = format!("/media/{media_id}");
+    for bytes in banners {
+        let banner = <pb::GachaBanner as prost::Message>::decode(bytes.as_slice())
+            .map_err(|_| Error::internal("a gacha banner couldn't be read"))?;
+        if banner.art_url.ends_with(&tail) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Fetches a picture this shard lost (its disk was replaced) back from its
