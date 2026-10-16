@@ -74,7 +74,7 @@ jobs:
         with:
           toolchain: 1.99.0 # rust-toolchain.toml
       # The version is pinned so a new cargo-packager can't change the installers by surprise.
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
         with:
           tool: cargo-packager@0.11.8
       # libvpx (VP8 for cameras) is linked in statically. On Linux and macOS
@@ -131,7 +131,7 @@ jobs:
             macOS) test -f "dist/$base.dmg" && test -f "dist/$base.app.zip" ;;
             Windows) test -f "dist/$base-setup.exe" ;;
           esac
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuwa-desktop-${{ matrix.file }}
           path: desktop/dist/*
