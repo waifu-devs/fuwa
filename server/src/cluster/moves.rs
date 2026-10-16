@@ -18,8 +18,14 @@
 //! A move that fails before 3 is undone: the new shard lets go of whatever it
 //! took, and the old one takes changes again. Shards learn how moves ended
 //! that they missed (the directory restarting, say) when they register.
+//!
+//! A shard that's stopping (a deploy) has every server it holds moved this
+//! way to the other shards in its region first ([`hand_off`]). Those moves
+//! keep calls: the region's shards share its media parts, so the old shard
+//! sends the places in the server's calls along with its files instead of
+//! hanging anyone up, and the new one carries on with them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -65,7 +71,23 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
     if here == shards.region(region) {
         return Err(Error::FailedPrecondition("that server is already in that region".into()));
     }
-    let (to, mut to_client) = shards.emptiest_in(region, &app.index.shard_sizes())?;
+    let (to, to_client) = shards.emptiest_in(region, &app.index.shard_sizes())?;
+    move_to(app, shards, &server_id, &from, &to, to_client, false).await
+}
+
+/// Moves a server from shard `from` to shard `to`. With `keep_calls` (the two
+/// are in the same region, so share media parts) its calls carry on: the
+/// places in them go along instead of being hung up.
+async fn move_to(
+    app: &Arc<App>,
+    shards: &Shards,
+    server_id: &str,
+    from: &str,
+    to: &str,
+    mut to_client: super::ShardClient,
+    keep_calls: bool,
+) -> Result<pb::Server> {
+    let (server_id, from, to) = (server_id.to_string(), from.to_string(), to.to_string());
     let from_url = shards
         .url_if_up(&from)
         .ok_or_else(|| Error::Unavailable(format!("shard {from}, which holds that server, is down; try again soon")))?;
@@ -84,9 +106,9 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
         shards.moves.write().unwrap_or_else(|p| p.into_inner()).remove(&server_id);
         return Err(err);
     }
-    tracing::info!(%from, %to, region = %shards.region(region), "moving a server");
+    tracing::info!(%from, %to, region = %shards.region_of(&to).unwrap_or_default(), keep_calls, "moving a server");
 
-    let request = cpb::AdoptServerRequest { server_id: server_id.clone(), from_url };
+    let request = cpb::AdoptServerRequest { server_id: server_id.clone(), from_url, keep_calls };
     let entry = match to_client.adopt_server(request).await.map(|r| r.into_inner().entry) {
         Ok(Some(entry)) => entry,
         failed => {
@@ -95,7 +117,7 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
                 _ => Error::internal("the new shard didn't say what it took"),
             };
             tracing::warn!(%from, %to, "a move failed; undoing it");
-            undo(app, shards, &moved).await;
+            undo(app, shards, &moved, keep_calls).await;
             return Err(err);
         }
     };
@@ -103,14 +125,14 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
     moved.committed = true;
     if let Err(err) = node.save_move(&moved).await {
         tracing::warn!("couldn't place a moved server; undoing the move");
-        undo(app, shards, &moved).await;
+        undo(app, shards, &moved, keep_calls).await;
         return Err(err);
     }
     let server = entry.server.clone().ok_or_else(|| Error::internal("the new shard sent no server"))?;
     shards.moves.write().unwrap_or_else(|p| p.into_inner()).insert(server_id.clone(), (moved.clone(), true));
     app.index.insert(server.clone(), entry.member_ids, entry.invite_codes, Some(&to));
 
-    let request = cpb::ReleaseServerRequest { server_id: server_id.clone(), keep: false };
+    let request = cpb::ReleaseServerRequest { server_id: server_id.clone(), keep: false, keep_calls };
     let released = super::ride_out(app.config.cluster.ride_out, || {
         let (mut client, request) = (from_client.clone(), request.clone());
         async move { client.release_server(request).await }
@@ -121,7 +143,7 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
         tracing::warn!(%from, "the old shard hasn't let go of a moved server yet");
     }
     // The new shard replicates it from now on.
-    let request = cpb::ReleaseServerRequest { server_id: server_id.clone(), keep: true };
+    let request = cpb::ReleaseServerRequest { server_id: server_id.clone(), keep: true, keep_calls };
     let kept = super::ride_out(app.config.cluster.ride_out, || {
         let (mut client, request) = (to_client.clone(), request.clone());
         async move { client.release_server(request).await }
@@ -138,13 +160,64 @@ async fn run(app: &Arc<App>, server_id: &str, region: &str) -> Result<pb::Server
     Ok(server)
 }
 
+/// How many of a stopping shard's servers move at once.
+const HAND_OFF_AT_ONCE: usize = 4;
+
+/// Moves every server off a shard that's stopping, each to another shard up
+/// in its region (see [`Shards::successor`]), keeping their calls. Returns
+/// how many moved and how many couldn't. Runs to the end even if the shard
+/// stops waiting.
+pub async fn hand_off(app: &Arc<App>, shard: &str) -> Result<(u32, u32)> {
+    let app = app.clone();
+    let shard = shard.to_string();
+    tokio::spawn(async move { hand_off_all(&app, &shard).await })
+        .await
+        .map_err(|err| Error::internal(format!("a hand-off stopped: {err}")))?
+}
+
+async fn hand_off_all(app: &Arc<App>, shard: &str) -> Result<(u32, u32)> {
+    use futures::StreamExt;
+    let Link::Directory(shards) = &app.link else {
+        return Err(Error::FailedPrecondition("this instance keeps every server in one place".into()));
+    };
+    shards.leave(shard);
+    let servers = app.index.by_shard(&[]).remove(shard).unwrap_or_default();
+    if servers.is_empty() {
+        return Ok((0, 0));
+    }
+    if shards.successor(shard, &HashMap::new()).is_none() {
+        tracing::info!(%shard, servers = servers.len(), "a shard is stopping with no other shard up in its region");
+        return Ok((0, servers.len() as u32));
+    }
+    tracing::info!(%shard, servers = servers.len(), "a shard is stopping; handing its servers over");
+    let moved: Vec<bool> = futures::stream::iter(servers)
+        .map(|server_id| async move {
+            // Chosen for each server, so they spread over the shards there are.
+            let Some((to, client)) = shards.successor(shard, &app.index.shard_sizes()) else { return false };
+            match move_to(app, shards, &server_id, shard, &to, client, true).await {
+                Ok(_) => true,
+                Err(_) => {
+                    tracing::warn!(%shard, %to, "couldn't hand a server over; it waits for its shard");
+                    false
+                }
+            }
+        })
+        .buffer_unordered(HAND_OFF_AT_ONCE)
+        .collect()
+        .await;
+    let done = moved.iter().filter(|done| **done).count() as u32;
+    let left = moved.len() as u32 - done;
+    tracing::info!(%shard, moved = done, left, "handed a stopping shard's servers over");
+    Ok((done, left))
+}
+
 /// Puts things back after a move that didn't get as far as placing the
 /// server on its new shard. Whatever can't be reached now is set right when
 /// it registers.
-async fn undo(app: &App, shards: &Shards, moved: &Move) {
+async fn undo(app: &App, shards: &Shards, moved: &Move, keep_calls: bool) {
     let release = |shard: &str, keep: bool| {
         let client = shards.client(shard);
-        let request = cpb::ReleaseServerRequest { server_id: moved.server_id.clone(), keep };
+        let request = cpb::ReleaseServerRequest { server_id: moved.server_id.clone(), keep, keep_calls };
         async move {
             match client {
                 Ok(mut client) => client.release_server(request).await.is_ok(),
@@ -236,16 +309,34 @@ pub fn sort_registration(
 // ─────────────── The old shard ───────────────
 
 /// Sends a server's files to the shard taking it, after stopping it taking
-/// changes. It stays that way until [`release`].
-pub fn send(app: Arc<App>, server_id: String) -> mpsc::Receiver<Result<cpb::SendServerResponse, Status>> {
+/// changes. It stays that way until [`release`]. With `keep_calls` the
+/// places in its calls go first, taken from this shard without hanging
+/// anyone up: the new shard keeps them on the same media parts.
+pub fn send(
+    app: Arc<App>,
+    server_id: String,
+    keep_calls: bool,
+) -> mpsc::Receiver<Result<cpb::SendServerResponse, Status>> {
     let (tx, rx) = mpsc::channel(4);
     tokio::spawn(async move {
         let sent = async {
             let sdb = app.servers.get(&server_id).await?;
             let id = sdb.id.clone();
             app.servers.freeze(&id, true);
-            crate::api::hang_up_server(&app, &id).await;
+            let places = match keep_calls {
+                true => crate::api::carry_calls(&app, &id),
+                false => {
+                    crate::api::hang_up_server(&app, &id).await;
+                    Vec::new()
+                }
+            };
             app.recordings.finish_server(&id).await;
+            if !places.is_empty() {
+                let carried = cpb::SendServerResponse { places, ..Default::default() };
+                if tx.send(Ok(carried)).await.is_err() {
+                    return Ok(());
+                }
+            }
             // Nothing writes while its files are read, and the log is folded
             // in, so the file alone is the whole server.
             let _alone = sdb.db().alone().await;
@@ -295,10 +386,10 @@ async fn send_file(
         let read = file.read(&mut buffer).await?;
         let piece = if read == 0 {
             let sha256 = std::mem::take(&mut hash).finalize().to_vec();
-            cpb::SendServerResponse { path: name.to_string(), data: Vec::new(), sha256 }
+            cpb::SendServerResponse { path: name.to_string(), sha256, ..Default::default() }
         } else {
             hash.update(&buffer[..read]);
-            cpb::SendServerResponse { path: name.to_string(), data: buffer[..read].to_vec(), sha256: Vec::new() }
+            cpb::SendServerResponse { path: name.to_string(), data: buffer[..read].to_vec(), ..Default::default() }
         };
         if tx.send(Ok(piece)).await.is_err() {
             return Ok(false);
@@ -312,8 +403,9 @@ async fn send_file(
 /// Ends a move for this shard. With `keep` the server carries on here: the
 /// old shard takes changes again (the move didn't happen), and the new one
 /// starts replicating it (it did), with its recordings. Without, this shard
-/// lets go of it, deleting its files and recordings here.
-pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
+/// lets go of it, deleting its files and recordings here, and hanging up its
+/// calls unless `keep_calls` (they carry on where the server is now).
+pub async fn release(app: &App, server_id: &str, keep: bool, keep_calls: bool) -> Result<()> {
     let id = parse_id("server_id", server_id)?;
     if keep {
         if app.servers.freeze(&id, false) {
@@ -347,7 +439,10 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
         return Ok(());
     }
     app.servers.freeze(&id, true);
-    crate::api::hang_up_server(app, &id).await;
+    match keep_calls {
+        true => drop(crate::api::carry_calls(app, &id)),
+        false => crate::api::hang_up_server(app, &id).await,
+    }
     app.recordings.finish_server(&id).await;
     app.servers.release(&id).await?;
     remove_dir(&recordings_dir(&app.config.data_path, &id))?;
@@ -360,14 +455,14 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
 /// away, and takes changes again to any frozen for a move that's over.
 pub async fn after_registering(app: &App, answer: &cpb::RegisterShardResponse) {
     for server_id in &answer.moved_away {
-        if release(app, server_id, false).await.is_err() {
+        if release(app, server_id, false, false).await.is_err() {
             tracing::warn!("couldn't let go of a server that moved away");
         }
     }
     for server_id in app.servers.frozen().into_iter().chain(app.servers.unreplicated()) {
         if !answer.moving.contains(&server_id)
             && !answer.moved_away.contains(&server_id)
-            && let Err(_) = release(app, &server_id, true).await
+            && let Err(_) = release(app, &server_id, true, false).await
         {
             tracing::warn!("couldn't carry on with a server after a move");
         }
@@ -377,9 +472,10 @@ pub async fn after_registering(app: &App, answer: &cpb::RegisterShardResponse) {
 // ─────────────── The new shard ───────────────
 
 /// Takes a server from the shard at `from_url`: copies its files and checks
-/// them, puts them in place, opens it and replicates it. Anything left over
-/// from a try that failed is replaced.
-pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cpb::ServerEntry> {
+/// them, puts them in place, opens it and replicates it, and with
+/// `keep_calls` takes the places in its calls. Anything left over from a try
+/// that failed is replaced.
+pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str, keep_calls: bool) -> Result<cpb::ServerEntry> {
     let id = parse_id("server_id", server_id)?;
     if app.servers.holds(&id) {
         return Err(Error::AlreadyExists(format!("server {id} is already on this shard")));
@@ -396,11 +492,12 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cp
     let received = async {
         let key = app.config.cluster.key_value()?;
         let mut from = super::shard_client(from_url, key)?;
-        let stream = from.send_server(cpb::SendServerRequest { server_id: id.clone() }).await?.into_inner();
+        let request = cpb::SendServerRequest { server_id: id.clone(), keep_calls };
+        let stream = from.send_server(request).await?.into_inner();
         receive(stream, &id, &incoming).await
     }
     .await;
-    let names = match received {
+    let (names, places) = match received {
         Ok(names) => names,
         Err(err) => {
             let _ = remove_dir(&incoming);
@@ -429,11 +526,13 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cp
     .await;
     match opened {
         Ok(entry) => {
-            tracing::info!(files = names.len(), "took over a server from another shard");
+            let calls = places.len();
+            crate::api::take_calls(app, &id, places);
+            tracing::info!(files = names.len(), calls, "took over a server from another shard");
             Ok(entry)
         }
         Err(err) => {
-            if release(app, &id, false).await.is_err() {
+            if release(app, &id, false, keep_calls).await.is_err() {
                 tracing::warn!("couldn't tidy up after a failed move");
             }
             for name in &names {
@@ -445,18 +544,24 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cp
 }
 
 /// Writes what the old shard sends into `incoming`, checking each file.
-/// Returns the files' paths, from the data folder.
+/// Returns the files' paths, from the data folder, and the places in the
+/// server's calls it sent along.
 async fn receive(
     mut stream: tonic::Streaming<cpb::SendServerResponse>,
     id: &str,
     incoming: &Path,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, Vec<cpb::CarriedPlace>)> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
     let mut names = Vec::new();
+    let mut places = Vec::new();
     let mut file: Option<(String, tokio::fs::File, Sha256)> = None;
     while let Some(piece) = stream.message().await.map_err(Error::retried)? {
+        if piece.path.is_empty() && file.is_none() && names.is_empty() {
+            places.extend(piece.places);
+            continue;
+        }
         if !moved_path_ok(&piece.path, id) {
             return Err(Error::internal(format!(
                 "the old shard sent {:?}, which isn't one of the server's files",
@@ -492,7 +597,7 @@ async fn receive(
     if let Some((name, ..)) = file {
         return Err(Error::internal(format!("the old shard stopped partway through {name}")));
     }
-    Ok(names)
+    Ok((names, places))
 }
 
 /// Whether a path the old shard sent is one of this server's files:

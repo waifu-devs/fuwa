@@ -169,9 +169,9 @@ jobs:
           subject-digest: ${{ steps.index.outputs.digest }}
           push-to-registry: true
 
-  # fuwa.chat runs :latest (.railway/railway.ts), and Railway's own check for a new
-  # image can take hours, so tell it now. RAILWAY_TOKEN is the project token for the
-  # "fuwa" project's production environment.
+  # fuwa.chat runs :latest (.railway/railway.ts), and its split parts don't take
+  # Railway's auto updates, so roll it out now. RAILWAY_TOKEN is the project token
+  # for the "fuwa" project's production environment.
   deploy:
     name: Deploy fuwa.chat
     needs: tags
@@ -180,28 +180,19 @@ jobs:
     permissions:
       contents: read
     concurrency: deploy-fuwa-chat
+    # A shard can take a few minutes (handing its servers over, then its volume).
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
-      # Every service the config runs fuwa's image on: `fuwa`, or each part of a split
-      # instance (the directory, the shards, then the gateways); fuwafuwa builds from
-      # the repository itself. --from-source pulls :latest again; a plain redeploy
-      # would rerun the old image.
-      - name: Redeploy
-        run: |
-          services=$(node --experimental-strip-types --input-type=module -e '
-            const { createRailwayContext, project } = await import("railway/iac");
-            const { default: config } = await import("./.railway/railway.ts");
-            const { resources } = await config(createRailwayContext({ environment: "production" }), project);
-            for (const r of resources.flat(Infinity)) {
-              if (r.type === "service" && r.source?.image?.startsWith(`${process.env.IMAGE}:`)) console.log(r.name);
-            }
-          ')
-          for service in $services; do
-            npx --yes @railway/cli@5.63.1 redeploy --service "$service" --from-source --yes
-          done
+      # Every service the config runs fuwa's image on, one part at a time and each up
+      # before the next (.railway/rollout.mjs): media parts, each region's shards in turn
+      # (each handing its servers to the others before it stops), the directory, then
+      # the gateways. fuwafuwa builds from the repository itself.
+      - name: Roll out
+        run: node --experimental-strip-types .railway/rollout.mjs
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

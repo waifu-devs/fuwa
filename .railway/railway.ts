@@ -59,6 +59,13 @@ const MEDIA_HOST_URL = "";
  */
 const DRAIN = 45;
 /**
+ * How long a shard told to stop may spend handing its servers to the other shards in its
+ * region first (FUWA_HANDOFF, in seconds), with their calls and live streams: they carry
+ * on there, so nobody waits while Railway moves its volume to the new deployment (which
+ * has taken minutes). Its draining time is this and a minute more.
+ */
+const HANDOFF = 240;
+/**
  * Where @fuwafuwa posts the feedback it's given, as "<server id>/<channel id>" on
  * fuwa.chat, in a server it's been added to. Empty, it isn't deployed at all.
  */
@@ -83,12 +90,16 @@ const FEEDBACK_CHANNEL = "01M3YTPEZBVSPZVWGFZ5AGGE6R/01M4ARF2YAS9698KE30AKZ2DG1"
  * servers wider, but never lower it: removing a shard here deletes its volume, and the
  * servers on it.
  *
- * Deploys don't interrupt anyone. Gateways have no volume, so Railway starts the new ones,
- * waits until they're healthy (reaching the directory), then stops the old ones; clients'
- * live streams move over and carry on from where they were. The directory and shards each
- * have a volume, so Railway has to stop the old process before starting the new one; for
- * those few seconds the gateways hold calls (up to 30 seconds) and keep live streams open,
- * then carry on once the part is back. See "Deploys" in the README.
+ * Deploys don't interrupt anyone. The publish workflow rolls the new image out one part at
+ * a time (.railway/rollout.mjs): media parts, then each region's shards in turn, the
+ * directory, the gateways last, each up before the next starts. Gateways and media parts
+ * have no volume, so Railway starts the new ones, waits until they're healthy, then stops
+ * the old ones; clients' live streams and calls move over. The directory and shards each
+ * have a volume, so Railway has to stop the old process before starting the new one, and
+ * moving the volume can take minutes. A shard told to stop first hands its servers to the
+ * other shards in its region (HANDOFF), calls and all, so only the directory restarts in
+ * place: the gateways hold calls for it (up to 30 seconds), and nothing else needs it. So
+ * every region keeps at least two shards. See "Restarts and deploys" in the README.
  */
 const SPLIT: { gateways: number; shards: number } | null = { gateways: 2, shards: 2 };
 
@@ -115,19 +126,20 @@ const HOME = { id: "us-east", name: "US East" };
  * Bucket regions: sjc, iad, ams, sin.
  */
 const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [
-  // Juan 2026-10-03: "deploy the eu region to fuwa.chat", "also the us-west".
-  { id: "eu", name: "Europe", railway: "europe-west4-drams3a", bucket: "ams", shards: 1 },
-  { id: "us-west", name: "US West", railway: "us-west2", bucket: "sjc", shards: 1 },
+  // Juan 2026-10-03: "deploy the eu region to fuwa.chat", "also the us-west". Two shards
+  // each since 2026-10-16, so a deploy hands one's servers to the other (HANDOFF).
+  { id: "eu", name: "Europe", railway: "europe-west4-drams3a", bucket: "ams", shards: 2 },
+  { id: "us-west", name: "US West", railway: "us-west2", bucket: "sjc", shards: 2 },
 ];
 
 export default defineRailway((ctx) => {
   // The image every merge to master publishes; the publish workflow redeploys every
-  // part onto it right away. Auto updates are the fallback: Railway takes a new image
-  // as soon as it notices one, which can take a few hours.
+  // part onto it right away. One process takes Railway's auto updates as the fallback (a
+  // new image as soon as Railway notices one, which can take a few hours). A split
+  // instance doesn't: Railway would update its parts all at once, whenever it noticed,
+  // instead of one at a time in order (.railway/rollout.mjs).
   const fuwaImage = () =>
-    image("ghcr.io/waifu-devs/fuwa:latest", {
-      autoUpdates: { type: "patch", schedule: ANYTIME },
-    });
+    image("ghcr.io/waifu-devs/fuwa:latest", SPLIT ? {} : { autoUpdates: { type: "patch", schedule: ANYTIME } });
 
   // node.db (accounts, sessions, instance settings) and, while it's one process, one
   // file per community server.
@@ -309,10 +321,11 @@ export default defineRailway((ctx) => {
       healthcheck: "/healthz",
       regions: { [REGION]: 1 },
       volumeMounts: { "/data": shardData },
-      deploy: { drainingSeconds: DRAIN },
+      deploy: { drainingSeconds: HANDOFF + 60 },
       env: {
         ...part("shard"),
         ...label(HOME),
+        FUWA_HANDOFF: String(HANDOFF),
         // Never renamed: the directory knows which servers are on which shard by it.
         FUWA_SHARD_ID: `shard-${i + 1}`,
         FUWA_DIRECTORY_URL: internalUrl(directory.name),
@@ -363,10 +376,11 @@ export default defineRailway((ctx) => {
         healthcheck: "/healthz",
         regions: { [region.railway]: 1 },
         volumeMounts: { "/data": shardData },
-        deploy: { drainingSeconds: DRAIN },
+        deploy: { drainingSeconds: HANDOFF + 60 },
         env: {
           ...part("shard"),
           ...label(region),
+          FUWA_HANDOFF: String(HANDOFF),
           FUWA_SHARD_ID: `${region.id}-shard-${i + 1}`,
           FUWA_DIRECTORY_URL: internalUrl(directory.name),
           FUWA_INTERNAL_URL: internalUrl(name),

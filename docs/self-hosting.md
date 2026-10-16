@@ -193,8 +193,13 @@ with `FUWA_HOST=::`.
 A service with a volume can't run its old and new deployments side by side, so
 with one process each deploy drops connections for a few seconds; the app
 reconnects and catches up by itself. Split, only the directory and shards have
-volumes, and the gateways hold calls and live streams while those restart, so
-deploys go unnoticed (see [Restarts and deploys](../README.md#restarts-and-deploys)).
+volumes. A shard told to stop first hands its servers, calls included, to the
+other shards in its region (`FUWA_HANDOFF`, 240 seconds at most by default, so
+give it a stop timeout a minute longer: Railway's draining time, `docker stop
+-t 300`, `terminationGracePeriodSeconds`), and the gateways hold calls while
+the directory restarts, so deploys go unnoticed as long as each region has two
+shards or more and you update one part at a time (see
+[Restarts and deploys](../README.md#restarts-and-deploys)).
 
 ## After it's up
 

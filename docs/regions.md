@@ -107,6 +107,12 @@ servers the move is a pause of a second or two. People in the server's calls
 are disconnected and rejoin on the new region's media part, as after a
 restart. A move that fails before step 3 leaves the server where it was.
 
+The same steps move a stopping shard's servers to the other shards in its
+region, before a deploy restarts it (see
+[Restarts and deploys](../README.md#restarts-and-deploys)). Those moves stay in
+the region, so on its media parts: the places in the server's calls go along
+to the new shard instead of being hung up, and nobody notices the call move.
+
 ## What stays in the home region
 
 Some things belong to a person or to the instance, not to one server, and
