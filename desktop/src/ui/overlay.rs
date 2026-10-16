@@ -295,6 +295,9 @@ impl FuwaApp {
         if let Dialog::PollVoters { key, server, channel, message } = &dialog {
             return Some(self.render_voters(key, server, channel, message, cx));
         }
+        if let Dialog::Reactions { .. } = &dialog {
+            return Some(self.render_reactions(cx));
+        }
         let busy = self.dialog_busy;
         let field = || Input::new(&self.dialog_input).large();
         let sso_label = match &dialog {
@@ -355,6 +358,7 @@ impl FuwaApp {
             | Dialog::Safety { .. }
             | Dialog::Poll { .. }
             | Dialog::PollVoters { .. }
+            | Dialog::Reactions { .. }
             | Dialog::Picture { .. }
             | Dialog::ShareScreen
             | Dialog::Leaving { .. }
@@ -432,6 +436,7 @@ impl FuwaApp {
             Dialog::AllowGame { .. } => "game",
             Dialog::Poll { .. } => "poll",
             Dialog::PollVoters { .. } => "voters",
+            Dialog::Reactions { .. } => "reactions",
             Dialog::Picture { .. } => "picture",
             Dialog::Apply { .. } => "apply",
             Dialog::Application { .. } => "application",

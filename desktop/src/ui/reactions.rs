@@ -2,7 +2,8 @@
 //! with its count (lit when one of them is yours) that adds or takes off
 //! your reaction, who reacted when pointed at, and a button at the end that
 //! opens the emoji picker by the pointer. Chips spring in and out and their
-//! counts roll; with reduced motion they just change.
+//! counts roll; with reduced motion they just change. A message's menu opens
+//! "See who reacted", everyone an emoji at a time.
 //!
 //! In a server's channels the instance counts them (`core/reactions.rs`);
 //! in direct messages and secure channels this device tallies them and knows
@@ -25,11 +26,12 @@ use crate::core::reactions::{EmojiKey, Reacted};
 use crate::core::store::InstanceState;
 use crate::core::vault::{EmojiRef, ReactionMark};
 use crate::pb;
-use crate::ui::app::{FuwaApp, Target};
+use crate::ui::app::{Dialog, FuwaApp, Target};
 use crate::ui::emoji::{Catalog, Choice, InColor as _};
 use crate::ui::motion;
+use crate::ui::polls::{dialog_frame, dialog_head};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{icon, pal};
+use crate::ui::widgets::{avatar, card, icon, pal};
 
 /// What a right-click menu offers first, before you've reacted with much.
 const QUICK: [&str; 6] = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
@@ -50,6 +52,8 @@ pub struct Chip {
     /// In an encrypted place: who has it on, by name, the earliest first.
     /// None where the instance is asked.
     pub who: Option<Vec<String>>,
+    /// In an encrypted place: their ids, in the same order (empty where the instance is asked).
+    pub people: Vec<String>,
 }
 
 impl Chip {
@@ -112,6 +116,7 @@ impl ReactBits {
                     count: r.count,
                     me: r.me,
                     who: None,
+                    people: Vec::new(),
                 })
             })
             .collect();
@@ -139,13 +144,21 @@ impl ReactBits {
             .into_iter()
             .map(|r| {
                 let key = EmojiKey::of(&r);
-                let who = crate::core::reactions::reactors(marks, &key)
-                    .iter()
-                    .map(|u| if u == me { t("chattools.reactions.you") } else { name_of(u) })
-                    .collect();
+                let people = crate::core::reactions::reactors(marks, &key);
+                let who =
+                    people.iter().map(|u| if u == me { t("chattools.reactions.you") } else { name_of(u) }).collect();
                 // A server emoji draws the picture its sender carried.
                 let url = (!r.emoji_id.is_empty()).then(|| r.emoji_url.clone());
-                Chip { key, name: r.emoji_name, animated: r.animated, url, count: r.count, me: r.me, who: Some(who) }
+                Chip {
+                    key,
+                    name: r.emoji_name,
+                    animated: r.animated,
+                    url,
+                    count: r.count,
+                    me: r.me,
+                    who: Some(who),
+                    people,
+                }
             })
             .collect();
         Self { chips, can_add, can_clear: false, standard_only: false }
@@ -711,6 +724,430 @@ impl FuwaApp {
     }
 }
 
+// ───────────────────────── Everyone who reacted ─────────────────────────
+
+/// "See who reacted", while it's open (the web's `ReactionsDialog`): a tab
+/// per emoji and who reacted with the one shown, a page at a time, the
+/// earliest first. Moderators can take one emoji's reactions off from here.
+pub struct ReactorsView {
+    msg: String,
+    /// The emoji shown (its key's id); the first one when it's gone.
+    chosen: String,
+    /// Who reacted with each emoji, as the instance answered (servers only;
+    /// encrypted places know without asking).
+    pages: HashMap<String, Page>,
+    /// Where each tab sits (left, top, width, height, from the first one's
+    /// corner), for the active pill to glide between.
+    spots: Vec<(f32, f32, f32, f32)>,
+    /// Which time it was opened, so its pill starts on its tab each time.
+    opened: u64,
+    /// "Remove all" on its way, and why it didn't work.
+    clearing: bool,
+    clear_error: Option<String>,
+}
+
+#[derive(Default)]
+struct Page {
+    users: Vec<pb::User>,
+    more: bool,
+    loading: bool,
+    /// The count it was loaded at: a new count loads it again, as the web's does.
+    count: Option<u32>,
+    failed: bool,
+}
+
+/// The loading circle, turning.
+fn spinner(size: f32, id: &'static str) -> AnyElement {
+    use gpui_kit::AnimationExt as _;
+    icon("loader-circle")
+        .size(px(size))
+        .with_animation(id, gpui_kit::Animation::new(Duration::from_millis(900)).repeat(), |el, t| {
+            el.rotate(gpui_kit::percentage(t))
+        })
+        .into_any_element()
+}
+
+/// The chip a tab shows: the one picked, or the first when that one's gone.
+fn shown<'a>(chips: &'a [Chip], chosen: &str) -> Option<&'a Chip> {
+    chips.iter().find(|c| c.key.id() == chosen).or(chips.first())
+}
+
+/// A page added to what's shown: the first one replaces it, later ones go
+/// after it, leaving out anyone already there.
+fn add_page(users: &mut Vec<pb::User>, page: Vec<pb::User>, first: bool) {
+    if first {
+        users.clear();
+    }
+    for user in page {
+        if !users.iter().any(|u| u.id == user.id) {
+            users.push(user);
+        }
+    }
+}
+
+impl FuwaApp {
+    /// Opens who reacted to a message in the open place, on `emoji` or the first one.
+    pub(crate) fn open_reactions(
+        &mut self,
+        msg: String,
+        emoji: Option<EmojiKey>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(bits) = self.message_reactions(&msg) else { return };
+        let Some(first) = bits.chips.first() else { return };
+        let chosen = emoji
+            .map(|e| e.id())
+            .filter(|id| bits.chips.iter().any(|c| c.key.id() == *id))
+            .unwrap_or_else(|| first.key.id());
+        static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let opened = OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.close_context_menu(cx);
+        self.open_dialog(Dialog::Reactions { msg: msg.clone() }, window, cx);
+        self.reactions_open = Some(ReactorsView {
+            msg,
+            chosen,
+            pages: HashMap::new(),
+            spots: Vec::new(),
+            opened,
+            clearing: false,
+            clear_error: None,
+        });
+        cx.notify();
+    }
+
+    /// Asks the instance who reacted with a chip's emoji: the first page
+    /// (unless it's loaded at this count), or with `more` the next.
+    fn load_reactions_page(&mut self, chip: &Chip, more: bool, cx: &mut Context<Self>) {
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return };
+        let Some(view) = self.reactions_open.as_mut() else { return };
+        let id = chip.key.id();
+        let page = view.pages.entry(id.clone()).or_default();
+        if page.loading || (!more && page.count == Some(chip.count)) {
+            return;
+        }
+        page.loading = true;
+        page.failed = false;
+        let after = if more { page.users.last().map(|u| u.id.clone()).unwrap_or_default() } else { String::new() };
+        let (core, msg, emoji, count) = (self.core.clone(), view.msg.clone(), chip.key.clone(), chip.count);
+        let of = msg.clone();
+        self.run(
+            cx,
+            async move { core.list_reactors(&key, &server, &channel, &msg, &emoji, &after).await },
+            move |this, result, cx| {
+                let view = this.reactions_open.as_mut().filter(|v| v.msg == of);
+                let Some(page) = view.and_then(|v| v.pages.get_mut(&id)) else { return };
+                page.loading = false;
+                if !more {
+                    page.count = Some(count);
+                }
+                match result {
+                    Ok(found) => {
+                        add_page(&mut page.users, found.users, !more);
+                        page.more = found.has_more;
+                    }
+                    Err(_) => page.failed = true,
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    /// "Remove all 👍" in the dialog (Manage Messages).
+    fn clear_from_reactions(&mut self, emoji: EmojiKey, cx: &mut Context<Self>) {
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return };
+        let Some(view) = self.reactions_open.as_mut().filter(|v| !v.clearing) else { return };
+        view.clearing = true;
+        view.clear_error = None;
+        let (core, msg) = (self.core.clone(), view.msg.clone());
+        let of = msg.clone();
+        self.run(
+            cx,
+            async move { core.clear_reactions(&key, &server, &channel, &msg, Some(&emoji)).await },
+            move |this, result, cx| {
+                if let Some(view) = this.reactions_open.as_mut().filter(|v| v.msg == of) {
+                    view.clearing = false;
+                    view.clear_error = result.as_ref().err().map(|err| err.message.clone());
+                }
+                if result.is_ok() {
+                    this.toast("check", t("chattools.reactions.cleared"), String::new(), None, None, cx);
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    pub(crate) fn render_reactions(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let Some(msg) = self.reactions_open.as_ref().map(|v| v.msg.clone()) else { return div().into_any_element() };
+        let bits = self.message_reactions(&msg).filter(|b| !b.chips.is_empty());
+        let chosen = self.reactions_open.as_ref().map(|v| v.chosen.clone()).unwrap_or_default();
+        let Some((bits, current)) = bits.and_then(|b| shown(&b.chips, &chosen).cloned().map(|c| (b, c))) else {
+            // Every reaction gone (a moderator took the last ones off), or the message: nothing left to show.
+            let this = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                let _ = this.update(cx, |this, cx| {
+                    if matches!(this.dialog, Some(Dialog::Reactions { .. })) {
+                        this.close_dialog(cx);
+                    }
+                });
+            });
+            return div().into_any_element();
+        };
+        let encrypted = current.who.is_some();
+        if !encrypted {
+            self.load_reactions_page(&current, false, cx);
+        }
+        let Some(view) = self.reactions_open.as_ref() else { return div().into_any_element() };
+        let (key, server) = match self.target() {
+            Some(Target::Channel { key, server, .. } | Target::Secure { key, server, .. }) => (key, Some(server)),
+            Some(Target::Dm { key, .. }) => (key, None),
+            None => return div().into_any_element(),
+        };
+
+        // A tab per emoji; the active one's pill glides between them (the
+        // web's `layoutId`) once they're measured, and until then the
+        // active tab wears it itself.
+        let at = bits.chips.iter().position(|c| c.key.id() == current.key.id());
+        let spot = at.and_then(|n| view.spots.get(n).copied());
+        let measure = cx.entity().downgrade();
+        let mut tabs = div().flex().flex_wrap().gap(px(6.0)).on_children_prepainted(move |bounds, window, cx| {
+            let first = bounds.first().map_or(gpui_kit::point(px(0.0), px(0.0)), |b| b.origin);
+            let spots: Vec<_> = bounds
+                .iter()
+                .map(|b| {
+                    let at = b.origin - first;
+                    (f32::from(at.x), f32::from(at.y), f32::from(b.size.width), f32::from(b.size.height))
+                })
+                .collect();
+            let _ = measure.update(cx, |this, _| {
+                if let Some(v) = this.reactions_open.as_mut().filter(|v| v.spots != spots) {
+                    v.spots = spots;
+                    window.request_animation_frame();
+                }
+            });
+        });
+        for c in &bits.chips {
+            let on = c.key.id() == current.key.id();
+            let id = c.key.id();
+            let hover = p.foreground;
+            tabs = tabs.child(
+                div()
+                    .id(SharedString::from(format!("reactions-tab|{id}")))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .px(px(12.0))
+                    .py(px(6.0))
+                    .rounded_full()
+                    .border_1()
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .when(on, |el| {
+                        el.border_color(gpui_kit::transparent_black())
+                            .text_color(p.primary_foreground)
+                            .when(spot.is_none(), |el| el.bg(p.primary))
+                    })
+                    .when(!on, |el| {
+                        el.border_color(p.border).text_color(p.muted_foreground).hover(move |s| s.text_color(hover))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(v) = this.reactions_open.as_mut() {
+                            v.chosen = id.clone();
+                            v.clear_error = None;
+                        }
+                        cx.notify();
+                    }))
+                    .child(glyph(c, 15.0))
+                    .child(div().opacity(0.8).child(crate::core::i18n::number(i64::from(c.count)))),
+            );
+        }
+        let glider = spot.map(|(x, y, w, h)| {
+            let key = format!("reactions-glide|{msg}|{}", view.opened);
+            let pill = motion::glide(
+                div().absolute().left_0().top_0().h(px(h)).rounded_full().bg(p.primary),
+                format!("{key}|w"),
+                w,
+                cx,
+                |el, w| el.w(px(w)),
+            );
+            let pill =
+                motion::glide(div().absolute().left_0().top_0().child(pill), format!("{key}|y"), y, cx, |el, y| {
+                    el.top(px(y))
+                });
+            motion::glide(div().absolute().left_0().top_0().child(pill), format!("{key}|x"), x, cx, |el, x| {
+                el.left(px(x))
+            })
+        });
+        let tabs = div().relative().children(glider).child(tabs);
+
+        // Who reacted with the one shown.
+        let page = view.pages.get(&current.key.id());
+        let users: Vec<pb::User> = if encrypted {
+            self.core.shared.read(|s| {
+                let i = s.instance(&key);
+                current
+                    .people
+                    .iter()
+                    .map(|id| {
+                        i.and_then(|i| i.users.get(id).cloned())
+                            .unwrap_or_else(|| pb::User { id: id.clone(), ..Default::default() })
+                    })
+                    .collect()
+            })
+        } else {
+            page.map(|p| p.users.clone()).unwrap_or_default()
+        };
+        let failed = !encrypted && page.is_some_and(|p| p.failed);
+        let waiting = !encrypted && !failed && page.is_none_or(|p| p.count.is_none());
+        let more = !encrypted && page.is_some_and(|p| p.more && !p.loading);
+        let loading_more = !encrypted && page.is_some_and(|p| p.loading && p.count.is_some());
+        let names: Vec<String> = self.core.shared.read(|s| {
+            let i = s.instance(&key);
+            users
+                .iter()
+                .map(|u| match i {
+                    Some(i) if i.users.contains_key(&u.id) => i.display_name(server.as_deref(), &u.id),
+                    _ if !u.username.is_empty() => crate::core::store::user_name(u),
+                    _ => "Someone".to_owned(),
+                })
+                .collect()
+        });
+        let shown_key = current.key.id();
+        let body: AnyElement = if failed {
+            div().text_sm().text_color(p.destructive).child(t("chattools.reactions.failed")).into_any_element()
+        } else if waiting {
+            div()
+                .py(px(24.0))
+                .flex()
+                .justify_center()
+                .text_color(p.muted_foreground)
+                .child(spinner(20.0, "reactions-loading"))
+                .into_any_element()
+        } else {
+            let mut list =
+                div().id("reactions-list").max_h(px(320.0)).overflow_y_scroll().flex().flex_col().gap(px(4.0));
+            for (n, (user, name)) in users.iter().zip(names).enumerate() {
+                list = list.child(motion::rise(
+                    div()
+                        .id(SharedString::from(format!("reactor|{}", user.id)))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .px(px(8.0))
+                        .py(px(6.0))
+                        .rounded(corner(12.0))
+                        .child(avatar(Some(user), 32.0, &p))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .child(name),
+                        ),
+                    SharedString::from(format!("reactor-in|{shown_key}|{n}")),
+                    Duration::from_millis(25 * n.min(12) as u64),
+                    6.0,
+                ));
+            }
+            if loading_more {
+                list = list.child(
+                    div()
+                        .py(px(8.0))
+                        .flex()
+                        .justify_center()
+                        .text_color(p.muted_foreground)
+                        .child(spinner(16.0, "reactions-more-loading")),
+                );
+            } else if more {
+                let (fg, hover) = (p.primary, alpha(p.primary, 0.1));
+                let chip = current.clone();
+                list = list.child(
+                    div()
+                        .id("reactions-more")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(4.0))
+                        .py(px(8.0))
+                        .rounded(corner(12.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(fg)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(move |this, _, _, cx| this.load_reactions_page(&chip, true, cx)))
+                        .child(icon("plus").size(px(14.0)))
+                        .child(t("chattools.poll.showMore")),
+                );
+            }
+            list.into_any_element()
+        };
+
+        // A moderator's "Remove all 👍".
+        let clear = bits.can_clear.then(|| {
+            let (clearing, error) = (view.clearing, view.clear_error.clone());
+            let label = t_with("chattools.reactions.clearOne", &[("emoji", Arg::Str(&current.label()))]);
+            let (fg, hover) = (p.destructive, alpha(p.destructive, 0.1));
+            let emoji = current.key.clone();
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap(px(8.0))
+                .pt(px(12.0))
+                .border_t_1()
+                .border_color(p.border)
+                .when_some(error, |el, e| {
+                    el.child(div().mr_auto().flex_1().min_w_0().text_xs().text_color(p.destructive).child(e))
+                })
+                .child(
+                    div()
+                        .id("reactions-clear")
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .rounded(corner(12.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(fg)
+                        .when(clearing, |el| el.opacity(0.6))
+                        .when(!clearing, |el| {
+                            el.cursor_pointer().hover(move |s| s.bg(hover)).active(|s| s.scale(0.95)).on_click(
+                                cx.listener(move |this, _, _, cx| this.clear_from_reactions(emoji.clone(), cx)),
+                            )
+                        })
+                        .child(if clearing {
+                            spinner(14.0, "reactions-clearing")
+                        } else {
+                            icon("trash").size(px(14.0)).into_any_element()
+                        })
+                        .child(label),
+                )
+        });
+
+        let panel = card(&p)
+            .w(px(440.0))
+            .p(px(24.0))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(dialog_head("face-slightly-smiling", t("chattools.reactions.title"), String::new(), &p, cx))
+            .child(tabs)
+            .child(body)
+            .children(clear);
+        dialog_frame(panel, "reactions", &p, cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,6 +1161,7 @@ mod tests {
             count,
             me: false,
             who: None,
+            people: Vec::new(),
         }
     }
 
@@ -738,6 +1176,26 @@ mod tests {
         let text = tip_text(&chip("👍", 2), &["Ann".into(), you.clone()]);
         assert!(text.starts_with(&format!("{you}, Ann")), "{text}");
         assert!(text.contains("👍"));
+    }
+
+    #[test]
+    fn the_dialog_shows_the_picked_emoji_or_the_first() {
+        let chips = [chip("👍", 2), chip("🎉", 1)];
+        assert_eq!(shown(&chips, "🎉").map(|c| c.key.emoji.as_str()), Some("🎉"));
+        // Its emoji gone (taken off by a moderator): the first one.
+        assert_eq!(shown(&chips, "😢").map(|c| c.key.emoji.as_str()), Some("👍"));
+        assert!(shown(&[], "👍").is_none());
+    }
+
+    #[test]
+    fn pages_of_who_reacted_add_up_without_repeats() {
+        let user = |id: &str| pb::User { id: id.into(), ..Default::default() };
+        let mut users = vec![user("a")];
+        add_page(&mut users, vec![user("a"), user("b")], false);
+        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        // A new count loads the first page again, in place of what was there.
+        add_page(&mut users, vec![user("c")], true);
+        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["c"]);
     }
 
     #[test]

@@ -168,6 +168,11 @@ pub enum Dialog {
         channel: String,
         message: String,
     },
+    /// Everyone who reacted to a message in the open place, an emoji at a
+    /// time (`reactions.rs`; what's shown is in `reactions_open`).
+    Reactions {
+        msg: String,
+    },
     /// Time out, kick or ban someone, with a reason for the audit log.
     Moderate {
         key: String,
@@ -400,6 +405,8 @@ pub struct FuwaApp {
     pub reacting: Option<crate::ui::reactions::ReactAt>,
     /// Who reacted with what, as last asked of the instance (`ui::reactions`).
     pub reactors: std::collections::HashMap<String, crate::ui::reactions::SeenReactors>,
+    /// "See who reacted", while it's open (`ui::reactions`).
+    pub reactions_open: Option<crate::ui::reactions::ReactorsView>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The activity link the open card asks about following (`ui::presence`).
@@ -784,6 +791,7 @@ impl FuwaApp {
             pins: None,
             reacting: None,
             reactors: Default::default(),
+            reactions_open: None,
             profile: None,
             profile_leaving: None,
             profile_tick: None,
@@ -1862,6 +1870,7 @@ impl FuwaApp {
         }
         self.polls.editor = None;
         self.polls.voters = None;
+        self.reactions_open = None;
         self.profile_leaving = None;
         cx.notify();
     }
@@ -1999,9 +2008,11 @@ impl FuwaApp {
                 }
             }
             Dialog::Invite { .. } => self.copy_invite(cx),
-            Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } | Dialog::Picture { .. } => {
-                self.close_dialog(cx)
-            }
+            Dialog::Welcome { .. }
+            | Dialog::Secure { .. }
+            | Dialog::PollVoters { .. }
+            | Dialog::Reactions { .. }
+            | Dialog::Picture { .. } => self.close_dialog(cx),
             Dialog::Onboarding { .. } => self.step_do(false, window, cx),
             Dialog::Poll { .. } => self.send_poll(cx),
             Dialog::Moderate { key, server, user_id, action } => {
