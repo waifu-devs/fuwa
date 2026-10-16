@@ -13061,6 +13061,36 @@ async fn gacha_banners_pulls_pity_and_duplicates() {
     let mine = c.economy.list_gacha_pulls(authed(&rin, log(""))).await.unwrap().into_inner();
     assert_eq!(mine.pulls.len(), 4);
     assert_eq!(mine.pulls[0].results.len(), 10);
+
+    // A pull shared in chat: its cards as kept, ranked by the banner; only by its puller.
+    let channels = c
+        .channels
+        .list_channels(authed(&rin, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels[0].id.clone();
+    let share = |pull_id: &str| pb::SendMessageRequest {
+        server_id: sid.clone(),
+        channel_id: general.clone(),
+        gacha_pull_id: pull_id.into(),
+        ..Default::default()
+    };
+    let refused = c.messages.send_message(authed(&mika, share(&mine.pulls[0].id))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::NotFound);
+    let shared = c.messages.send_message(authed(&rin, share(&mine.pulls[0].id))).await.unwrap().into_inner();
+    let gacha = shared.message.unwrap().gacha.unwrap();
+    assert_eq!((gacha.banner_name.as_str(), gacha.cards.len()), ("Starlight", 10));
+    let first = &gacha.cards[0];
+    assert_eq!((first.prize_name.as_str(), first.tier_name.as_str()), ("Star", "SSR"));
+    assert_eq!((first.rarity, first.stars, first.tier_at, first.guaranteed), (3, 3, 0, true));
+    assert_eq!(gacha.cards[3].outcome(), pb::GachaOutcome::Refunded);
+    let common = gacha.cards.iter().find(|card| card.tier_name == "R").unwrap();
+    assert_eq!((common.rarity, common.stars), (0, 1));
+    // Kept with the message, as read back.
+    let read = messages(&mut c, &rin, &sid, &general).await;
+    assert_eq!(read.last().unwrap().gacha.as_ref(), Some(&gacha));
     let refused = c.economy.list_gacha_pulls(authed(&mika, log("*"))).await;
     assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
     let all = c.economy.list_gacha_pulls(authed(&juan, log("*"))).await.unwrap().into_inner();

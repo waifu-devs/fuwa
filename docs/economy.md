@@ -161,6 +161,27 @@ the prizes and refunds in it. Deleting a banner keeps its pulls in the log.
 Managing banners takes Manage Economy, and a role prize Manage Roles and a
 rank above the role, as listing it would.
 
+Both apps open a pull the same way, to one clock (`revealPlan` in
+`web/src/lib/gacha.ts`, `reveal_plan` in the desktop's `core/economy.rs`,
+tested to the same numbers): the pack charges up in the best tier's color,
+bursts, the cards are dealt face down and turn one by one, a rarer card
+pausing and trembling first, a legendary one throwing rays. Skip (or
+Escape) turns them all at once; reduced motion shows them turned. Each step
+has a sound made on the spot (`gachaCue` in `lib/sounds.ts`,
+`play_gacha` in `core/sounds.rs`, the same voices), switched by the synced
+`gachaSounds` setting (docs/app-settings.md) and the app's volume.
+
+Once the cards are turned, a pull can be shown off. **Share** posts it in a
+text channel you can write in (`SendMessageRequest.gacha_pull_id`, the
+`gacha-share` feature): the server copies your pull, as it kept it, into the
+message (`Message.gacha`, a `GachaShare`), ranking each card by its banner
+as the apps do, so what's shown is what was drawn and stays so if the banner
+changes. Only your own pulls can be shared, and not in channels shared
+between servers yet. Chat shows it as the pull's little cards. **Save
+image** (on the results and on a shared pull) saves a PNG of the cards,
+laid out the same in both apps (`lib/gacha-share.ts`, `core/gacha_share.rs`,
+tested against one file, `web/src/lib/gacha-share.test.svg`).
+
 ## Moving currency
 
 - **Transfers** (`Transfer`): a member sends some of a transferable

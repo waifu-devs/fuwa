@@ -121,6 +121,10 @@ message SendMessageRequest {
   string interaction_id = 12;
   // Agents only: buttons under the message, up to 5 rows of 5.
   repeated ComponentRow components = 13;
+  // Shows one of the sender's own gacha pulls in this server under the
+  // message (Message.gacha), as the server kept it; its text may then be
+  // empty. Not in channels shared between servers.
+  string gacha_pull_id = 14;
 }
 
 // A poll as its creator writes it.

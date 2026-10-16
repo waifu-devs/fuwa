@@ -456,6 +456,32 @@
   "economy.gacha.dropsFrom": "Drops from {banners}",
   "economy.gacha.guaranteed": "Guaranteed",
   "economy.gacha.tryLuck": "Try your luck",
+  "economy.gacha.banners": "Banners",
+  "economy.gacha.topPrizes": "Top prizes",
+  "economy.gacha.youHave": "You have {amount}",
+  "economy.gacha.opening": "Opening {banner}…",
+  "economy.gacha.skip": "Skip",
+  "economy.gacha.soundsOn": "Gacha sounds on",
+  "economy.gacha.soundsOff": "Gacha sounds off",
+  "economy.gacha.stars": {
+    "one": "{count} star",
+    "other": "{count} stars"
+  },
+  "economy.gacha.pityMeter": "{done} of {total}",
+  "economy.gacha.share": "Share",
+  "economy.gacha.shareIn": "Share in a channel",
+  "economy.gacha.sharedIn": "Shared in #{channel}",
+  "economy.gacha.noChannels": "There's no channel here you can post in.",
+  "economy.gacha.saveImage": "Save image",
+  "economy.gacha.imageFailed": "Couldn't save the picture.",
+  "economy.gacha.sharedHeader": {
+    "one": "Pulled on {banner}",
+    "other": "Pulled {count} times on {banner}"
+  },
+  "economy.gacha.imageSubtitle": {
+    "one": "{name}'s pull",
+    "other": "{name} · {count} pulls"
+  },
   "economy.give": "Give",
   "economy.giveAbout": "Currency given or taken is in the audit log, with your reason.",
   "economy.giveAmount": "Give {amount}",

@@ -410,39 +410,7 @@
     "one": "{total} movido para {count} persona.",
     "other": "{total} movido para {count} personas."
   },
-  "economy.gacha.title": "Gacha",
-  "economy.gacha.tryLuck": "Probar suerte",
   "economy.gacha.about": "Tira por un premio al azar. Todos ven las probabilidades.",
-  "economy.gacha.aBanner": "un banner",
-  "economy.gacha.always": "Siempre abierto",
-  "economy.gacha.empty": "No hay banners ahora mismo.",
-  "economy.gacha.dropsFrom": "Sale en {banners}",
-  "economy.gacha.done": "Listo",
-  "economy.gacha.duplicate": "Repetido",
-  "economy.gacha.opensIn": "Abre en {time}",
-  "economy.gacha.closesIn": "Cierra en {time}",
-  "economy.gacha.pityIn": {
-    "one": "{tier} garantizado en {count} tirada",
-    "other": "{tier} garantizado en {count} tiradas"
-  },
-  "economy.gacha.pullsLeft": {
-    "one": "Te queda {count} tirada",
-    "other": "Te quedan {count} tiradas"
-  },
-  "economy.gacha.pulled": {
-    "one": "{count} tirada hasta ahora",
-    "other": "{count} tiradas hasta ahora"
-  },
-  "economy.gacha.pullOnce": "Tirar",
-  "economy.gacha.pullMany": "Tirar ×{count}",
-  "economy.gacha.notOpen": "No abierto",
-  "economy.gacha.noPulls": "Sin tiradas",
-  "economy.gacha.new": "Nuevo",
-  "economy.gacha.rates": "Probabilidades",
-  "economy.gacha.ratesNote": "Cada tirada elige un nivel según su probabilidad y luego un premio dentro de él según su peso. Los premios que ahora no puedes obtener se omiten y los demás reparten su probabilidad.",
-  "economy.gacha.results": "Lo que te tocó en {name}",
-  "economy.gacha.refunded": "Reembolsado",
-  "economy.gacha.guaranteed": "Garantizado",
   "economy.shop.title": "Tienda",
   "economy.shop.about": "Gasta aquí lo que has ganado.",
   "economy.shop.forSale": "A la venta",

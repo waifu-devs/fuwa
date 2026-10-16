@@ -127,6 +127,57 @@ export function outcomeLabel(outcome: number): Key {
   }
 }
 
+// ── The reveal ───────────────────────────────────────────────────────────
+
+/** How grand a tier's moment is, 0 to 3: the rarest tier is 3, the pity tier and any rarer 2, the commonest 0, the rest 1. */
+export function rarity(banner: Pick<GachaBanner, "tiers" | "pityTierId">, tierId: string): number {
+  const n = banner.tiers.length;
+  const at = banner.tiers.findIndex((t) => t.id === tierId);
+  if (at === -1) return 0;
+  if (n === 1) return 1;
+  if (at === 0) return 3;
+  const pity = banner.pityTierId ? banner.tiers.findIndex((t) => t.id === banner.pityTierId) : -1;
+  if (pity !== -1 && at <= pity) return 2;
+  return at === n - 1 ? 0 : 1;
+}
+
+/** The stars a tier's cards wear: the commonest one, one more for each tier rarer, at most five. */
+export function stars(banner: Pick<GachaBanner, "tiers">, tierId: string): number {
+  const at = banner.tiers.findIndex((t) => t.id === tierId);
+  return at === -1 ? 1 : Math.min(5, banner.tiers.length - at);
+}
+
+/** The rarest tier among what dropped (its index, rarest 0), so the pack can glow its color before it opens. */
+export function bestTier(banner: Pick<GachaBanner, "tiers">, results: readonly { tierId: string }[]): number {
+  let best = banner.tiers.length;
+  for (const r of results) {
+    const at = banner.tiers.findIndex((t) => t.id === r.tierId);
+    if (at !== -1 && at < best) best = at;
+  }
+  return best === banner.tiers.length ? Math.max(0, best - 1) : best;
+}
+
+/** When each part of a pull's reveal happens, in milliseconds from the pull: both apps play it to this clock. */
+export type RevealPlan = { burst: number; deal: number; flips: number[]; done: number };
+
+/** The pack charges, bursts, the cards are dealt face down, then turn one by one, waiting a beat before a rare one and after the rarest. Reduced motion shows them all at once. */
+export const REVEAL = { charge: 1300, burst: 350, deal: 60, settle: 320, flip: 220, suspense: 380, linger: 320 } as const;
+
+export function revealPlan(rarities: readonly number[], reduced: boolean): RevealPlan {
+  if (reduced) return { burst: 0, deal: 0, flips: rarities.map(() => 0), done: 0 };
+  const burst = REVEAL.charge;
+  const deal = burst + REVEAL.burst;
+  let at = deal + rarities.length * REVEAL.deal + REVEAL.settle;
+  const flips = rarities.map((r, n) => {
+    if (n > 0) at += REVEAL.flip;
+    if (r >= 2) at += REVEAL.suspense;
+    const flip = at;
+    if (r >= 3) at += REVEAL.linger;
+    return flip;
+  });
+  return { burst, deal, flips, done: at + REVEAL.flip };
+}
+
 // ── The banner editor ────────────────────────────────────────────────────
 
 export type TierDraft = { id: string; name: string; color: number | null; rate: string };

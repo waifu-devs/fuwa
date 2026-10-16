@@ -77,3 +77,94 @@ function tune(tune: Tune, volume: number) {
     // No audio here (or not allowed yet): stay quiet.
   }
 }
+
+/**
+ * The gacha's sounds (docs/economy.md), richer than the tunes above: each is
+ * a few voices that can sweep from one pitch to another, or be a hiss of
+ * noise, rising over `attack` seconds and dying away by `length`. The pack
+ * charges up, bursts, each card flips with a tick, and its tier answers with
+ * a chime that grows grander with rarity (`rarity` in lib/gacha.ts). The
+ * desktop's `core/sounds.rs` plays the same voices.
+ */
+export type GachaCue = "charge" | "burst" | "flip" | "common" | "rare" | "epic" | "legendary" | "tap";
+
+type Voice = { wave: OscillatorType | "noise"; from: number; to?: number; at: number; length: number; attack?: number; gain?: number };
+
+const note = (wave: OscillatorType, from: number, at: number, length: number, gain = 1): Voice => ({ wave, from, at, length, gain });
+
+export const GACHA_CUES: Record<GachaCue, Voice[]> = {
+  charge: [
+    { wave: "sine", from: 196, to: 784, at: 0, length: 1.3, attack: 1.15, gain: 0.9 },
+    { wave: "triangle", from: 392, to: 1568, at: 0.05, length: 1.25, attack: 1.1, gain: 0.35 },
+    { wave: "noise", from: 0, at: 0.2, length: 1.1, attack: 1, gain: 0.12 },
+  ],
+  burst: [
+    { wave: "noise", from: 0, at: 0, length: 0.5, attack: 0.004, gain: 0.7 },
+    { wave: "sine", from: 160, to: 45, at: 0, length: 0.4, attack: 0.004, gain: 1 },
+    { wave: "triangle", from: 1046.5, to: 2093, at: 0.02, length: 0.25, attack: 0.01, gain: 0.3 },
+  ],
+  flip: [
+    { wave: "noise", from: 0, at: 0, length: 0.07, attack: 0.002, gain: 0.35 },
+    { wave: "triangle", from: 1800, to: 1100, at: 0, length: 0.06, attack: 0.002, gain: 0.3 },
+  ],
+  common: [note("sine", 659.25, 0.03, 0.18)],
+  rare: [note("triangle", 783.99, 0.03, 0.22), note("triangle", 1174.66, 0.1, 0.26)],
+  epic: [note("sine", 659.25, 0.03, 0.3), note("sine", 830.61, 0.1, 0.3), note("sine", 987.77, 0.17, 0.3), note("sine", 1318.51, 0.24, 0.4)],
+  legendary: [
+    ...[523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98].map((f, n) => note("triangle", f, 0.03 + n * 0.07, 0.45, 0.9)),
+    note("sine", 2093, 0.45, 0.9, 0.35),
+    note("sine", 2637.02, 0.52, 0.9, 0.3),
+    { wave: "noise", from: 0, at: 0.4, length: 0.6, attack: 0.3, gain: 0.08 },
+  ],
+  tap: [note("sine", 1046.5, 0, 0.07, 0.6)],
+};
+
+/** The chime for a card of this rarity (0 to 3). */
+export const RARITY_CUES: GachaCue[] = ["common", "rare", "epic", "legendary"];
+
+let noise: AudioBuffer | null = null;
+
+/** Plays one of the gacha's sounds, when they're on (the gacha's own switch, the volume and streamer mode). */
+export function gachaCue(which: GachaCue) {
+  const p = getPrefs();
+  if (!p.gachaSounds || (p.streamer && p.streamerMuteSounds)) return;
+  const volume = p.volume / 100;
+  if (volume <= 0) return;
+  try {
+    context ??= new AudioContext();
+    if (context.state === "suspended") void context.resume();
+    const ctx = context;
+    const now = ctx.currentTime;
+    for (const v of GACHA_CUES[which]) {
+      const start = now + v.at;
+      const attack = v.attack ?? 0.012;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.18 * volume * (v.gain ?? 1), start + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + v.length);
+      let source: AudioScheduledSourceNode;
+      if (v.wave === "noise") {
+        if (!noise) {
+          noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+          const data = noise.getChannelData(0);
+          for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        }
+        const buffer = ctx.createBufferSource();
+        buffer.buffer = noise;
+        buffer.loop = true;
+        source = buffer;
+      } else {
+        const osc = ctx.createOscillator();
+        osc.type = v.wave;
+        osc.frequency.setValueAtTime(v.from, start);
+        if (v.to) osc.frequency.exponentialRampToValueAtTime(v.to, start + v.length);
+        source = osc;
+      }
+      source.connect(gain).connect(ctx.destination);
+      source.start(start);
+      source.stop(start + v.length + 0.02);
+    }
+  } catch {
+    // No audio here (or not allowed yet): stay quiet.
+  }
+}

@@ -67,6 +67,9 @@ ratex-layout = "0.1.14"
 ratex-parser = "0.1.14"
 ratex-render = { version = "0.1.14", features = ["embed-fonts"] }
 ratex-types = "0.1.14"
+# Pictures of gacha pulls to save (core/gacha_share.rs): an SVG drawn on the
+# CPU, with the version and fonts support GPUI already builds.
+resvg = { version = "0.46", default-features = false, features = ["text"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ring = "0.17"

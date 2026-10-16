@@ -6,6 +6,7 @@ import { economyProblem } from "./economy.ts";
 import {
   bannerDraft,
   bannersWith,
+  bestTier,
   bannerValue,
   draftChanged,
   draftChances,
@@ -27,7 +28,10 @@ import {
   pullsLeft,
   ratesTable,
   ratesTotal,
+  rarity,
+  revealPlan,
   shownBanners,
+  stars,
   tierColor,
   TIER_COLORS,
   WHOLE,
@@ -276,4 +280,24 @@ test("prize pickers list gacha-only listings first", () => {
     prizeListings(shop).map((l) => l.id),
     ["c", "b", "a"],
   );
+});
+
+test("the reveal ranks tiers, gives them stars and plays to one clock", () => {
+  const banner = { tiers: ["legendary", "epic", "rare", "common"].map((id) => ({ id })), pityTierId: "epic" } as unknown as GachaBanner;
+  assert.deepEqual(
+    banner.tiers.map((t) => rarity(banner, t.id)),
+    [3, 2, 1, 0],
+  );
+  assert.deepEqual(
+    banner.tiers.map((t) => stars(banner, t.id)),
+    [4, 3, 2, 1],
+  );
+  assert.equal(rarity({ ...banner, pityTierId: "" }, "epic"), 1);
+  assert.equal(rarity(banner, "gone"), 0);
+  assert.equal(rarity({ tiers: [{ id: "only" }], pityTierId: "" } as unknown as GachaBanner, "only"), 1);
+  assert.equal(bestTier(banner, [{ tierId: "common" }, { tierId: "epic" }, { tierId: "rare" }]), 1);
+  assert.equal(bestTier(banner, []), 3);
+  // The rare card waits a beat before it turns and lingers after.
+  assert.deepEqual(revealPlan([0, 3, 0], false), { burst: 1300, deal: 1650, flips: [2150, 2750, 3290], done: 3510 });
+  assert.deepEqual(revealPlan([0, 3], true), { burst: 0, deal: 0, flips: [0, 0], done: 0 });
 });

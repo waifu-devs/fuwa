@@ -77,6 +77,7 @@ own fields to these.
 | `customKeybinds` | `[{ id, action, combo }]` |
 | `developerMode`, `shareReports` | boolean |
 | `sendTyping` | boolean: others see you typing (docs/typing.md) |
+| `gachaSounds` | boolean: the gacha's sounds as a pull opens (docs/economy.md) |
 | `inputMode` | `"voice"` or `"ptt"` |
 | `pttRelease` | milliseconds |
 | `userVolumes` | `"instance/user id"` to percent, up to 200 |

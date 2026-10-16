@@ -676,39 +676,7 @@
     "one": "{total} moved for {count} person.",
     "other": "{total} moved for {count} people."
   },
-  "economy.gacha.title": "Gacha",
-  "economy.gacha.tryLuck": "Try your luck",
   "economy.gacha.about": "Pull for a random prize. Everyone sees the drop rates.",
-  "economy.gacha.aBanner": "a banner",
-  "economy.gacha.always": "Always open",
-  "economy.gacha.empty": "No banners right now.",
-  "economy.gacha.dropsFrom": "Drops from {banners}",
-  "economy.gacha.done": "Done",
-  "economy.gacha.duplicate": "Duplicate",
-  "economy.gacha.opensIn": "Opens in {time}",
-  "economy.gacha.closesIn": "Closes in {time}",
-  "economy.gacha.pityIn": {
-    "one": "{tier} guaranteed in {count} pull",
-    "other": "{tier} guaranteed within {count} pulls"
-  },
-  "economy.gacha.pullsLeft": {
-    "one": "{count} pull left",
-    "other": "{count} pulls left"
-  },
-  "economy.gacha.pulled": {
-    "one": "{count} pull so far",
-    "other": "{count} pulls so far"
-  },
-  "economy.gacha.pullOnce": "Pull",
-  "economy.gacha.pullMany": "Pull ×{count}",
-  "economy.gacha.notOpen": "Not open",
-  "economy.gacha.noPulls": "No pulls left",
-  "economy.gacha.new": "New",
-  "economy.gacha.rates": "Drop rates",
-  "economy.gacha.ratesNote": "Each pull picks a tier by its rate, then a prize in it by its weight. Prizes you can't get right now are left out and the rest share their chance.",
-  "economy.gacha.results": "What you got on {name}",
-  "economy.gacha.refunded": "Refunded",
-  "economy.gacha.guaranteed": "Guaranteed",
   "economy.shop.title": "Shop",
   "economy.shop.about": "Spend what you've earned here.",
   "economy.shop.forSale": "For sale",
