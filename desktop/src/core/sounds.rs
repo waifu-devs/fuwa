@@ -19,6 +19,9 @@ use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
 use crate::core::config::SoundPick;
 use crate::core::voice::access::{self, Access};
+use crate::core::voice::devices;
+use crate::core::voice::processing::{Choice, Processing};
+use crate::core::voice::sound::{Pipe, level as voice_level};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sound {
@@ -690,23 +693,42 @@ pub fn device_names(input: bool) -> Vec<String> {
     names
 }
 
-/// A running mic test: the microphone's level, in dB (-100 to 0), as it comes.
+/// What a mic test plays back while "Hear myself" is on: the microphone as
+/// a call sends it, through the processing and at the input volume.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hearing {
+    pub on: bool,
+    pub processing: Choice,
+    /// The input volume, 1.0 as it comes.
+    pub volume: f32,
+}
+
+/// A running mic test: the microphone's level, in dB (-100 to 0), as it
+/// comes, and on your speakers too while you ask to hear yourself.
 pub struct MicTest {
     level: Arc<std::sync::atomic::AtomicI32>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     pub failed: Arc<std::sync::atomic::AtomicBool>,
     /// It failed because the system won't let the app use the microphone.
     pub blocked: Arc<std::sync::atomic::AtomicBool>,
+    hearing: Arc<parking_lot::Mutex<Hearing>>,
 }
 
 impl MicTest {
-    /// Opens the microphone named `device` ("" for the system's) on a thread of its own.
-    pub fn start(device: &str) -> Self {
+    /// Opens the microphone named `device` ("" for the system's) on a thread
+    /// of its own; what you hear of yourself plays on `speakers`.
+    pub fn start(device: &str, speakers: &str) -> Self {
         let level = Arc::new(std::sync::atomic::AtomicI32::new(-100));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (l, s, f, b, name) = (level.clone(), stop.clone(), failed.clone(), blocked.clone(), device.to_owned());
+        let hearing = Arc::new(parking_lot::Mutex::new(Hearing {
+            on: false,
+            processing: Choice { echo: false, noise: false, gain: false },
+            volume: 1.0,
+        }));
+        let (l, s, f, b, h) = (level.clone(), stop.clone(), failed.clone(), blocked.clone(), hearing.clone());
+        let (name, out_name) = (device.to_owned(), speakers.to_owned());
         let _ = std::thread::Builder::new().name("fuwa-mic-test".into()).spawn(move || {
             // Waits while the system's prompt is up.
             loop {
@@ -721,59 +743,54 @@ impl MicTest {
                     }
                 }
             }
-            let Some(device) = input_device(&name) else {
+            let microphone = Arc::new(Pipe::microphone());
+            let Some(input) = input_device(&name).and_then(|d| devices::open_input(&d, microphone.clone())) else {
                 f.store(true, Ordering::Relaxed);
                 return;
             };
-            let Ok(config) = device.default_input_config() else {
-                f.store(true, Ordering::Relaxed);
-                return;
-            };
-            let channels = usize::from(config.channels().max(1));
-            let meter = l.clone();
-            let take = move |data: &[f32]| {
-                let rms = (data.iter().map(|x| x * x).sum::<f32>() / data.len().max(1) as f32).sqrt();
-                let db = if rms > 0.0 { (20.0 * rms.log10()).clamp(-100.0, 0.0) } else { -100.0 };
-                meter.store(db.round() as i32, Ordering::Relaxed);
-            };
-            let stream = match config.sample_format() {
-                SampleFormat::F32 => device.build_input_stream::<f32, _, _>(
-                    config.config(),
-                    move |data: &[f32], _| take(&data.iter().step_by(channels).copied().collect::<Vec<_>>()),
-                    |_| {},
-                    None,
-                ),
-                SampleFormat::I16 => device.build_input_stream::<i16, _, _>(
-                    config.config(),
-                    move |data: &[i16], _| {
-                        take(&data.iter().step_by(channels).map(|s| f32::from(*s) / 32768.0).collect::<Vec<_>>())
-                    },
-                    |_| {},
-                    None,
-                ),
-                _ => {
-                    f.store(true, Ordering::Relaxed);
-                    return;
-                }
-            };
-            let Ok(stream) = stream else {
-                f.store(true, Ordering::Relaxed);
-                return;
-            };
-            if stream.play().is_err() {
-                f.store(true, Ordering::Relaxed);
-                return;
-            }
+            let back = Arc::new(Pipe::speakers());
+            // The speakers open the first time you ask to hear yourself, and
+            // aren't tried again until you ask again.
+            let (mut output, mut tried) = (None, false);
+            let mut processing: Option<Processing> = None;
             while !s.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(50));
+                let hearing = *h.lock();
+                if hearing.on && !tried {
+                    tried = true;
+                    output = output_device(&out_name).and_then(|d| devices::open_output(&d, back.clone()));
+                } else if !hearing.on && tried {
+                    (output, tried, processing) = (None, false, None);
+                    back.clear();
+                }
+                while let Some(mut frame) = microphone.frame() {
+                    let rms = voice_level(&frame);
+                    let db = if rms > 0.0 { (20.0 * rms.log10()).clamp(-100.0, 0.0) } else { -100.0 };
+                    l.store(db.round() as i32, Ordering::Relaxed);
+                    if output.is_none() {
+                        continue;
+                    }
+                    let processing = processing.get_or_insert_with(|| Processing::new(hearing.processing));
+                    processing.set(hearing.processing);
+                    processing.clean(&mut frame, 0);
+                    for x in frame.iter_mut() {
+                        *x = (*x * hearing.volume).clamp(-1.0, 1.0);
+                    }
+                    back.push(&frame);
+                }
+                std::thread::sleep(Duration::from_millis(10));
             }
-            drop(stream);
+            drop((input, output));
         });
-        Self { level, stop, failed, blocked }
+        Self { level, stop, failed, blocked, hearing }
     }
 
     pub fn level(&self) -> f32 {
         self.level.load(Ordering::Relaxed) as f32
+    }
+
+    /// Plays the microphone back to you, or stops: the settings' "Hear myself".
+    pub fn hear(&self, hearing: Hearing) {
+        *self.hearing.lock() = hearing;
     }
 }
 

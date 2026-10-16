@@ -77,6 +77,9 @@ sha2 = "0.10"
 # Echo cancellation, noise suppression and automatic gain for the microphone:
 # WebRTC's audio processing, ported to Rust (no C++ to build).
 sonora = "0.2"
+# Which programs run, for streamer mode to follow OBS and XSplit
+# (core/streaming.rs): the version zed-scap already brings.
+sysinfo = "0.31"
 # Sound files people pick for the app's sounds (Ogg Opus goes through `opus`),
 # and the sound of videos and sound files in messages (core/media).
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "mp3", "flac", "ogg", "vorbis", "adpcm", "aac", "isomp4", "mkv"] }

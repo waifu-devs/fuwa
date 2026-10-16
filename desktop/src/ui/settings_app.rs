@@ -862,6 +862,17 @@ impl SettingsView {
             cx,
             |this, on, cx| this.set(cx, |pr| pr.streamer_mute_notifications = on),
         );
+        let auto = toggle(
+            "streamer-auto",
+            &t("desktop.settings.streamerAutoToggle"),
+            Some(&t("desktop.settings.streamerAutoHint")),
+            prefs.streamer_auto,
+            false,
+            p,
+            window,
+            cx,
+            |this, on, cx| this.set(cx, |pr| pr.streamer_auto = on),
+        );
         let list = self.stack(
             [
                 (
@@ -892,6 +903,7 @@ impl SettingsView {
                     pref!(prefs, streamer_mute_notifications),
                     notes,
                 ),
+                ("streamer-auto", t("appsettings.streamer.auto"), None, pref!(prefs, streamer_auto), auto),
             ],
             p,
             cx,

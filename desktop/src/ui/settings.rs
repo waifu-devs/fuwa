@@ -227,6 +227,7 @@ fn app_sections() -> Vec<Section> {
             ("streamer-hide-personal", t("appsettings.streamer.hidePersonal"), "address username"),
             ("streamer-sounds", t("settings.nav.streamerSounds"), ""),
             ("streamer-notifications", t("settings.nav.streamerNotifications"), ""),
+            ("streamer-auto", t("appsettings.streamer.auto"), "obs xsplit live automatic"),
         ]),
         Section::new(Page::Advanced, "code-xml", t("settings.nav.advanced"), t("settings.nav.advancedAbout"), "").with(
             vec![

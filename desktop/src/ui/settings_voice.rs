@@ -17,7 +17,8 @@ use gpui_kit::{
 
 use crate::core::config::{InputMode, Prefs, Sounds};
 use crate::core::i18n::{Arg, t, t_with};
-use crate::core::sounds::{self, MicTest, Sound};
+use crate::core::sounds::{self, Hearing, MicTest, Sound};
+use crate::core::voice::processing::Choice;
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::settings_controls::{At, Badge, Look, Opt, button, choice, segmented, toggle};
@@ -45,7 +46,7 @@ const CALL_SOUNDS: [Sound; 10] = [
 pub(crate) fn voice_settings() -> Vec<(&'static str, String, &'static str)> {
     vec![
         ("devices", t("appsettings.voice.devices"), "input output device headset"),
-        ("mic-test", t("appsettings.voice.micTest"), "check level meter"),
+        ("mic-test", t("appsettings.voice.micTest"), "check level meter hear myself loopback"),
         ("input-mode", t("appsettings.voice.inputMode"), "voice activity push to talk ptt"),
         ("sensitivity", t("appsettings.voice.sensitivity"), "threshold gate noise"),
         ("processing", t("appsettings.voice.processing"), "echo noise suppression gain"),
@@ -69,6 +70,8 @@ pub(crate) struct VoiceForm {
     mic_failed: bool,
     /// The mic test failed because the system won't let the app use the microphone.
     mic_blocked: bool,
+    /// "Hear myself" during the mic test.
+    hear_myself: bool,
     /// The camera check, while it's on: it stops when this goes.
     camera: Option<CameraCheck>,
 }
@@ -295,6 +298,13 @@ impl SettingsView {
                 window.request_animation_frame();
             }
         }
+        if let Some(mic) = &self.voice.mic {
+            mic.hear(Hearing {
+                on: self.voice.hear_myself,
+                processing: Choice::of(prefs),
+                volume: f32::from(prefs.input_volume) / 100.0,
+            });
+        }
         let level = self.voice.mic.as_ref().map_or(-100.0, MicTest::level);
         let threshold = if prefs.auto_sensitivity { -50.0 } else { f32::from(prefs.sensitivity) };
         let open = testing && level > threshold;
@@ -325,30 +335,54 @@ impl SettingsView {
                     .w(px(2.0))
                     .bg(alpha(p.foreground, 0.7)),
             );
-        let device = prefs.input_device.clone();
+        let (device, speakers) = (prefs.input_device.clone(), prefs.output_device.clone());
+        // Hearing yourself: what would be sent, processing and all, on your speakers.
+        let hear = testing.then(|| {
+            toggle(
+                "hear-myself",
+                &t("appsettings.voice.hearMyself"),
+                Some(&t("appsettings.voice.hearMyselfHint")),
+                self.voice.hear_myself,
+                false,
+                p,
+                window,
+                cx,
+                |this, on, cx| {
+                    this.voice.hear_myself = on;
+                    cx.notify();
+                },
+            )
+        });
         let mic_test = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(
-                div().flex().child(
-                    button(
-                        "mic-test",
-                        if testing { t("appsettings.voice.stop") } else { t("appsettings.voice.micTestStart") },
-                        Some(if testing { "square" } else { "play" }),
-                        if testing { Look::Outline } else { Look::Primary },
-                        false,
-                        p,
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        button(
+                            "mic-test",
+                            if testing { t("appsettings.voice.stop") } else { t("appsettings.voice.micTestStart") },
+                            Some(if testing { "square" } else { "play" }),
+                            if testing { Look::Outline } else { Look::Primary },
+                            false,
+                            p,
+                        )
+                        .rounded(radius_xl())
+                        .font_weight(FontWeight::BOLD)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.voice.mic =
+                                if this.voice.mic.is_some() { None } else { Some(MicTest::start(&device, &speakers)) };
+                            this.voice.mic_failed = false;
+                            this.voice.mic_blocked = false;
+                            cx.notify();
+                        })),
                     )
-                    .rounded(radius_xl())
-                    .font_weight(FontWeight::BOLD)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.voice.mic = if this.voice.mic.is_some() { None } else { Some(MicTest::start(&device)) };
-                        this.voice.mic_failed = false;
-                        this.voice.mic_blocked = false;
-                        cx.notify();
-                    })),
-                ),
+                    .when_some(hear, |el, hear| el.child(div().flex_1().min_w(px(240.0)).child(hear))),
             )
             .child(meter)
             .when(self.voice.mic_failed && !self.voice.mic_blocked, |el| {
