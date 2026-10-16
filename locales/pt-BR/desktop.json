@@ -726,5 +726,12 @@
   "economy.send.have": "Você tem {amount}",
   "economy.send.sending": "Enviando…",
   "economy.send.sent": "Enviado!",
-  "economy.audit.value.changed": "alterado"
+  "economy.audit.value.changed": "alterado",
+  "media.play": "Reproduzir",
+  "media.pause": "Pausar",
+  "media.mute": "Silenciar",
+  "media.unmute": "Ativar som",
+  "media.cantPlay": "O app não consegue reproduzir esse tipo de arquivo. Salve-o para reproduzir.",
+  "media.broken": "Não foi possível ler este arquivo.",
+  "media.noSpeakers": "Não foi possível abrir os alto-falantes."
 }

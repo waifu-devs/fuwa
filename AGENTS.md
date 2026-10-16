@@ -688,7 +688,11 @@
     allows only to a bundle whose Info.plist says why,
     `desktop/packaging/macos/`), `pictures.rs` (the web's `lib/pictures.ts`:
     crop sizes and math, cutting the crop out; `ui/cropper.rs` is the
-    cropper every picture upload goes through), `reports.rs` (the anonymous reports: panics, also
+    cropper every picture upload goes through), `media/` (videos and
+    sounds in messages, played in place like the web's `<video>` and
+    `<audio>`: the file fetched whole on the first play, its sound through
+    Symphonia or libopus keeping the time, its picture through OpenH264 or
+    libvpx following; `ui/media.rs` draws the players), `reports.rs` (the anonymous reports: panics, also
     written to `crashes.txt` in the config folder so a crash is sent next
     time, failed and timed `rpc!` calls, startup, catching up, slow frames
     and a few feature counts, sent every 10 minutes through

@@ -9,7 +9,7 @@ use std::ptr;
 
 use vpx_sys as sys;
 
-use super::vp8::{Encoded, Yuv, to_bgra};
+use super::vp8::{Codec, Encoded, Yuv, to_bgra};
 
 /// A VP8 encoder for one size, at a steady bitrate, made for calls.
 pub struct Encoder {
@@ -126,7 +126,7 @@ impl Drop for Encoder {
     }
 }
 
-/// A VP8 decoder that hands back pictures as BGRA.
+/// A VP8 (or VP9) decoder that hands back pictures as BGRA.
 pub struct Decoder {
     ctx: sys::vpx_codec_ctx_t,
 }
@@ -136,13 +136,21 @@ unsafe impl Send for Decoder {}
 
 impl Decoder {
     pub fn new() -> Result<Self, String> {
+        Self::of(Codec::Vp8)
+    }
+
+    pub fn of(codec: Codec) -> Result<Self, String> {
         // SAFETY: plain libvpx calls; no configuration means its defaults.
         unsafe {
+            let iface = match codec {
+                Codec::Vp8 => sys::vpx_codec_vp8_dx(),
+                Codec::Vp9 => sys::vpx_codec_vp9_dx(),
+            };
             let mut ctx = MaybeUninit::<sys::vpx_codec_ctx_t>::zeroed();
             check(
                 sys::vpx_codec_dec_init_ver(
                     ctx.as_mut_ptr(),
-                    sys::vpx_codec_vp8_dx(),
+                    iface,
                     ptr::null(),
                     0,
                     sys::VPX_DECODER_ABI_VERSION as c_int,

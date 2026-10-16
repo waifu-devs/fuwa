@@ -704,5 +704,12 @@
   "economy.send.have": "所持：{amount}",
   "economy.send.sending": "送金中…",
   "economy.send.sent": "送金しました！",
-  "economy.audit.value.changed": "変更"
+  "economy.audit.value.changed": "変更",
+  "media.play": "再生",
+  "media.pause": "一時停止",
+  "media.mute": "ミュート",
+  "media.unmute": "ミュート解除",
+  "media.cantPlay": "この種類のファイルはアプリで再生できません。保存して再生してください。",
+  "media.broken": "このファイルを読み込めませんでした。",
+  "media.noSpeakers": "スピーカーを開けませんでした。"
 }

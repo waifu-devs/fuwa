@@ -726,5 +726,12 @@
   "economy.send.have": "Tu as {amount}",
   "economy.send.sending": "Envoi…",
   "economy.send.sent": "Envoyé !",
-  "economy.audit.value.changed": "modifié"
+  "economy.audit.value.changed": "modifié",
+  "media.play": "Lire",
+  "media.pause": "Pause",
+  "media.mute": "Couper le son",
+  "media.unmute": "Remettre le son",
+  "media.cantPlay": "L’app ne peut pas lire ce type de fichier. Enregistre-le pour le lire.",
+  "media.broken": "Impossible de lire ce fichier.",
+  "media.noSpeakers": "Impossible d’ouvrir les haut-parleurs."
 }
