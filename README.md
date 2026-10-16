@@ -468,6 +468,7 @@ the cluster key, apart from `/healthz`.
 | `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`), shown publicly by `/healthz/parts`. Defaults to one made up on first start and kept in its data folder as `shard-id` |
 | `FUWA_REGION` | any part | The region it runs in, like `eu` or `us-west` (see [docs/regions.md](docs/regions.md)). The directory's is the home region; unset is the home region |
 | `FUWA_REGION_NAME` | any part | The region's name people see, like `Europe`. Common labels have one built in |
+| `FUWA_HANDOFF` | shards | How long a shard told to stop spends handing its servers to the other shards in its region first, in seconds (`240`) or like `4m`; `off` stops at once. Give the shard a little longer than this to stop |
 
 The other variables work as above, read by the part that uses them: set
 `FUWA_PUBLIC_URL` (the gateways' address), the admin token, accounts, limits
@@ -508,11 +509,25 @@ a directory or shard that lost its volume restores itself from it.
 
 Restarting a part, say to deploy a new version, interrupts nobody:
 
-- **A shard** stops, then starts again. Meanwhile gateways hold calls for its
-  servers and send them on once it's back (if that takes over 30 seconds, the
-  call answers "unavailable"). Live streams stay open: the gateway follows the
-  shard's servers again from the last event each client got, so nothing is
-  missed and the client never sees a break.
+- **A shard** told to stop (SIGTERM) first hands its servers to the other
+  shards up in its region: the directory moves them one by one, as it moves a
+  server to another region, except that their calls carry on (the shards share
+  the region's media parts, so the places in them go along and nobody is hung
+  up). Each server pauses for as long as copying its file takes, while gateways
+  hold its calls, and live streams follow it to its new shard from where they
+  were. The shard prefers shards that started after it, so in a rolling deploy
+  each server moves once. Only then does it stop, and starting again (moving
+  its disk, opening its files) takes as long as it likes: it comes back empty,
+  and takes servers from the next shard to stop, or new ones.
+  `FUWA_HANDOFF` (default `240`, seconds, or `off`) bounds the hand-off, so
+  give a shard a little longer than that to stop. A region with one shard has
+  nowhere to hand its servers to: they wait for it to come back, as below.
+- **A shard that stops without handing over** (a crash, `FUWA_HANDOFF=off`,
+  the only shard in its region) comes back on its own. Meanwhile gateways hold
+  calls for its servers and send them on once it's back (if that takes over 30
+  seconds, the call answers "unavailable"). Live streams stay open: the gateway
+  follows the shard's servers again from the last event each client got, so
+  nothing is missed and the client never sees a break.
 - **The directory** stops, then starts again. Gateways hold calls for it the
   same way, and shards wait for it when they need to check who's calling.
   Once back, it answers clients only after every shard has registered again
@@ -529,9 +544,15 @@ Restarting a part, say to deploy a new version, interrupts nobody:
   gateway doesn't take traffic before it can serve it.
 
 Every part finishes the calls it's answering before it exits on SIGTERM, so
-give it up to 45 seconds. A part with its files on a disk of its own (the
-directory, shards) can't overlap its old and new processes; a gateway can, and
-that's what keeps clients connected.
+give it up to 45 seconds (a shard, its hand-off on top). A part with its files
+on a disk of its own (the directory, shards) can't overlap its old and new
+processes; a gateway can, and that's what keeps clients connected.
+
+Deploy a new version one part at a time, each up again before the next:
+media parts, then each region's shards in turn (so there's always another
+shard to hand servers to, already on the new version), the directory, and the
+gateways last. fuwa.chat's publish workflow does this with
+[`.railway/rollout.mjs`](.railway/rollout.mjs).
 
 A shard that stays down is different: after the 30 seconds its servers answer
 "unavailable" and live streams following them end, so clients reconnect once

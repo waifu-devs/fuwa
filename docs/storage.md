@@ -10,8 +10,12 @@ once:
 - **Safety.** It's the only copy. Railway's volume backups help (see
   [A stopgap](#a-stopgap-railways-volume-backups)), but they live in the same
   project and go when the volume does.
-- **Deploys.** A service with a volume can't run two deployments at once, so
-  every deploy of a part that keeps files drops its connections for a moment.
+- **Deploys.** A service with a volume can't run two deployments at once, and
+  moving the volume to the new one can take minutes. Shards get around it
+  today by handing their servers to another shard in their region before they
+  stop ([Restarts and deploys](../README.md#restarts-and-deploys)), which costs
+  a copy of each server's file per deploy; the directory still restarts in
+  place.
 
 This document is the plan for lifting those limits, and the one place that
 describes how fuwa stores data past a volume. It starts with this release:
@@ -159,9 +163,10 @@ folded as usual.
 - **The volume stops being the ceiling** in phase 3, when servers nobody is
   using leave the volume and live only in the bucket. Phase 1 is what makes
   that safe: every server is already there.
-- **Deploys without a drop** for shards, in phase 2: a new shard can restore
-  its servers from the bucket and take them over, instead of waiting for the
-  old one to let go of a volume.
+- **Cheaper deploys without a drop** for shards, in phase 2: shards already
+  hand their servers over before they stop (copying each file from shard to
+  shard); with the bucket, the shard taking a server restores it from there
+  ahead of time and only catches up on the last commits.
 
 ## What it costs
 

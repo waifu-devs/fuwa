@@ -55,6 +55,13 @@ struct Shard {
     client: Option<ShardClient>,
     /// Open settings streams from it: up while there's one.
     watching: usize,
+    /// When its process started, as it said when it registered (0 until
+    /// then): in a deploy, a shard that started after another is the one
+    /// already running the new version.
+    started_at: i64,
+    /// Handing its servers over before it stops: no server goes to it until
+    /// it registers again.
+    leaving: bool,
 }
 
 impl Shard {
@@ -71,7 +78,10 @@ impl Shards {
         let mut known = HashMap::new();
         for (id, url, region) in node.shards().await? {
             let client = Some(shard_client(&url, key.clone())?);
-            known.insert(id, Shard { url, region, region_name: None, client, watching: 0 });
+            known.insert(
+                id,
+                Shard { url, region, region_name: None, client, watching: 0, started_at: 0, leaving: false },
+            );
         }
         let moves = node.moves().await?.into_iter().map(|moved| (moved.server_id.clone(), (moved, false))).collect();
         let left = leftovers(&config.data_path)?.len();
@@ -150,6 +160,7 @@ impl Shards {
             .iter()
             .filter(|(_, shard)| self.region(&shard.region) == region)
             .inspect(|_| known = true)
+            .filter(|(_, shard)| !shard.leaving)
             .filter_map(|(id, shard)| shard.up().map(|client| (id.clone(), client.clone())))
             .min_by_key(|(id, _)| (sizes.get(id).copied().unwrap_or(0), id.clone()));
         match chosen {
@@ -159,6 +170,34 @@ impl Shards {
             }
             None => Err(Error::invalid(format!("this instance has no region {region:?}"))),
         }
+    }
+
+    /// Marks a shard as handing its servers over (see [`HandOff`](cpb::HandOffRequest)):
+    /// new servers and moves go elsewhere until it registers again.
+    pub fn leave(&self, id: &str) {
+        if let Some(shard) = self.write().get_mut(id) {
+            shard.leaving = true;
+        }
+    }
+
+    /// Where a leaving shard's servers go: another shard up in its region, not
+    /// leaving itself, preferring those that started after it did (in a
+    /// deploy, those already on the new version, so each server moves once),
+    /// then the one holding the fewest (by `sizes`).
+    pub fn successor(&self, from: &str, sizes: &HashMap<String, usize>) -> Option<(String, ShardClient)> {
+        let known = self.read();
+        let leaving = known.get(from)?;
+        let region = self.region(&leaving.region);
+        let since = leaving.started_at;
+        known
+            .iter()
+            .filter(|(id, shard)| *id != from && !shard.leaving && self.region(&shard.region) == region)
+            .filter_map(|(id, shard)| shard.up().map(|client| (id, shard, client)))
+            .min_by_key(|(id, shard, _)| {
+                let older = shard.started_at <= since;
+                (older, sizes.get(*id).copied().unwrap_or(0), (*id).clone())
+            })
+            .map(|(id, _, client)| (id.clone(), client.clone()))
     }
 
     /// Whether every shard known before this start has registered again, and
@@ -186,7 +225,14 @@ impl Shards {
     }
 
     /// Notes where a shard is, as it registers.
-    pub fn register(&self, id: &str, url: &str, region: &str, region_name: Option<&str>) -> Result<()> {
+    pub fn register(
+        &self,
+        id: &str,
+        url: &str,
+        region: &str,
+        region_name: Option<&str>,
+        started_at: i64,
+    ) -> Result<()> {
         {
             let mut missing = self.missing.write().unwrap_or_else(|p| p.into_inner());
             if missing.remove(id) && missing.is_empty() {
@@ -203,13 +249,26 @@ impl Shards {
             }
             None => {
                 let client = Some(shard_client(url, self.key.clone())?);
-                let shard =
-                    Shard { url: url.to_string(), region: String::new(), region_name: None, client, watching: 0 };
+                let shard = Shard {
+                    url: url.to_string(),
+                    region: String::new(),
+                    region_name: None,
+                    client,
+                    watching: 0,
+                    started_at: 0,
+                    leaving: false,
+                };
                 known.entry(id.to_string()).or_insert(shard)
             }
         };
         shard.region = region.to_string();
         shard.region_name = region_name.map(str::to_string);
+        // A shard registers again whenever it may have missed something, so
+        // only a new process (one that started since) is done leaving.
+        if shard.started_at != started_at {
+            shard.started_at = started_at;
+            shard.leaving = false;
+        }
         Ok(())
     }
 
@@ -225,6 +284,8 @@ impl Shards {
                 region_name: None,
                 client: None,
                 watching: change as usize,
+                started_at: 0,
+                leaving: false,
             };
             known.insert(id.to_string(), shard);
         }
@@ -551,7 +612,8 @@ impl DirectoryService for Internal {
                 let ids: Vec<String> =
                     req.servers.iter().filter_map(|entry| entry.server.as_ref().map(|s| s.id.clone())).collect();
                 self.app.node()?.register_shard(&req.shard_id, &req.url, &req.region, &ids).await?;
-                self.shards()?.register(&req.shard_id, &req.url, &req.region, region_name)?;
+                let started_at = req.started_at.as_ref().map(crate::id::millis).unwrap_or_default();
+                self.shards()?.register(&req.shard_id, &req.url, &req.region, region_name, started_at)?;
                 for server_id in settled {
                     super::moves::settled(&self.app, &server_id).await;
                 }
@@ -567,6 +629,18 @@ impl DirectoryService for Internal {
                     shards.left.write().unwrap_or_else(|p| p.into_inner()).retain(|id| index.placement(id).is_none());
                 }
                 Ok(answer)
+            }
+            .await,
+        )
+    }
+
+    async fn hand_off(&self, request: Request<cpb::HandOffRequest>) -> Result<Response<cpb::HandOffResponse>, Status> {
+        respond(
+            async {
+                let shard = request.into_inner().shard_id;
+                super::check_shard_id(&shard).map_err(Error::invalid)?;
+                let (moved, left) = super::moves::hand_off(&self.app, &shard).await?;
+                Ok(cpb::HandOffResponse { moved, left })
             }
             .await,
         )

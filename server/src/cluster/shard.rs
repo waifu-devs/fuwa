@@ -52,6 +52,9 @@ pub struct Link {
     dirty: AtomicBool,
     registered: watch::Sender<bool>,
     ride_out: Duration,
+    /// When this process started, which the directory compares between
+    /// shards to tell which already restarted in a deploy.
+    started_at: i64,
 }
 
 impl Link {
@@ -68,6 +71,7 @@ impl Link {
             dirty: AtomicBool::new(false),
             registered: watch::Sender::new(false),
             ride_out: cluster.ride_out,
+            started_at: crate::id::now_ms(),
         })
     }
 
@@ -242,6 +246,7 @@ async fn register(app: &App, link: &Link) {
                 servers,
                 region: cluster.region.clone(),
                 region_name: cluster.region_name.clone().unwrap_or_default(),
+                started_at: Some(crate::id::timestamp(link.started_at)),
             };
             let answer = link.directory().register_shard(request).await?.into_inner();
             super::moves::after_registering(app, &answer).await;
@@ -264,6 +269,32 @@ async fn register(app: &App, link: &Link) {
         }
     }
     link.dirty.store(true, Ordering::SeqCst);
+}
+
+/// Before a shard stops (a deploy, a restart), has the directory move its
+/// servers to the other shards in its region, keeping their calls, so
+/// nobody waits for this one to come back (FUWA_HANDOFF bounds how long it
+/// tries). Whatever doesn't make it in time waits for it, as before.
+pub async fn hand_off(app: &App) {
+    let AppLink::Shard(link) = &app.link else { return };
+    let within = app.config.cluster.hand_off;
+    let servers = app.servers.len();
+    if within.is_zero() || servers == 0 {
+        return;
+    }
+    tracing::info!(servers, "handing this shard's servers to the others in its region before stopping");
+    let request = cpb::HandOffRequest { shard_id: link.id.clone() };
+    match tokio::time::timeout(within, link.directory().hand_off(request)).await {
+        Ok(Ok(answer)) => {
+            let answer = answer.into_inner();
+            match answer.left {
+                0 => tracing::info!(moved = answer.moved, "handed every server over"),
+                left => tracing::info!(moved = answer.moved, left, "some servers stay, waiting for this shard"),
+            }
+        }
+        Ok(Err(_)) => tracing::warn!("couldn't hand this shard's servers over; they wait for it to come back"),
+        Err(_) => tracing::warn!(?within, "handing this shard's servers over took too long; the rest wait for it"),
+    }
 }
 
 // ─────────────── Taking over a single process's servers ───────────────
@@ -644,7 +675,8 @@ impl ShardService for Internal {
     type SendServerStream = MovedStream;
 
     async fn send_server(&self, request: Request<cpb::SendServerRequest>) -> Result<Response<MovedStream>, Status> {
-        let pieces = super::moves::send(self.app.clone(), request.into_inner().server_id);
+        let req = request.into_inner();
+        let pieces = super::moves::send(self.app.clone(), req.server_id, req.keep_calls);
         Ok(Response::new(Box::pin(ReceiverStream::new(pieces))))
     }
 
@@ -654,7 +686,7 @@ impl ShardService for Internal {
     ) -> Result<Response<cpb::AdoptServerResponse>, Status> {
         let req = request.into_inner();
         respond(
-            super::moves::adopt(&self.app, &req.server_id, &req.from_url)
+            super::moves::adopt(&self.app, &req.server_id, &req.from_url, req.keep_calls)
                 .await
                 .map(|entry| cpb::AdoptServerResponse { entry: Some(entry) }),
         )
@@ -666,7 +698,9 @@ impl ShardService for Internal {
     ) -> Result<Response<cpb::ReleaseServerResponse>, Status> {
         let req = request.into_inner();
         respond(
-            super::moves::release(&self.app, &req.server_id, req.keep).await.map(|()| cpb::ReleaseServerResponse {}),
+            super::moves::release(&self.app, &req.server_id, req.keep, req.keep_calls)
+                .await
+                .map(|()| cpb::ReleaseServerResponse {}),
         )
     }
 

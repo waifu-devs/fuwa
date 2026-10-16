@@ -1311,6 +1311,134 @@ async fn calls_ride_out_a_media_restart() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stopping_shard_hands_its_servers_over_calls_and_all() {
+    let root = tempfile::tempdir().unwrap();
+    let (media_listener, media_addr) = listen().await;
+    let (media, _calls) = start_media(&root.path().join("media"), media_listener, media_addr).await;
+    let media_url = [("FUWA_MEDIA_URL", media.url())];
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let directory = start_directory(root.path(), &media_url, listener, addr, gateway_addr).await;
+    let a = start_shard_with(&root.path().join("shard-a"), "a", &directory, &media_url).await;
+    let b = start_shard_with(&root.path().join("shard-b"), "b", &directory, &media_url).await;
+    let (gateway, _gateway) = start_gateway(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr);
+    let cluster = Cluster { directory, shards: vec![a, b], gateway, _gateway };
+
+    let channel = Channel::from_shared(cluster.gateway.url()).unwrap().connect().await.unwrap();
+    let mut c = clients(&cluster.gateway).await;
+    let mut voice = pb::call_service_client::CallServiceClient::new(channel);
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Calls").await;
+    join(&mut c, &mika, &server.id).await.unwrap();
+    let text = general(&mut c, &juan, &server.id).await;
+    let lounge = c
+        .channels
+        .create_channel(authed(
+            &juan,
+            pb::CreateChannelRequest {
+                server_id: server.id.clone(),
+                name: "Lounge".into(),
+                r#type: pb::ChannelType::Voice as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    let (from, to) = match cluster.placement(&server.id).as_deref() {
+        Some("a") => (0, "b"),
+        _ => (1, "a"),
+    };
+
+    // Two people talking, and a live stream.
+    let join_voice = |token: String, offer: String| {
+        let mut voice = voice.clone();
+        let request = pb::JoinVoiceRequest {
+            server_id: server.id.clone(),
+            channel_id: lounge.id.clone(),
+            offer,
+            ..Default::default()
+        };
+        async move { voice.join_voice(authed(&token, request)).await.unwrap().into_inner() }
+    };
+    let (mut a, offer) = common::Peer::new().await;
+    let a_joined = join_voice(juan.clone(), offer).await;
+    a.answer(&a_joined.answer);
+    let (mut b, offer) = common::Peer::new().await;
+    let b_joined = join_voice(mika.clone(), offer).await;
+    b.answer(&b_joined.answer);
+    common::talk(&mut a, &mut b, Duration::from_secs(2)).await;
+    assert!(b.heard.len() > 20, "sound goes through");
+    let cursors = vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }];
+    let mut stream = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(next(&mut stream).await.ready.is_some());
+    send(&mut c, &juan, &server.id, &text.id, "before").await;
+
+    // The shard holding it is told to stop: it hands the server to the other one first.
+    let signalled = (a.signals.len(), b.signals.len());
+    let stopping = cluster.shards[from].app().clone();
+    fuwa_server::cluster::shard::hand_off(&stopping).await;
+    assert_eq!(cluster.placement(&server.id).as_deref(), Some(to));
+    assert!(!stopping.servers.holds(&server.id), "the stopping shard let go of it");
+    assert_eq!(stopping.servers.len(), 0);
+
+    // The call never stopped: nobody was told to join again, the sound goes on, and
+    // both are still in it on the new shard, keeping their places as before.
+    let heard_before = b.heard.len();
+    common::talk(&mut a, &mut b, Duration::from_secs(2)).await;
+    assert!(b.heard.len() > heard_before + 20, "sound carried on through the hand-off");
+    let told: Vec<&String> = a.signals[signalled.0..].iter().chain(&b.signals[signalled.1..]).collect();
+    assert!(told.iter().all(|signal| *signal == "offer"), "nobody was hung up or told to rejoin: {told:?}");
+    let states = voice
+        .list_voice_states(authed(&juan, pb::ListVoiceStatesRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .states;
+    assert_eq!(states.len(), 2, "both places came along");
+    let kept = voice
+        .keep_voice(authed(
+            &juan,
+            pb::KeepVoiceRequest {
+                server_id: server.id.clone(),
+                session_id: a_joined.session_id.clone(),
+                channel_id: lounge.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect("keeping the place works on the new shard")
+        .into_inner();
+    assert_eq!(kept.state.unwrap().joined_at, a_joined.state.unwrap().joined_at, "the same place, not a new one");
+
+    // Messages go on, and the live stream followed the server.
+    send(&mut c, &juan, &server.id, &text.id, "after").await;
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "before");
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "after");
+
+    // No new server goes to a shard that's leaving.
+    for _ in 0..3 {
+        let made = create_server(&mut c, &juan, "Later").await;
+        assert_eq!(cluster.placement(&made.id).as_deref(), Some(to));
+    }
+
+    cluster.stop().await;
+    media.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn channels_are_shared_across_shards() {
     let root = tempfile::tempdir().unwrap();
     let cluster = start_cluster(root.path(), &[]).await;

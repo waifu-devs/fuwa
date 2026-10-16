@@ -316,11 +316,20 @@ Calls ride out deploys:
   forgets who's in, but the media part still carries their sound. The next
   keep puts them back, only if the media part says that session is still
   connected there.
+- **A shard handing its servers over** before it stops (a deploy, see
+  [Restarts and deploys](../README.md#restarts-and-deploys)) sends the places
+  in their calls to the shard taking each server, which is in the same region
+  and so on the same media parts. Nobody is hung up and the sound never stops:
+  while the server moves, keeps and joins wait at the gateway, then go to the
+  new shard, which already has everyone's place. Programs listening
+  (ListenVoice) are told to listen again, which `fuwa-voice` and the SDK do by
+  themselves. A recording on the server ends and a new one starts.
 - **A connection that drops** (Wi-Fi changing, a laptop waking up) reconnects
   the same way, fetching fresh TURN credentials first.
 
 `server/tests/calls.rs` and `server/tests/cluster.rs`
-(`calls_ride_out_a_media_restart`) cover these.
+(`calls_ride_out_a_media_restart`, `a_stopping_shard_hands_its_servers_over_calls_and_all`)
+cover these.
 
 ## Agents, bots and apps
 

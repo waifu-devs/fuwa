@@ -179,6 +179,28 @@ impl Voice {
         out.into_iter().map(|(s, c, u, _)| (s, c, u)).collect()
     }
 
+    /// Takes every place in a scope out, quietly: nobody is hung up, for a
+    /// server whose calls carry on on another shard.
+    pub fn take(&self, scope: &str) -> Vec<Place> {
+        self.lock().remove(scope).map(|s| s.places.into_values().collect()).unwrap_or_default()
+    }
+
+    /// Puts places taken from another shard in, the call started by whoever
+    /// joined first.
+    pub fn carry_in(&self, scope: &str, places: Vec<Place>) {
+        let joined = |p: &Place| p.state.joined_at.as_ref().map(crate::id::millis).unwrap_or_default();
+        let Some(first) = places.iter().min_by_key(|p| joined(p)) else { return };
+        let mut scopes = self.lock();
+        let entry = scopes.entry(scope.to_string()).or_insert_with(|| Scope {
+            started_at: Some(joined(first)).filter(|at| *at > 0).unwrap_or_else(now_ms),
+            started_by: first.state.user_id.clone(),
+            ..Default::default()
+        });
+        for place in places {
+            entry.places.entry(place.state.user_id.clone()).or_insert(place);
+        }
+    }
+
     /// Lets go of the places nobody kept, as of `now`.
     pub fn expire(&self, now: Instant) -> Vec<(String, Place)> {
         let mut scopes = self.lock();

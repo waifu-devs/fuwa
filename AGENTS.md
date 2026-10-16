@@ -619,7 +619,12 @@
     deleting its files, recordings and replica copies, and ending live
     streams with `Misrouted` so gateways follow) and the new one starts
     replicating. `sort_registration` keeps a restart mid-move from putting a
-    server in two places.
+    server in two places. The same moves, within a region and keeping calls
+    (their places sent along, `keep_calls`), empty a shard that's told to
+    stop: `shard::hand_off` asks the directory's `HandOff`, which moves each
+    server to `Shards::successor` (up, not leaving, started after it, then
+    emptiest) before the shard stops serving (FUWA_HANDOFF bounds it).
+    fuwa.chat deploys one part at a time with `.railway/rollout.mjs`.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
@@ -1093,11 +1098,15 @@
   shards (a volume each) and gateway replicas; shards can be added, never
   removed. `fuwa-media` carries calls' sound, reached by apps through a TCP
   proxy (Railway has no public UDP), one replica. Every merge to master redeploys each service it declares onto the
-  new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
+  new image (the `Deploy fuwa.chat` job in `publish.yml`, through
+  `.railway/rollout.mjs`: one part at a time, media, each region's shards in
+  turn, the directory, gateways last, each up before the next); with a volume
   attached, Railway stops the old deployment before starting the new one, so
   while it's one process each deploy briefly drops connections. Split, only
-  the directory and shards have volumes, and the gateways (which overlap old
-  and new) ride out their restarts. A pull request that touches it gets a plan comment and merging
+  the directory and shards have volumes: a stopping shard hands its servers
+  to the others in its region first (so each region keeps two shards or
+  more, and the split parts don't take Railway's auto updates), and the
+  gateways (which overlap old and new) ride out the directory's restart. A pull request that touches it gets a plan comment and merging
   applies it (`.github/workflows/railway-config.yml`); the root `package.json`
   exists only for this. The encryption key is a shared variable set by hand and
   must never change; so is the cluster key, which can. Don't edit the project in Railway's dashboard between a

@@ -99,6 +99,10 @@ pub struct ClusterConfig {
     /// FUWA_REGION_NAME: what people see for this region; built in for
     /// common labels.
     pub region_name: Option<String>,
+    /// FUWA_HANDOFF: how long a stopping shard may spend handing its servers
+    /// to the other shards in its region before it exits ([`HANDOFF`]);
+    /// zero (`off`) exits at once, leaving them to wait for it.
+    pub hand_off: Duration,
 }
 
 impl std::fmt::Debug for ClusterConfig {
@@ -113,6 +117,7 @@ impl std::fmt::Debug for ClusterConfig {
             .field("ride_out", &self.ride_out)
             .field("region", &self.region)
             .field("region_name", &self.region_name)
+            .field("hand_off", &self.hand_off)
             .finish()
     }
 }
@@ -129,6 +134,7 @@ impl ClusterConfig {
             ride_out: RIDE_OUT,
             region: String::new(),
             region_name: None,
+            hand_off: Duration::ZERO,
         }
     }
 
@@ -195,6 +201,11 @@ impl ClusterConfig {
                     .into(),
             );
         }
+        let hand_off = match get("FUWA_HANDOFF").as_deref().map(str::trim) {
+            None | Some("") | Some("on") => HANDOFF,
+            Some("off") | Some("0") => Duration::ZERO,
+            Some(other) => crate::config::parse_duration(other).map_err(|err| format!("FUWA_HANDOFF {err}"))?,
+        };
         let shard_id = get("FUWA_SHARD_ID").map(|id| id.trim().to_string());
         if let Some(id) = &shard_id {
             check_shard_id(id).map_err(|err| format!("FUWA_SHARD_ID {err}"))?;
@@ -209,6 +220,7 @@ impl ClusterConfig {
             ride_out: RIDE_OUT,
             region,
             region_name,
+            hand_off,
         })
     }
 
@@ -421,6 +433,11 @@ impl Backoff {
 /// before giving up on it. A part with a volume can't overlap its old and new
 /// deployments, so it's gone for a few seconds each time.
 pub const RIDE_OUT: Duration = Duration::from_secs(30);
+
+/// How long a stopping shard spends at most handing its servers over to the
+/// other shards in its region (FUWA_HANDOFF), so it must be given a little
+/// longer than this to stop (Railway's draining time, `docker stop -t`).
+pub const HANDOFF: Duration = Duration::from_secs(240);
 
 /// Paces tries at a part that's restarting: right away, then a little longer
 /// each time up to a second, until the time runs out.

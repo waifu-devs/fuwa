@@ -18,6 +18,7 @@ use tonic::{Request, Response, Status};
 use super::friends::blocks_any;
 use super::{Api, Seat, respond};
 use crate::app::App;
+use crate::cpb;
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::node::Account;
@@ -81,6 +82,13 @@ async fn listen(app: Arc<App>, server_id: String, mut place: Place, mut events: 
                 let session = place.session_id.clone();
                 match app.voice.update(&server_id, &user_id, |p| if p.session_id == session { p.expires = lease() }) {
                     Some(kept) if kept.session_id == session && app.settings().calls => place = kept,
+                    // The server went to another shard, its call and this
+                    // place with it: listening again finds it there.
+                    _ if app.servers.get(&server_id).await.is_ok_and(|sdb| sdb.writable().is_err())
+                        || !app.servers.holds(&server_id) =>
+                    {
+                        break Status::unavailable("this server moved to another part of the instance; listen again");
+                    }
                     _ => break moved_away().into(),
                 }
             }
@@ -212,6 +220,33 @@ pub async fn hang_up_server(app: &App, server_id: &str) {
             gone(app, server_id, &place).await;
         }
     }
+}
+
+/// Takes everyone in a server's voice channels out of this shard without
+/// hanging them up, for a server moving to a shard on the same media parts:
+/// their calls carry on there ([`take_calls`]).
+pub fn carry_calls(app: &App, server_id: &str) -> Vec<cpb::CarriedPlace> {
+    app.voice
+        .take(server_id)
+        .into_iter()
+        .map(|place| cpb::CarriedPlace { session_id: place.session_id, room: place.room, state: Some(place.state) })
+        .collect()
+}
+
+/// Puts the places [`carry_calls`] took on another shard in here, as they
+/// were. Their apps' next keep finds them.
+pub fn take_calls(app: &App, server_id: &str, places: Vec<cpb::CarriedPlace>) {
+    let places = places
+        .into_iter()
+        .filter_map(|carried| {
+            let state = carried.state?;
+            // Only the server's own voice channels.
+            let ok =
+                carried.room == voice::channel_room(server_id, &state.channel_id) && !carried.session_id.is_empty();
+            ok.then(|| Place { session_id: carried.session_id, room: carried.room, state, expires: lease() })
+        })
+        .collect();
+    app.voice.carry_in(server_id, places);
 }
 
 /// Who may still be where they are in a server's voice channels.
@@ -541,7 +576,10 @@ impl Api {
         if req.frames.len() > crate::rtc::MAX_QUEUED {
             return Err(Error::invalid(format!("at most {} frames at a time", crate::rtc::MAX_QUEUED)));
         }
-        let server_id = self.app.servers.get(&req.server_id).await?.id.clone();
+        let sdb = self.app.servers.get(&req.server_id).await?;
+        // Moving to another shard: said there once it's arrived.
+        sdb.writable()?;
+        let server_id = sdb.id.clone();
         let place = self
             .app
             .voice
@@ -558,6 +596,8 @@ impl Api {
     async fn leave_voice(&self, metadata: &MetadataMap, req: pb::LeaveVoiceRequest) -> Result<pb::LeaveVoiceResponse> {
         let account = self.account(metadata).await?;
         let sdb = self.app.servers.get(&req.server_id).await?;
+        // Moving to another shard, with its calls: left there once it's arrived.
+        sdb.writable()?;
         if let Some(place) = self.app.voice.remove(&sdb.id, &account.id, Some(&req.session_id)) {
             self.app.media_link.close(&place.room, Some(&account.id), Some(&place.session_id)).await;
             gone(&self.app, &sdb.id, &place).await;
@@ -580,6 +620,8 @@ impl Api {
             return Err(Error::invalid("which call session?"));
         }
         let sdb = self.app.servers.get(&req.server_id).await?;
+        // Moving to another shard, with its calls: kept there once it's arrived.
+        sdb.writable()?;
         let server_id = sdb.id.clone();
         let before = self.app.voice.get(&server_id, &account.id);
         if before.as_ref().is_some_and(|p| p.session_id != req.session_id) {

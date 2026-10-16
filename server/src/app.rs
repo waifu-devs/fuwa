@@ -756,7 +756,21 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         crate::api::spawn_search_indexer(app.clone());
         crate::api::spawn_minute_earnings(app.clone());
     }
-    spawn_signal_handler(app.shutdown.clone());
+    match &app.link {
+        // A shard hands its servers over before it stops serving, so nobody
+        // waits for it to come back.
+        Link::Shard(_) => {
+            let stopping = CancellationToken::new();
+            spawn_signal_handler(stopping.clone());
+            let app = app.clone();
+            tokio::spawn(async move {
+                stopping.cancelled().await;
+                crate::cluster::shard::hand_off(&app).await;
+                app.shutdown.cancel();
+            });
+        }
+        _ => spawn_signal_handler(app.shutdown.clone()),
+    }
     crate::api::spawn_voice_sweeper(app.clone());
     crate::api::spawn_voice_guard(app.clone());
     crate::recordings::Recordings::spawn(app.clone());
