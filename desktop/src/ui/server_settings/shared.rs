@@ -314,6 +314,14 @@ fn instance_line(instance: &str, fingerprint: &str, note: &str, p: &Palette) -> 
 }
 
 impl ServerSettingsView {
+    /// Where this instance keeps servers (docs/regions.md).
+    fn regions(&self) -> Vec<pb::Region> {
+        self.core
+            .shared
+            .read(|s| s.instance(&self.key).and_then(|i| i.node.as_ref().map(|n| n.regions.clone())))
+            .unwrap_or_default()
+    }
+
     /// Reads the server's shared channels once for this view; the event stream keeps them current.
     pub(super) fn load_shared(&mut self, cx: &mut Context<Self>) {
         if self.shared.asked_for.as_deref() == Some(self.server.as_str()) {
@@ -775,7 +783,7 @@ impl ServerSettingsView {
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .child(preview_card(&preview, url, &code, p))
+            .child(preview_card(&preview, url, &code, &self.regions(), p))
             .child(labeled(
                 &t("serversettings.sharedChannels.nameHere"),
                 Input::new(&self.shared.name).prefix(icon("hash").size(px(16.0)).text_color(p.muted_foreground)),
@@ -1627,7 +1635,7 @@ fn nothing_shared(p: &Palette) -> impl IntoElement {
 }
 
 /// Where a code leads: whose channel it is, where what's said is kept, and what your people may do there.
-fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &Palette) -> Div {
+fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, regions: &[pb::Region], p: &Palette) -> Div {
     let home = preview.home_server.as_ref();
     let home_name = home.map_or_else(|| t("serversettings.sharedChannels.theOtherServer"), |s| s.name.clone());
     let left = ms(preview.expires_at.as_ref()) - now_ms();
@@ -1659,7 +1667,16 @@ fn preview_card(preview: &pb::PreviewShareResponse, url: &str, code: &str, p: &P
     body = body.child(line(
         "database",
         1,
-        div().child(t_with("serversettings.sharedChannels.storedOn", &[("server", Arg::Str(&home_name))])),
+        // Where on this instance, when it keeps servers in more than one region (another instance's are its own).
+        div().child(if crate::core::instance_servers::has_regions(regions) && preview.instance.is_empty() {
+            let region = crate::core::instance_servers::region_name(regions, &preview.region);
+            t_with(
+                "serversettings.sharedChannels.storedOnIn",
+                &[("server", Arg::Str(&home_name)), ("region", Arg::Str(&region))],
+            )
+        } else {
+            t_with("serversettings.sharedChannels.storedOn", &[("server", Arg::Str(&home_name))])
+        }),
     ));
     if !preview.checked_by.is_empty() {
         body = body.child(line(

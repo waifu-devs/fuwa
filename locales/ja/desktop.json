@@ -189,7 +189,6 @@
   "server.audit.webhookUpdate": "{actor}がウェブフック{name}を変更しました",
   "server.audit.sharedRequest": "{actor}が{server}の{channel}の表示をリクエストしました",
   "server.audit.sharedUpdate": "{actor}が{channel}で相手のサーバーができることを変更しました",
-  "server.agents.none": "まだエージェントはいません。ユーザー名で追加できます。エージェントはウェブアプリの「設定」→「エージェント」で作成します。",
   "server.automod.rule": "ルール",
   "server.automod.namePlaceholder": "名前を付ける",
   "server.automod.morePings": "{count}件を超えるメンション",

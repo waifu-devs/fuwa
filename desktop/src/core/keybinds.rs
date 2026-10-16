@@ -61,7 +61,7 @@ const fn action(
     Action { id, label, group, combo, while_typing, repeats }
 }
 
-pub const ACTIONS: [Action; 20] = [
+pub const ACTIONS: [Action; 22] = [
     action("quickSwitcher", "Find a server or channel", Group::Navigation, Some("Mod+K"), true, false),
     action("searchServer", "Search this server's messages", Group::Navigation, Some("Mod+F"), true, false),
     action("previousServer", "Previous server", Group::Navigation, Some("Mod+Alt+ArrowUp"), true, true),
@@ -77,6 +77,8 @@ pub const ACTIONS: [Action; 20] = [
     action("toggleMute", "Mute or unmute yourself", Group::Voice, Some("Mod+Shift+M"), true, false),
     action("toggleDeafen", "Deafen or undeafen yourself", Group::Voice, Some("Mod+Shift+D"), true, false),
     action("pushToTalk", "Push to talk (hold)", Group::Voice, None, true, false),
+    action("toggleCamera", "Turn your camera on or off", Group::Voice, None, true, false),
+    action("toggleScreen", "Share your screen, or stop", Group::Voice, None, true, false),
     action("toggleRecording", "Record the call, or stop and save it", Group::Voice, None, true, false),
     action("toggleOverlay", "Use the game overlay", Group::Voice, Some("Shift+Backquote"), true, false),
     action("openSettings", "Open settings", Group::App, Some("Mod+Comma"), true, false),

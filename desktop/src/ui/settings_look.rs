@@ -86,15 +86,25 @@ impl SettingsView {
             multiple: false,
             prompt: Some(t("desktop.look.importTheme").into()),
         });
-        let (core, key, dark) = (self.core.clone(), instance_in_use(self), system_dark(window.appearance()));
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(path) = paths.into_iter().next() else { return };
-            let _ = this.update(cx, |this, cx| {
-                this.look.busy = true;
-                this.look.note = None;
-                cx.notify();
-            });
+            let _ = this.update_in(cx, |this, window, cx| this.import_theme_from(path, window, cx));
+        })
+        .detach();
+    }
+
+    /// Reads a theme file (picked, or dropped on the Themes page), uploads its
+    /// picture (if it has one) and puts the theme on.
+    pub(crate) fn import_theme_from(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.look.busy {
+            return;
+        }
+        self.look.busy = true;
+        self.look.note = None;
+        cx.notify();
+        let (core, key, dark) = (self.core.clone(), instance_in_use(self), system_dark(window.appearance()));
+        cx.spawn(async move |this, cx| {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {

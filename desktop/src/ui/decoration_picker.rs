@@ -129,7 +129,12 @@ impl SettingsView {
                                 .active(|s| s.scale(0.95))
                                 .on_click(cx.listener(move |this, _, _, cx| pick(this, pick_id.clone(), cx)))
                         })
-                        .when(!open, |el| el.cursor_not_allowed())
+                        // A locked one is sold in the server's shop: it opens there (the web's `onLocked`).
+                        .when(!open, |el| {
+                            el.cursor_pointer()
+                                .hover(|s| s.translate_y(px(-3.0)))
+                                .on_click(cx.listener(|this, _, _, cx| this.locked_to_shop(cx)))
+                        })
                         .child(square)
                         .child(
                             div()

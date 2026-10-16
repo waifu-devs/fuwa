@@ -201,7 +201,6 @@
   "server.audit.webhookUpdate": "{actor}: изменён вебхук {name}",
   "server.audit.sharedRequest": "{actor}: запрос на показ {channel} с {server}",
   "server.audit.sharedUpdate": "{actor}: изменено, что может другой сервер в {channel}",
-  "server.agents.none": "Агентов здесь пока нет. Добавьте агента по имени пользователя; агенты создаются в веб-приложении в разделе «Настройки», «Агенты».",
   "server.automod.rule": "Правило",
   "server.automod.namePlaceholder": "Дайте ему название",
   "server.automod.morePings": "Больше {count} упоминаний",

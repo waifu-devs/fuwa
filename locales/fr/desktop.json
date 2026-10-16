@@ -193,7 +193,6 @@
   "server.audit.webhookUpdate": "{actor} a modifié le webhook {name}",
   "server.audit.sharedRequest": "{actor} a demandé à afficher {channel} depuis {server}",
   "server.audit.sharedUpdate": "{actor} a modifié ce que l’autre serveur peut faire dans {channel}",
-  "server.agents.none": "Pas encore d’agents ici. Ajoutes-en un avec son nom d’utilisateur ; les agents se créent dans Paramètres, Agents, dans l’app web.",
   "server.automod.rule": "Règle",
   "server.automod.namePlaceholder": "Donne-lui un nom",
   "server.automod.morePings": "Plus de {count} mentions",
