@@ -770,5 +770,12 @@
   "economy.send.have": "У вас {amount}",
   "economy.send.sending": "Отправка…",
   "economy.send.sent": "Отправлено!",
-  "economy.audit.value.changed": "изменено"
+  "economy.audit.value.changed": "изменено",
+  "media.play": "Воспроизвести",
+  "media.pause": "Пауза",
+  "media.mute": "Выключить звук",
+  "media.unmute": "Включить звук",
+  "media.cantPlay": "Приложение не может воспроизвести такой файл. Сохраните его, чтобы воспроизвести.",
+  "media.broken": "Не удалось прочитать этот файл.",
+  "media.noSpeakers": "Не удалось открыть динамики."
 }

@@ -396,7 +396,14 @@ impl Encoder {
 
 // ───────────────────────── Decoding ─────────────────────────
 
-/// A VP8 decoder that hands back pictures as BGRA.
+/// Which of libvpx's decoders: calls send VP8, and videos in messages may be either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Codec {
+    Vp8,
+    Vp9,
+}
+
+/// A VP8 (or VP9) decoder that hands back pictures as BGRA.
 #[cfg(not(any(windows, feature = "system-libvpx")))]
 pub struct Decoder {
     inner: vpx::Decoder,
@@ -405,7 +412,15 @@ pub struct Decoder {
 #[cfg(not(any(windows, feature = "system-libvpx")))]
 impl Decoder {
     pub fn new() -> Result<Self, String> {
-        let inner = vpx::Decoder::new(vpx::DecoderConfig::new(vpx::DecoderCodec::Vp8)).map_err(|e| e.to_string())?;
+        Self::of(Codec::Vp8)
+    }
+
+    pub fn of(codec: Codec) -> Result<Self, String> {
+        let codec = match codec {
+            Codec::Vp8 => vpx::DecoderCodec::Vp8,
+            Codec::Vp9 => vpx::DecoderCodec::Vp9,
+        };
+        let inner = vpx::Decoder::new(vpx::DecoderConfig::new(codec)).map_err(|e| e.to_string())?;
         Ok(Self { inner })
     }
 

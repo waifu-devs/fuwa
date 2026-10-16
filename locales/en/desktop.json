@@ -766,5 +766,12 @@
   "economy.send.have": "You have {amount}",
   "economy.send.sending": "Sending…",
   "economy.send.sent": "Sent!",
-  "economy.audit.value.changed": "changed"
+  "economy.audit.value.changed": "changed",
+  "media.play": "Play",
+  "media.pause": "Pause",
+  "media.mute": "Mute",
+  "media.unmute": "Unmute",
+  "media.cantPlay": "This kind of file can't play in the app. Save it to play it.",
+  "media.broken": "This file couldn't be read.",
+  "media.noSpeakers": "Couldn't open the speakers."
 }
