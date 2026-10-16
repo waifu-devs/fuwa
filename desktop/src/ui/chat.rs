@@ -260,7 +260,7 @@ pub struct Msg {
     /// The GIF it is.
     pub gif: Option<pb::MessageGif>,
     /// The gacha pull it shares.
-    pub gacha: Option<Rc<crate::core::gacha_share::ShareCards>>,
+    pub gacha: Option<Rc<crate::ui::gacha_share::SharedPull>>,
     /// Its thread, or the thread it's in.
     pub thread: ThreadBits,
     /// An agent's buttons, and over its answer who used what.
@@ -703,7 +703,9 @@ impl FuwaApp {
                 })
                 .for_each(|a| a.hash(&mut h));
             m.gif.as_ref().map(|g| (&g.url, g.width, g.height, g.provider)).hash(&mut h);
-            m.gacha.as_ref().map(|g| (&g.pull_id, g.cards.len())).hash(&mut h);
+            if let Some(g) = &m.gacha {
+                crate::ui::gacha_share::SharedPull::digest(g, i.server_list(&server), &mut h);
+            }
             (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
             user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
             decoration.hash(&mut h);
@@ -774,7 +776,9 @@ impl FuwaApp {
                         voice: crate::ui::voice_notes::channel_voice(&m.attachments).0,
                         attachments: crate::ui::voice_notes::channel_voice(&m.attachments).1,
                         gif: m.gif.clone(),
-                        gacha: m.gacha.as_ref().map(|g| Rc::new(crate::core::gacha_share::cards_of_share(g))),
+                        gacha: m.gacha.as_ref().map(|g| {
+                            Rc::new(crate::ui::gacha_share::SharedPull::new(g, i.server_list(&server), &m.author_id))
+                        }),
                         thread: bits.clone(),
                         agent: agent.clone(),
                         pinned,
@@ -2316,7 +2320,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
         text = text.child(crate::ui::threads::replies_row(&m.id, replies, p, &ctx.this));
     }
     if let Some(cards) = &m.gacha {
-        text = text.child(crate::ui::gacha_share::share_card(&m.id, cards, &m.name, &ctx.this));
+        text = text.child(crate::ui::gacha_share::share_card(&m.id, cards, &m.name, m.user.as_ref(), p, &ctx.this));
     }
     if let Some(card) = &m.poll {
         text = text.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this, ctx.fresh.contains_key(&m.id)));

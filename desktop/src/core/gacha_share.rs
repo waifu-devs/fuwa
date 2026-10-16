@@ -473,6 +473,7 @@ mod tests {
             color,
             outcome: c.outcome as i32,
             guaranteed: c.guaranteed,
+            item_id: String::new(),
         };
         let c = &from_pull.cards;
         let share = pb::GachaShare {

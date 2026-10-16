@@ -179,41 +179,64 @@ impl Render for EffectView {
             ));
         }
         let pictures = self.effect.as_ref().map(|s| s.pictures.as_slice()).unwrap_or_default();
-        for particle in &self.particles {
-            let at = if moving { particle.at(elapsed, self.fade_at) } else { particle.still };
-            let Some(f) = at else { continue };
-            if f.opacity <= 0.01 {
-                continue;
-            }
-            let squash = f.flip.map_or(1.0, |d| d.to_radians().cos().abs().max(0.08));
-            let place =
-                div().absolute().left(px(f.x)).top(px(f.y)).size(px(particle.size)).opacity(f.opacity.clamp(0.0, 1.0));
-            let drawn = match (particle.shape, particle.image.and_then(|n| pictures.get(n))) {
-                (Some(shape), _) => place.child(
-                    svg()
-                        .path(SharedString::from(format!("fx/{}.svg", shape.name())))
-                        .size_full()
-                        .text_color(paint(&p, particle.paint, profile))
-                        .with_transformation(
-                            Transformation::rotate(radians(f.rotate.to_radians()))
-                                .with_scaling(size(f.scale * f.scale_x, f.scale * squash)),
-                        ),
-                ),
-                // A picture turns and scales with its box.
-                (None, Some(shown)) => place
-                    .rotate(radians(f.rotate.to_radians()))
-                    .scale_x(f.scale * f.scale_x)
-                    .scale_y(f.scale * squash)
-                    .child(effect_picture(shown, !moving)),
-                (None, None) => continue,
-            };
-            layer = layer.child(drawn);
-        }
+        let at = |particle: &Particle| if moving { particle.at(elapsed, self.fade_at) } else { particle.still };
+        layer = draw_particles(layer, &self.particles, pictures, at, !moving, &p, profile);
         if moving {
             window.request_animation_frame();
         }
         layer
     }
+}
+
+/// Particles over `layer`, each where `at` puts it (`still` holds moving pictures on their first frame).
+fn draw_particles(
+    mut layer: gpui_kit::Div,
+    particles: &[Particle],
+    pictures: &[Picture],
+    at: impl Fn(&Particle) -> Option<fx::Frame>,
+    still: bool,
+    p: &Palette,
+    profile: Hsla,
+) -> gpui_kit::Div {
+    for particle in particles {
+        let Some(f) = at(particle) else { continue };
+        if f.opacity <= 0.01 {
+            continue;
+        }
+        let squash = f.flip.map_or(1.0, |d| d.to_radians().cos().abs().max(0.08));
+        let place =
+            div().absolute().left(px(f.x)).top(px(f.y)).size(px(particle.size)).opacity(f.opacity.clamp(0.0, 1.0));
+        let drawn = match (particle.shape, particle.image.and_then(|n| pictures.get(n))) {
+            (Some(shape), _) => place.child(
+                svg()
+                    .path(SharedString::from(format!("fx/{}.svg", shape.name())))
+                    .size_full()
+                    .text_color(paint(p, particle.paint, profile))
+                    .with_transformation(
+                        Transformation::rotate(radians(f.rotate.to_radians()))
+                            .with_scaling(size(f.scale * f.scale_x, f.scale * squash)),
+                    ),
+            ),
+            // A picture turns and scales with its box.
+            (None, Some(shown)) => place
+                .rotate(radians(f.rotate.to_radians()))
+                .scale_x(f.scale * f.scale_x)
+                .scale_y(f.scale * squash)
+                .child(effect_picture(shown, still)),
+            (None, None) => continue,
+        };
+        layer = layer.child(drawn);
+    }
+    layer
+}
+
+/// An effect's still (what it shows with reduced motion), particles `plan`ned beforehand, filling
+/// its card: for places that draw many and keep no view for each (a pull shared in chat).
+/// Its shader, if any, isn't drawn.
+pub fn still_effect(spec: &fx::Spec, particles: &[Particle], seed: &str, accent: i32, p: &Palette) -> AnyElement {
+    let layer = div().absolute().top_0().left_0().size_full().overflow_hidden();
+    draw_particles(layer, particles, &spec.pictures, |x| x.still, true, p, profile_color(seed, accent))
+        .into_any_element()
 }
 
 /// A built-in effect's line, in the app's language.

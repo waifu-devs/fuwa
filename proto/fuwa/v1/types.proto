@@ -2279,6 +2279,9 @@ message GachaShareCard {
   optional int32 color = 6;
   GachaOutcome outcome = 7;
   bool guaranteed = 8;
+  // The server's profile item it won, while its listing sells one, so apps
+  // can draw it as it's worn. Empty for anything else.
+  string item_id = 9;
 }
 
 message GachaBannersUpdated {

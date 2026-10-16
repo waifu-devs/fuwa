@@ -170,6 +170,10 @@ Escape) turns them all at once; reduced motion shows them turned. Each step
 has a sound made on the spot (`gachaCue` in `lib/sounds.ts`,
 `play_gacha` in `core/sounds.rs`, the same voices), switched by the synced
 `gachaSounds` setting (docs/app-settings.md) and the app's volume.
+A card that won a profile item shows the item itself, worn by you: a
+decoration around your avatar, an effect playing on a tiny card of yours
+once it turns (`ItemArt` in `components/economy/shared.tsx`, `item_art` in
+the desktop's `ui/shop.rs`, which the shop's listings use too).
 
 Once the cards are turned, a pull can be shown off. **Share** posts it in a
 text channel you can write in (`SendMessageRequest.gacha_pull_id`, the
@@ -177,7 +181,10 @@ text channel you can write in (`SendMessageRequest.gacha_pull_id`, the
 message (`Message.gacha`, a `GachaShare`), ranking each card by its banner
 as the apps do, so what's shown is what was drawn and stays so if the banner
 changes. Only your own pulls can be shared, and not in channels shared
-between servers yet. Chat shows it as the pull's little cards. **Save
+between servers yet. Chat shows it as the pull's little cards; a card that
+won a profile item carries its id (`GachaShareCard.item_id`), and while the
+server still has the item it's drawn worn by whoever pulled it (an effect's
+still on the desktop, playing while pointed at on the web). **Save
 image** (on the results and on a shared pull) saves a PNG of the cards,
 laid out the same in both apps (`lib/gacha-share.ts`, `core/gacha_share.rs`,
 tested against one file, `web/src/lib/gacha-share.test.svg`).

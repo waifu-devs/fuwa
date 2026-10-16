@@ -27,14 +27,16 @@ use crate::core::economy::{
     until_next_day,
 };
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::profile_items::item_effect;
 use crate::pb::{self, CurrencyAction as Action, LedgerKind, ShopListingKind as Kind};
 use crate::ui::economy::{currency_icon, gold, money};
 use crate::ui::motion;
+use crate::ui::profile_effect::{EffectView, effect_in, mini_card};
 use crate::ui::server_settings::spinner;
 use crate::ui::settings_controls::{Look, button, field};
 use crate::ui::text::{TIGHT, ms_of, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_lg, radius_xl};
-use crate::ui::widgets::{avatar, error_line, icon, pal, picture};
+use crate::ui::widgets::{avatar, decorated, error_line, icon, pal};
 
 /// How tall a listing is, its gap included.
 const LISTING_ROW: f32 = 92.0;
@@ -98,6 +100,10 @@ pub struct ShopView {
     sent: Option<Instant>,
     error: Option<String>,
     closing: Option<Instant>,
+    /// Effects playing on listings and a pull's cards, one view per place.
+    effects: HashMap<String, Entity<EffectView>>,
+    /// The listing pointed at, whose effect plays.
+    pointed: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -183,6 +189,8 @@ impl ShopView {
             sent: None,
             error: None,
             closing: None,
+            effects: HashMap::new(),
+            pointed: None,
             _subscriptions: subscriptions,
         }
     }
@@ -420,6 +428,7 @@ impl ShopView {
                     .filter(|u| u.id != me)
                     .collect(),
                 economy,
+                me_user: i.me.clone(),
                 my_name: i.display_name(Some(&self.server), &me),
                 channels: {
                     let access = i.access(&self.server);
@@ -463,6 +472,8 @@ struct Facts {
     /// Everyone here but you, for Send.
     members: Vec<pb::User>,
     me: String,
+    /// You, to wear what a listing or a pull shows.
+    me_user: Option<pb::User>,
     /// Your name here, for a pull's picture.
     my_name: String,
     /// Where a pull can be shared: the text channels you can post in (id, name).
@@ -742,9 +753,38 @@ impl ShopView {
         row.into_any_element()
     }
 
+    /// A profile item worn by you, or None when it can't be drawn: a decoration over your avatar
+    /// (`width` across), or an effect on a tiny card of yours `width` wide, playing while
+    /// `playing` in its own view kept by `place`. The web's `ItemArt`.
+    #[allow(clippy::too_many_arguments)]
+    fn item_art(
+        &mut self,
+        item: Option<&pb::ProfileItem>,
+        f: &Facts,
+        place: &str,
+        width: f32,
+        playing: bool,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let item = item?;
+        let me = f.me_user.as_ref()?;
+        if item.kind == pb::ProfileItemKind::Decoration as i32 {
+            if item.picture_url.is_empty() {
+                return None;
+            }
+            let size = width * 0.8;
+            return Some(decorated(avatar(Some(me), size, p), size, Some(&item.picture_url)).into_any_element());
+        }
+        let spec = item_effect(item)?;
+        let card = (width, width * 5.0 / 4.0);
+        let effect = effect_in(&mut self.effects, place, &spec, &me.id, -1, card, playing, cx);
+        Some(mini_card(&me.id, -1, width, p).child(effect).into_any_element())
+    }
+
     /// One listing: what it is, its price, stock and Buy (asked once before).
     fn listing_row(
-        &self,
+        &mut self,
         l: &pb::ShopListing,
         f: &Facts,
         p: &Palette,
@@ -778,13 +818,30 @@ impl ShopView {
                 let base = div()
                     .size(px(44.0))
                     .rounded(radius_xl())
+                    .overflow_hidden()
                     .bg(alpha(p.primary, 0.12))
                     .text_color(p.primary)
                     .flex()
                     .items_center()
                     .justify_center();
-                match item.filter(|i| !i.picture_url.is_empty()) {
-                    Some(i) => base.child(picture(i.picture_url.clone()).size(px(36.0))).into_any_element(),
+                // The item worn by you, like the web's `ListingVisual`: an effect plays while pointed at.
+                let playing = self.pointed.as_deref() == Some(l.id.as_str());
+                let place = format!("listing|{}", l.id);
+                match self.item_art(item, f, &place, 32.0, playing, p, cx) {
+                    Some(art) => {
+                        let id = l.id.clone();
+                        base.id(SharedString::from(format!("listing-art|{}", l.id)))
+                            .on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                                if *on {
+                                    this.pointed = Some(id.clone());
+                                } else if this.pointed.as_deref() == Some(id.as_str()) {
+                                    this.pointed = None;
+                                }
+                                cx.notify();
+                            }))
+                            .child(art)
+                            .into_any_element()
+                    }
                     None => base.child(icon("sparkles").size(px(22.0))).into_any_element(),
                 }
             }
@@ -989,6 +1046,7 @@ impl ShopView {
                 emojis: f.emojis.clone(),
                 members: Vec::new(),
                 me: f.me.clone(),
+                me_user: f.me_user.clone(),
                 my_name: String::new(),
                 channels: Vec::new(),
             });

@@ -19,6 +19,7 @@ import { displayName, formatStamp, toDate } from "@/lib/format";
 import { SPRING } from "@/lib/motion";
 import { cssColor } from "@/lib/permissions";
 import { ITEM_DECORATION, itemEffect } from "@/lib/profile-items";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 /*
@@ -79,6 +80,7 @@ export function listingName(listing: Pick<ShopListing, "name" | "kind" | "target
 
 /** A picture of what a listing sells: the role's color, the item worn by you, or a parcel. */
 export function ListingVisual({ listing, roles, items, me, className }: { listing: ShopListing; roles: readonly Role[]; items: readonly ProfileItem[] | undefined; me: User | undefined | null; className?: string }) {
+  const [hover, setHover] = useState(false);
   if (listing.kind === LISTING_ROLE) {
     const role = roles.find((r) => r.id === listing.targetId);
     const color = role?.color !== undefined ? cssColor(role.color) : undefined;
@@ -88,20 +90,13 @@ export function ListingVisual({ listing, roles, items, me, className }: { listin
       </span>
     );
   }
-  if (listing.kind === LISTING_PROFILE_ITEM) {
-    const item = items?.find((i) => i.id === listing.targetId);
-    if (item?.kind === ITEM_DECORATION && me)
-      return (
-        <span className={cn("grid place-items-center rounded-2xl bg-muted", className)}>
-          <span className="relative size-[60%]">
-            <UserAvatar user={me} className="size-full" />
-            <DecorationImage item={item} />
-          </span>
-        </span>
-      );
-    const spec = item ? itemEffect(item) : null;
-    if (spec && me) return <EffectVisual spec={spec} me={me} className={className} />;
-  }
+  const item = listing.kind === LISTING_PROFILE_ITEM ? items?.find((i) => i.id === listing.targetId) : undefined;
+  if (item && me && hasArt(item))
+    return (
+      <span className={cn("grid place-items-center overflow-hidden rounded-2xl bg-muted", item.kind === ITEM_DECORATION ? "p-[20%]" : "p-1", className)} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+        <ItemArt item={item} me={me} play={hover} />
+      </span>
+    );
   return (
     <span className={cn("grid place-items-center rounded-2xl bg-primary/10 text-primary", className)}>
       <PackageIcon className="size-1/2" />
@@ -109,15 +104,32 @@ export function ListingVisual({ listing, roles, items, me, className }: { listin
   );
 }
 
-/** An effect playing on a tiny card while pointed at. */
-function EffectVisual({ spec, me, className }: { spec: NonNullable<ReturnType<typeof itemEffect>>; me: User; className?: string }) {
-  const [hover, setHover] = useState(false);
+/** Whether `ItemArt` can draw the item: a decoration with its picture, or an effect that plays. */
+export function hasArt(item: ProfileItem): boolean {
+  return item.kind === ITEM_DECORATION ? !!shownPicture(item.pictureUrl) : !!itemEffect(item);
+}
+
+/**
+ * A profile item as you'd wear it, as tall as its parent: a decoration over
+ * your avatar, or an effect on a tiny card of yours, playing while `play`.
+ * Nothing for an item `hasArt` turns down.
+ */
+export function ItemArt({ item, me, play, className }: { item: ProfileItem; me: User; play: boolean; className?: string }) {
+  if (item.kind === ITEM_DECORATION) {
+    if (!shownPicture(item.pictureUrl)) return null;
+    return (
+      <span className={cn("relative block aspect-square h-full", className)}>
+        <UserAvatar user={me} className="size-full" />
+        <DecorationImage item={item} />
+      </span>
+    );
+  }
+  const spec = itemEffect(item);
+  if (!spec) return null;
   return (
-    <span className={cn("grid place-items-center overflow-hidden rounded-2xl bg-muted p-1", className)} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
-      <MiniCard userId={me.id} accent={-1} className="h-full w-auto">
-        <ProfileEffect effect={spec} seed={me.id} play={hover} measure={false} replayOnHover={false} />
-      </MiniCard>
-    </span>
+    <MiniCard userId={me.id} accent={-1} className={cn("h-full w-auto", className)}>
+      <ProfileEffect effect={spec} seed={me.id} play={play} measure={false} replayOnHover={false} />
+    </MiniCard>
   );
 }
 
