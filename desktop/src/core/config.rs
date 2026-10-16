@@ -506,6 +506,9 @@ pub struct Prefs {
     pub streamer_mute_sounds: bool,
     /// Streamer mode keeps notifications quiet.
     pub streamer_mute_notifications: bool,
+    /// Streamer mode turns on while OBS or XSplit runs (`core::streaming`).
+    /// This computer's alone: the web app can't see programs.
+    pub streamer_auto: bool,
     /// Voice and audio: devices by name, "" for the system's default.
     pub input_device: String,
     pub output_device: String,
@@ -627,6 +630,7 @@ impl Default for Prefs {
             streamer_hide_personal: true,
             streamer_mute_sounds: true,
             streamer_mute_notifications: true,
+            streamer_auto: false,
             input_device: String::new(),
             output_device: String::new(),
             input_volume: 100,

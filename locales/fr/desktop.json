@@ -36,6 +36,8 @@
   "settings.yourInstance": "ton instance",
   "settings.removeHere": "Retirer de cet ordinateur",
   "settings.streamerHidePersonalHint": "Une adresse auto-hébergée peut être une IP personnelle. Les adresses et ton nom d’utilisateur deviennent des points partout dans l’app.",
+  "settings.streamerAutoToggle": "Tant qu’OBS ou XSplit est ouvert",
+  "settings.streamerAutoHint": "fuwa regarde le nom des programmes ouverts toutes les quelques secondes et ne garde rien. Le mode streamer se coupe quand ils se ferment, sauf si tu l’avais activé toi-même.",
   "voice.micFailed": "Impossible d’ouvrir ce micro.",
   "voice.micBlocked": "macOS n’autorise pas fuwa à utiliser ton micro. Autorise-le dans Réglages Système, sous Confidentialité et sécurité, puis Micro.",
   "voice.openPrivacy": "Ouvrir Réglages Système",

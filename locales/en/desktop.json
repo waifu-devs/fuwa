@@ -36,6 +36,8 @@
   "settings.yourInstance": "your instance",
   "settings.removeHere": "Remove from this computer",
   "settings.streamerHidePersonalHint": "A self-hosted address can be a home IP. Addresses and your username turn into dots everywhere in the app.",
+  "settings.streamerAutoToggle": "While OBS or XSplit is open",
+  "settings.streamerAutoHint": "fuwa checks the names of the programs running every few seconds, and keeps nothing. Streamer mode goes off again when they close, unless you'd turned it on yourself.",
   "voice.micFailed": "Couldn't open that microphone.",
   "voice.micBlocked": "macOS isn't letting fuwa use your microphone. Allow it in System Settings, under Privacy & Security, then Microphone.",
   "voice.openPrivacy": "Open System Settings",

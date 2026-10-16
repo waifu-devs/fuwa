@@ -77,6 +77,7 @@ pub mod sounds;
 pub mod spoilers;
 pub mod sso;
 pub mod store;
+pub mod streaming;
 mod sync;
 pub mod themes;
 pub mod threads;
@@ -447,6 +448,8 @@ pub struct Core {
     pub games: Arc<presence::Games>,
     /// Listening for games, while that's on.
     games_listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Watching for streaming programs, while streamer mode follows them (`streaming.rs`).
+    streaming_watch: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Keys heard while another program is in front (push to talk, the overlay).
     pub hotkeys: Arc<hotkeys::Hotkeys>,
     /// Whether you've stepped away, which goes out with this app's presence.
@@ -511,6 +514,7 @@ impl Core {
             move || shared.poke(&[Area::Window])
         });
         let game_activity = prefs.game_activity;
+        let streamer_auto = prefs.streamer_auto;
         // Custom shaders being tried are kept in the settings, so one that stops the app is remembered.
         effects::status::start(
             prefs.shaders_trying.clone(),
@@ -542,6 +546,7 @@ impl Core {
             voice: voice::Voice::default(),
             games,
             games_listener: Mutex::new(None),
+            streaming_watch: Mutex::new(None),
             hotkeys: hotkeys::Hotkeys::start(),
             idle: presence::Idle::new(),
             kept: Mutex::new(HashMap::new()),
@@ -551,6 +556,7 @@ impl Core {
         });
         let _ = core.this.set(Arc::downgrade(&core));
         core.listen_for_games(game_activity);
+        core.watch_streaming(streamer_auto);
         let idle = core.idle.clone();
         core.runtime.spawn(async move {
             loop {
@@ -647,6 +653,7 @@ impl Core {
         sounds::set_picks(&self.paths.sounds(), &prefs.sound_picks);
         reports::set_enabled(prefs.share_reports);
         self.listen_for_games(prefs.game_activity);
+        self.watch_streaming(prefs.streamer_auto);
         self.games.set_answers(prefs.game_answers.clone());
         config::store_prefs(&self.paths, &prefs);
         // A call going on hears its volumes and microphone processing at once.
@@ -669,6 +676,34 @@ impl Core {
                     task.abort();
                 }
                 self.games.clear();
+            }
+            _ => {}
+        }
+    }
+
+    /// Starts or stops streamer mode following streaming programs.
+    fn watch_streaming(&self, on: bool) {
+        let mut watch = self.streaming_watch.lock();
+        match (on, watch.is_some()) {
+            (true, false) => {
+                let Some(this) = self.this.get().cloned() else { return };
+                *watch = Some(self.runtime.spawn(async move {
+                    let mut follow = streaming::Follow::default();
+                    loop {
+                        let Ok(running) = tokio::task::spawn_blocking(streaming::streaming_now).await else { return };
+                        let Some(core) = this.upgrade() else { return };
+                        if let Some(on) = follow.see(running, core.prefs_now().streamer_mode) {
+                            core.set_prefs(|p| p.streamer_mode = on);
+                        }
+                        drop(core);
+                        tokio::time::sleep(streaming::EVERY).await;
+                    }
+                }));
+            }
+            (false, true) => {
+                if let Some(task) = watch.take() {
+                    task.abort();
+                }
             }
             _ => {}
         }

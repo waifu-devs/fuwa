@@ -124,31 +124,8 @@ fn run(
             list.push(what);
         }
     };
-    let open_input = || {
-        let device = crate::core::sounds::picked_input()?;
-        let config = device.default_input_config().ok()?;
-        let stream = match config.sample_format() {
-            SampleFormat::F32 => input_stream::<f32>(&device, config.config(), microphone.clone()),
-            SampleFormat::I16 => input_stream::<i16>(&device, config.config(), microphone.clone()),
-            SampleFormat::U16 => input_stream::<u16>(&device, config.config(), microphone.clone()),
-            SampleFormat::I32 => input_stream::<i32>(&device, config.config(), microphone.clone()),
-            _ => None,
-        }?;
-        stream.play().ok()?;
-        Some(stream)
-    };
-    let output = crate::core::sounds::picked_output().and_then(|device| {
-        let config = device.default_output_config().ok()?;
-        let stream = match config.sample_format() {
-            SampleFormat::F32 => output_stream::<f32>(&device, config.config(), speakers.clone()),
-            SampleFormat::I16 => output_stream::<i16>(&device, config.config(), speakers.clone()),
-            SampleFormat::U16 => output_stream::<u16>(&device, config.config(), speakers.clone()),
-            SampleFormat::I32 => output_stream::<i32>(&device, config.config(), speakers.clone()),
-            _ => None,
-        }?;
-        stream.play().ok()?;
-        Some(stream)
-    });
+    let open_input = || open_input(&crate::core::sounds::picked_input()?, microphone.clone());
+    let output = crate::core::sounds::picked_output().and_then(|device| open_output(&device, speakers.clone()));
     report(Trouble::NoSpeakers, output.is_none());
     let mut input = None;
     while !stop.load(Ordering::Relaxed) {
@@ -174,6 +151,34 @@ fn run(
         std::thread::park_timeout(Duration::from_millis(250));
     }
     drop((input, output));
+}
+
+/// Plays a microphone into `pipe`, as 48 kHz mono, until the stream is dropped.
+pub fn open_input(device: &cpal::Device, pipe: Arc<Pipe>) -> Option<cpal::Stream> {
+    let config = device.default_input_config().ok()?;
+    let stream = match config.sample_format() {
+        SampleFormat::F32 => input_stream::<f32>(device, config.config(), pipe),
+        SampleFormat::I16 => input_stream::<i16>(device, config.config(), pipe),
+        SampleFormat::U16 => input_stream::<u16>(device, config.config(), pipe),
+        SampleFormat::I32 => input_stream::<i32>(device, config.config(), pipe),
+        _ => None,
+    }?;
+    stream.play().ok()?;
+    Some(stream)
+}
+
+/// Plays what comes down `pipe` (48 kHz mono) on speakers, until the stream is dropped.
+pub fn open_output(device: &cpal::Device, pipe: Arc<Pipe>) -> Option<cpal::Stream> {
+    let config = device.default_output_config().ok()?;
+    let stream = match config.sample_format() {
+        SampleFormat::F32 => output_stream::<f32>(device, config.config(), pipe),
+        SampleFormat::I16 => output_stream::<i16>(device, config.config(), pipe),
+        SampleFormat::U16 => output_stream::<u16>(device, config.config(), pipe),
+        SampleFormat::I32 => output_stream::<i32>(device, config.config(), pipe),
+        _ => None,
+    }?;
+    stream.play().ok()?;
+    Some(stream)
 }
 
 fn input_stream<T>(device: &cpal::Device, config: StreamConfig, pipe: Arc<Pipe>) -> Option<cpal::Stream>

@@ -36,6 +36,8 @@
   "settings.yourInstance": "あなたのインスタンス",
   "settings.removeHere": "このコンピューターから削除",
   "settings.streamerHidePersonalHint": "セルフホストのアドレスは自宅の IP の場合があります。アプリ内のどこでも、アドレスとユーザー名が点に置き換わります。",
+  "settings.streamerAutoToggle": "OBS か XSplit が開いている間",
+  "settings.streamerAutoHint": "fuwa は数秒ごとに実行中のプログラムの名前だけを確認し、何も保存しません。閉じるとストリーマーモードはオフに戻ります（自分でオンにしていた場合を除く）。",
   "voice.micFailed": "そのマイクを開けませんでした。",
   "voice.micBlocked": "macOS が fuwa のマイク使用を許可していません。「システム設定」の「プライバシーとセキュリティ」→「マイク」で許可してください。",
   "voice.openPrivacy": "システム設定を開く",

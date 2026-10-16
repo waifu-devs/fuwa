@@ -1,4 +1,6 @@
 {
+  "settings.streamerAutoToggle": "Mientras OBS o XSplit estén abiertos",
+  "settings.streamerAutoHint": "fuwa mira los nombres de los programas abiertos cada pocos segundos y no guarda nada. El modo streamer se apaga cuando se cierran, salvo que lo hayas encendido tú.",
   "look.omarchy": "Igual que tu tema de Omarchy, {theme}, y cambia con él.",
   "profileItems.chooseEffect": "Elige un archivo de efecto",
   "profileItems.effectTooBig": "Ese archivo es demasiado grande para ser un efecto.",

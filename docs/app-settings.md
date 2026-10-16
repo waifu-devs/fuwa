@@ -89,7 +89,8 @@ own fields to these.
 The rest stays on the device, since it belongs to its screen or hardware:
 the zoom, microphone, speaker and camera picks, the microphone's volume and
 processing (sensitivity, echo cancellation, noise suppression, gain),
-streamer mode itself, whether system notifications are on, and fonts
+streamer mode itself and whether it follows OBS and XSplit (the desktop's),
+whether system notifications are on, and fonts
 imported from a file. Settings only one app has (the desktop's game overlay,
 its sound picks) may be added under new names; apps that don't know them
 keep them for those that do.
