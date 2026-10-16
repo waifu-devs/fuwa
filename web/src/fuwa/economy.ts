@@ -27,7 +27,7 @@ import {
 import { withProgress, type BannerValue } from "@/lib/gacha";
 import { reportUsage } from "@/lib/reports";
 import { toFuwaError } from "./errors";
-import { store, useFuwa } from "./store";
+import { store, updateInstance, upsertMessage, useFuwa } from "./store";
 import { engine } from "./sync";
 
 /*
@@ -312,6 +312,19 @@ export async function pull(instanceKey: string, serverId: string, banner: GachaB
   for (const balance of res.balances) keepBalance(instanceKey, serverId, balance, res.pull?.ledgerId);
   update(instanceKey, serverId, (s) => ({ ...s, progress: withProgress(s.progress, res.progress) }));
   return res;
+}
+
+/** Whether this instance takes pulls shared in chat. */
+export const shareHere = (instanceKey: string) => instanceHas(store.get().instances[instanceKey]?.node?.versions, "gacha-share");
+
+/** Shows one of your pulls in a channel, as the server kept it (Message.gacha). */
+export async function sharePull(instanceKey: string, serverId: string, channelId: string, pullId: string) {
+  const res = await call(() => engine(instanceKey).api.messages.sendMessage({ serverId, channelId, gachaPullId: pullId }));
+  if (!res.message) return;
+  updateInstance(instanceKey, (i) => {
+    const loaded = i.messages[channelId];
+    return loaded ? { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, res.message!) } } } : i;
+  });
 }
 
 /** Pulls, newest first, with their rolls: yours, someone's or (`userId` "*") everyone's. */

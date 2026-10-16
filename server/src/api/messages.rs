@@ -1,7 +1,9 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, boards, commands, economy, polls, reactions, respond, shared, threads, url, users};
+use super::{
+    Api, Seat, automod, boards, commands, economy, gacha, polls, reactions, respond, shared, threads, url, users,
+};
 use std::sync::Arc;
 
 use crate::app::App;
@@ -57,6 +59,8 @@ struct Extras {
     /// made for it again.
     #[prost(bool, tag = "13")]
     previews_hidden: bool,
+    #[prost(message, optional, tag = "14")]
+    gacha: Option<pb::GachaShare>,
 }
 
 impl Extras {
@@ -78,6 +82,7 @@ impl Extras {
             mention_user_ids: message.mention_user_ids.clone(),
             components: message.components.clone(),
             interaction: message.interaction.clone(),
+            gacha: message.gacha.clone(),
             previews_hidden,
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
@@ -363,6 +368,7 @@ pub(super) fn message_row(
                 interaction: None,
                 pinned_at: r.get::<Option<i64>>(11)?.map(timestamp),
                 reactions: vec![],
+                gacha: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -391,6 +397,7 @@ pub(super) fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>))
         message.mention_user_ids = extras.mention_user_ids;
         message.components = extras.components;
         message.interaction = extras.interaction;
+        message.gacha = extras.gacha;
     }
     Ok(message)
 }
@@ -1087,11 +1094,20 @@ impl Api {
         }
         // Only GIFs this instance stored and sealed.
         let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
-        // A card's title is enough without a body.
+        // A card's title is enough without a body, and a shared pull its cards.
+        let sharing = !req.gacha_pull_id.is_empty();
         check_content(
             &req.content,
-            !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some() || card.is_some(),
+            !req.attachments.is_empty()
+                || !req.embeds.is_empty()
+                || poll.is_some()
+                || gif.is_some()
+                || card.is_some()
+                || sharing,
         )?;
+        if sharing && (poll.is_some() || card.is_some()) {
+            return Err(Error::invalid("a shared pull goes without a poll or a card"));
+        }
         check_extras(&mut req.attachments, &req.embeds)?;
         check_embed_links(&self.app, &mut req.embeds)?;
         if req.also_send_to_channel && req.thread_id.is_empty() {
@@ -1107,6 +1123,9 @@ impl Api {
         }
         let components = commands::check_components(&req.components)?;
         if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
+            if sharing {
+                return Err(Error::invalid("gacha pulls aren't shared in channels shared between servers yet"));
+            }
             if answering || !components.is_empty() {
                 return Err(Error::invalid("buttons and interactions aren't in channels shared between servers yet"));
             }
@@ -1256,6 +1275,14 @@ impl Api {
                         "buttons and interactions aren't in channels shared between servers yet",
                     ));
                 }
+                let gacha = if sharing {
+                    if polls::shared_out(conn, &channel.id).await? {
+                        return Err(Error::invalid("gacha pulls aren't shared in channels shared between servers yet"));
+                    }
+                    Some(gacha::share(conn, &sdb.id, &account.id, &req.gacha_pull_id).await?)
+                } else {
+                    None
+                };
                 let message = pb::Message {
                     id,
                     server_id: sdb.id.clone(),
@@ -1284,6 +1311,7 @@ impl Api {
                     interaction,
                     pinned_at: None,
                     reactions: vec![],
+                    gacha,
                 };
                 // Checked again here, where no other message can take the room meanwhile.
                 if file_bytes > 0

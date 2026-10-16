@@ -982,6 +982,35 @@ impl Core {
     }
 
     /// Pulls on a banner once or its multi-pull, at the price shown.
+    /// Whether this instance takes pulls shared in chat.
+    pub fn share_here(&self, key: &str) -> bool {
+        self.shared.read(|s| s.instance(key).is_some_and(|i| i.has("gacha-share")))
+    }
+
+    /// Shows one of your pulls in a channel, as the server kept it (`Message.gacha`).
+    pub async fn share_pull(&self, key: &str, server_id: &str, channel_id: &str, pull_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.messages(),
+            send_message(pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                gacha_pull_id: pull_id.into(),
+                ..Default::default()
+            })
+        )
+        .await?;
+        if let Some(message) = res.message {
+            self.shared.instance(key, |i| {
+                crate::core::store::heard_of(i, channel_id, &message.id);
+                if let Some(loaded) = i.messages.get_mut(channel_id) {
+                    crate::core::store::upsert_message(&mut loaded.items, message);
+                }
+            });
+        }
+        Ok(())
+    }
+
     pub async fn pull(
         &self,
         key: &str,

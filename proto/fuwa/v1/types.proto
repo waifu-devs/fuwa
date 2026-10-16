@@ -1093,6 +1093,8 @@ message Message {
   // a whole message (MessageCreated, MessageUpdated) leave them out: apps keep
   // what they had and follow ReactionUpdated and ReactionsCleared.
   repeated Reaction reactions = 27;
+  // A gacha pull its author shared (SendMessageRequest.gacha_pull_id).
+  GachaShare gacha = 28;
 }
 
 // One emoji people reacted to a message with, and how many did.
@@ -2247,6 +2249,36 @@ message GachaResult {
   int64 tier_total = 11;
   int64 prize_roll = 12;
   int64 prize_total = 13;
+}
+
+// A gacha pull shared in chat: what came up, as the server kept it, for
+// apps to draw as the pull's cards. Copied when it's shared, so it stays
+// as it was if the banner changes.
+message GachaShare {
+  string pull_id = 1;
+  string banner_id = 2;
+  // The banner's name when it was pulled.
+  string banner_name = 3;
+  // One per draw, in order.
+  repeated GachaShareCard cards = 4;
+}
+
+message GachaShareCard {
+  string tier_name = 1;
+  string prize_name = 2;
+  // How rare its tier is on the banner, as apps rank tiers: 3 for the
+  // rarest, 2 for the others up to the pity tier, 0 for the commonest and 1
+  // for the rest (one tier alone is 1).
+  int32 rarity = 3;
+  // 1 to 5: the commonest tier 1, each rarer one more.
+  int32 stars = 4;
+  // The tier's place on the banner, rarest first, for its color when it
+  // has none of its own.
+  int32 tier_at = 5;
+  // 0xRRGGBB, when the tier has its own.
+  optional int32 color = 6;
+  GachaOutcome outcome = 7;
+  bool guaranteed = 8;
 }
 
 message GachaBannersUpdated {

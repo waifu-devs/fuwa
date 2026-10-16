@@ -33,6 +33,7 @@ mod emoji;
 mod emoji_picker;
 mod floats;
 mod friends;
+mod gacha_share;
 mod game_overlay;
 mod gifs;
 mod http;

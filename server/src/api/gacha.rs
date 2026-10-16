@@ -695,6 +695,68 @@ fn pull_row(r: &turso::Row) -> turso::Result<(pb::GachaPull, Vec<u8>)> {
     ))
 }
 
+// Sharing a pull in chat.
+
+/// How rare a tier is on a banner, as the apps rank it for their cards
+/// (`rarity` in web/src/lib/gacha.ts): 3 the rarest, 2 the others up to the
+/// pity tier, 0 the commonest and 1 the rest; one tier alone is 1.
+fn rarity(banner: &pb::GachaBanner, at: usize) -> i32 {
+    let n = banner.tiers.len();
+    if n == 1 {
+        return 1;
+    }
+    if at == 0 {
+        return 3;
+    }
+    let pity = banner.tiers.iter().position(|t| !banner.pity_tier_id.is_empty() && t.id == banner.pity_tier_id);
+    if pity.is_some_and(|p| at <= p) {
+        return 2;
+    }
+    if at + 1 == n { 0 } else { 1 }
+}
+
+/// One of `account_id`'s pulls, as a message shows it (SendMessageRequest.gacha_pull_id),
+/// ranked by its banner as it is now (or plainly, when the banner or a tier is gone).
+pub(super) async fn share(
+    conn: &turso::Connection,
+    server_id: &str,
+    account_id: &str,
+    pull_id: &str,
+) -> Result<pb::GachaShare> {
+    // Someone else's pull is as good as none.
+    let (banner_id, banner_name, bytes) = query_one(
+        conn,
+        "SELECT banner_id, banner_name, results FROM gacha_pulls WHERE id = ?1 AND account_id = ?2",
+        [pull_id, account_id],
+        |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?, r.get::<Vec<u8>>(2)?)),
+    )
+    .await?
+    .ok_or(Error::NotFound("pull"))?;
+    let banner = banners(conn, server_id).await?.into_iter().find(|b| b.id == banner_id);
+    let cards = GachaResults::decode(bytes.as_slice())?
+        .results
+        .into_iter()
+        .map(|r| {
+            let place = banner.as_ref().and_then(|b| b.tiers.iter().position(|t| t.id == r.tier_id).map(|at| (b, at)));
+            let (rarity, stars, tier_at, color) = match place {
+                Some((b, at)) => (rarity(b, at), (b.tiers.len() - at).min(5) as i32, at as i32, b.tiers[at].color),
+                None => (0, 1, MAX_TIERS as i32, None),
+            };
+            pb::GachaShareCard {
+                tier_name: r.tier_name,
+                prize_name: r.prize_name,
+                rarity,
+                stars,
+                tier_at,
+                color,
+                outcome: r.outcome,
+                guaranteed: r.guaranteed,
+            }
+        })
+        .collect();
+    Ok(pb::GachaShare { pull_id: pull_id.to_string(), banner_id, banner_name, cards })
+}
+
 // The calls, answered for EconomyService.
 
 pub(super) async fn list_banners(
