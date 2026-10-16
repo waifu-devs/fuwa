@@ -2273,6 +2273,8 @@ mod tests {
         let mut d = good.clone();
         d.add_tier();
         assert_eq!(d.tiers[2].id, "t3");
+        assert_eq!(d.value("B", "S").unwrap_err().key, "serversettings.economy.gacha.problem.tierName");
+        d.tiers[2].name = "Dust".into();
         assert!(d.value("B", "S").is_ok());
         d.remove_tier(0);
         assert_eq!(d.pity_tier_id, "t2");
