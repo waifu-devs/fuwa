@@ -61,6 +61,13 @@ service AccountService {
   // FAILED_PRECONDITION, and the app reads it again, merges and retries.
   rpc SetAppSettings(SetAppSettingsRequest) returns (SetAppSettingsResponse);
 
+  // Says how far you've read in channels, threads or conversations, so your
+  // other devices clear their unread marks there (docs/read-marks.md). The
+  // marks reach every live connection of yours that asked for `reads`,
+  // this one's too. A mark only moves forward: one behind what's kept
+  // changes nothing and isn't sent again.
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+
   // Everything this instance keeps about you, as one JSON document sent in
   // pieces: your account, sessions, settings, servers and every message you
   // wrote.
@@ -203,6 +210,35 @@ message SetServerArrangementResponse {
   // As stored, after dropping what doesn't apply.
   repeated ServerRailItem items = 1;
   google.protobuf.Timestamp updated_at = 2;
+}
+
+// How far you've read in one place.
+message ReadMark {
+  // Where: a server channel's id, a thread's (the id of the message it's
+  // under) or a direct message conversation's. A secure channel is its
+  // channel's id, and a thread in one "<channel id>/<sequence of the
+  // record it's under>".
+  string place = 1;
+  // Channels and threads: the newest message read. Left empty in MarkRead,
+  // everything up to now: the instance fills in an id that sorts after
+  // every message sent before it.
+  string message_id = 2;
+  // Conversations, secure channels and their threads: the newest record read.
+  int64 sequence = 3;
+  // When the instance took it (ms since the epoch): a live connection asks
+  // for the marks from here on again (OpenRequest.reads_after).
+  int64 at_ms = 4;
+}
+
+message MarkReadRequest {
+  // Up to 100, each place once.
+  repeated ReadMark marks = 1;
+}
+
+message MarkReadResponse {
+  // Each place as kept now, which is further along than asked when another
+  // device had read further.
+  repeated ReadMark marks = 1;
 }
 
 message GetAppSettingsRequest {}

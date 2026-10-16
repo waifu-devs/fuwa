@@ -33,6 +33,7 @@ const instance = (extra: Partial<InstanceState> = {}) =>
     channels: { s1: [{ id: "general" }, { id: "random" }] as Channel[] },
     messages: {},
     unread: {},
+    readMarks: {},
     ...extra,
   }) as unknown as InstanceState;
 
@@ -92,6 +93,15 @@ test("heads newer than what's known light unread marks out of focus", () => {
   const next = withHeads(inst, news, "general");
   assert.deepEqual(next.unread, { random: 2, lounge: 1 });
   assert.equal(withHeads(inst, [], null), inst);
+});
+
+test("heads another device read up to light nothing", () => {
+  const inst = instance({ readMarks: { lounge: "m2" } });
+  const news = [
+    { serverId: "s1", channelId: "lounge", lastMessageId: "m2", after: undefined },
+    { serverId: "s1", channelId: "random", lastMessageId: "m4", after: undefined },
+  ];
+  assert.deepEqual(withHeads(inst, news, null).unread, { random: 1 });
 });
 
 test("what's known of a channel is the newer of what's loaded and its last head", () => {

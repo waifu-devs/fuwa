@@ -63,6 +63,8 @@ pub mod providers;
 pub mod qr;
 pub mod rail;
 pub mod reactions;
+pub mod read_marks;
+mod reads;
 pub mod reports;
 pub mod sealed_files;
 pub mod search;
@@ -235,6 +237,8 @@ pub struct Shared {
     /// Who's typing where (`typing.rs`), apart from the store so a typing
     /// line doesn't build the message list again.
     typing: Arc<Mutex<typing::Typing>>,
+    /// Read marks waiting to go out to your other devices (`reads.rs`).
+    reads: Arc<reads::Outbox>,
 }
 
 impl Shared {
@@ -494,6 +498,7 @@ impl Core {
             notices: notices_tx,
             prefs: Arc::new(Mutex::new(Arc::new(prefs.clone()))),
             typing: Arc::new(Mutex::new(typing::Typing::default())),
+            reads: Arc::new(reads::Outbox::default()),
         };
         // Only you can open the app's folders.
         vault::private_dir(&paths.config)?;
@@ -976,7 +981,8 @@ impl Core {
 
     /// What's on screen, so it doesn't collect unread counts.
     pub fn set_focus(self: &Arc<Self>, focus: Option<Focus>) {
-        let dm = self.shared.update(|s| {
+        let (dm, moved) = self.shared.update(|s| {
+            let moved = s.focus != focus;
             s.focus = focus.clone();
             // What's out of sight now keeps only its newest page, and
             // conversations only what their line in the list shows.
@@ -993,14 +999,19 @@ impl Core {
                     }
                 }
             }
-            let f = focus.as_ref()?;
-            let i = s.instances.get_mut(&f.instance)?;
+            let Some((f, i)) = focus.as_ref().and_then(|f| Some((f, s.instances.get_mut(&f.instance)?))) else {
+                return (None, moved);
+            };
             i.unread.remove(&f.channel);
             // A conversation, or a secure channel: what's been read is kept with its messages.
             let encrypted =
                 i.dms.conversations.iter().any(|c| c.id == f.channel) || i.dms.items.contains_key(&f.channel);
-            encrypted.then(|| (f.instance.clone(), f.channel.clone()))
+            (encrypted.then(|| (f.instance.clone(), f.channel.clone())), moved)
         });
+        // Read here, so your other devices stop showing it unread.
+        if moved {
+            self.note_focus_read();
+        }
         if let Some((key, id)) = dm
             && let Some(engine) = self.dm_engine(&key)
         {
@@ -1046,9 +1057,16 @@ impl Core {
     /// Marks channels and conversations as read on this computer, with the
     /// followed threads under the channels. How many had something unread.
     pub fn mark_read(self: &Arc<Self>, key: &str, ids: &[String]) -> usize {
-        let (cleared, encrypted) = self
+        let (cleared, encrypted, plain) = self
             .shared
             .instance(key, |i| {
+                // What showed unread and isn't encrypted goes to your other devices
+                // (conversations and secure channels go by what each device noted it read).
+                let secure = |id: &str| {
+                    i.channels.values().flatten().any(|c| c.id == id && c.r#type == pb::ChannelType::Secure as i32)
+                };
+                let mut plain: Vec<String> =
+                    ids.iter().filter(|id| i.unread.get(*id).is_some_and(|n| *n > 0) && !secure(id)).cloned().collect();
                 let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
                 let threads: Vec<String> = i
                     .thread_parents
@@ -1070,7 +1088,9 @@ impl Core {
                     }
                 }
                 for t in &threads {
-                    i.thread_unread.remove(t);
+                    if i.thread_unread.remove(t).is_some_and(|n| n > 0) {
+                        plain.push(t.clone());
+                    }
                 }
                 // A conversation, or a secure channel: what's been read is kept with its messages.
                 let encrypted: Vec<String> = ids
@@ -1078,9 +1098,10 @@ impl Core {
                     .filter(|id| i.dms.conversations.iter().any(|c| c.id == **id) || i.dms.items.contains_key(*id))
                     .cloned()
                     .collect();
-                (cleared, encrypted)
+                (cleared, encrypted, plain)
             })
             .unwrap_or_default();
+        self.note_marked_read(key, &plain);
         if let Some(engine) = self.dm_engine(key) {
             for id in encrypted {
                 let engine = engine.clone();
