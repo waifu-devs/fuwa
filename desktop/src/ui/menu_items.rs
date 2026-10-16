@@ -30,7 +30,7 @@ impl FuwaApp {
             )]
         };
         match of {
-            MenuOf::Message { msg, thread, picture, selection } => {
+            MenuOf::Message { msg, thread, picture, selection, link } => {
                 let m = msg.clone();
                 let mut target = Vec::new();
                 if !selection.is_empty() {
@@ -39,6 +39,29 @@ impl FuwaApp {
                         "Copy",
                         "copy",
                         run(move |this, _, cx| copy(this, text.clone(), "text", cx)),
+                    ));
+                }
+                if let Some(href) = link.clone() {
+                    // Where it goes, unless streamer mode hides an instance's address.
+                    let hidden = self.prefs.streamer_mode
+                        && self.core.instance_urls().iter().any(|i| crate::core::attachments::on_instance(&href, i));
+                    let hint = if hidden { "address hidden".to_owned() } else { crate::core::links::host_of(&href) };
+                    let (open, words) = (href.clone(), m.content.clone());
+                    target.push(
+                        Item::act(
+                            t("workspace.menu.target.openLink"),
+                            "external-link",
+                            run(move |_, window, cx| {
+                                let masked = crate::core::links::masked_in(&words, &open);
+                                crate::ui::text::open_written(&open, masked, window, cx)
+                            }),
+                        )
+                        .hint(hint),
+                    );
+                    target.push(Item::act(
+                        t("workspace.menu.target.copyLink"),
+                        "link",
+                        run(move |this, _, cx| copy(this, href.clone(), "link", cx)),
                     ));
                 }
                 if let Some(file) = picture.and_then(|n| m.attachments.get(n)).cloned() {
@@ -269,6 +292,37 @@ impl FuwaApp {
             MenuOf::Member { key, server, user_id } => {
                 self.member_items(key, server.as_deref(), user_id, copy_id(user_id, "user"), cx)
             }
+            // The web's join and AutoMod alert menus; deleting asks in the row, as its trash button does.
+            MenuOf::Join { key, server, id, user_id, wave, can_delete } => {
+                let mut primary = Vec::new();
+                if let Some(username) =
+                    wave.clone().filter(|_| !self.msg_ui.waved.contains(id) && !self.msg_ui.waving.contains(id))
+                {
+                    let id = id.clone();
+                    primary.push(Item::act(
+                        t("chat.join.wave"),
+                        "hand",
+                        run(move |this, _, cx| this.wave(id.clone(), username.clone(), cx)),
+                    ));
+                }
+                // Their own menu, which their name opens on the web.
+                let person = self.member_items(key, server.as_deref(), user_id, copy_id(user_id, "user"), cx).items;
+                if !person.is_empty() {
+                    let name = self.core.shared.read(|s| {
+                        s.instance(key).map(|i| i.display_name(server.as_deref(), user_id)).unwrap_or_default()
+                    });
+                    primary.push(Item::sub(name, "user-round", person));
+                }
+                Built::of(vec![
+                    primary,
+                    copy_id(id, "message"),
+                    self.ask_delete_item(id, *can_delete, "chat.join.deleteMessage"),
+                ])
+            }
+            MenuOf::Alert { id, can_delete } => Built::of(vec![
+                copy_id(id, "message"),
+                self.ask_delete_item(id, *can_delete, "chat.automod.deleteAlert"),
+            ]),
             MenuOf::Channel { key, server, channel } => {
                 self.channel_items(key, server, channel, copy_id(channel, "channel"))
             }
@@ -439,19 +493,12 @@ impl FuwaApp {
             ));
         }
         let mut manage = Vec::new();
-        if f.me && server.is_some() {
+        if let (Some(sv), true) = (server, f.me) {
+            let (k, s) = (key.to_owned(), sv.to_owned());
             manage.push(Item::act(
                 crate::core::i18n::t("workspace.menu.member.editServerProfile"),
                 "id-card",
-                run(|this, window, cx| {
-                    this.open_settings(window, cx);
-                    if let Some(view) = &this.settings {
-                        view.update(cx, |view, cx| {
-                            view.page = crate::ui::settings::Page::ServerProfiles;
-                            cx.notify();
-                        });
-                    }
-                }),
+                run(move |this, window, cx| this.open_server_profile(&k, &s, window, cx)),
             ));
         }
         if let (Some(sv), true) = (server, f.rename) {
@@ -758,6 +805,21 @@ impl FuwaApp {
                 .disabled(!unread),
             );
         }
+        {
+            // The sidebar folds it the same way its heading does.
+            let folded = self.collapsed.contains(category);
+            let id = category.to_owned();
+            primary.push(Item::act(
+                t(if folded { "workspace.menu.category.expand" } else { "workspace.menu.category.collapse" }),
+                if folded { "chevron-right" } else { "chevron-down" },
+                run(move |this, _, cx| {
+                    if !this.collapsed.remove(&id) {
+                        this.collapsed.insert(id.clone());
+                    }
+                    cx.notify();
+                }),
+            ));
+        }
         if manages {
             let (k, s, parent) = (key.to_owned(), server.to_owned(), category.to_owned());
             primary.push(Item::act(
@@ -837,6 +899,15 @@ impl FuwaApp {
         if invite {
             primary.push(self.invite_item(key, server, ""));
         }
+        // The economy's Shop, on servers with currencies (the web's economy/menus.ts).
+        if self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("economy") && i.has_currencies(server))) {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            primary.push(Item::act(
+                t("chattools.economy.shopItem"),
+                "store",
+                run(move |this, window, cx| this.open_shop(&k, &s, window, cx)),
+            ));
+        }
         let mut notifications = self.notification_items(key, server, "");
         {
             let menu = Menu::Server { key: key.to_owned(), server: server.to_owned() };
@@ -899,10 +970,10 @@ impl FuwaApp {
     /// invite and what you manage, then rules, welcome and notifications,
     /// then the ID and leaving.
     fn server_header_items(&self, key: &str, server: &str, developer: Vec<Item>) -> Built {
-        let Some((access, rules, welcome, onboarding)) = self.core.shared.read(|s| {
+        let Some((access, rules, welcome, onboarding, applications, admin)) = self.core.shared.read(|s| {
             let i = s.instance(key)?;
             let sv = i.server(server)?;
-            Some((i.access(server), sv.has_rules, sv.has_welcome_screen, sv.has_onboarding))
+            Some((i.access(server), sv.has_rules, sv.has_welcome_screen, sv.has_onboarding, sv.applications, i.admin))
         }) else {
             return Built::of(Vec::new());
         };
@@ -916,6 +987,42 @@ impl FuwaApp {
                 "Server settings",
                 "settings",
                 run(move |this, window, cx| this.open_server_settings(&k, &s, window, cx)),
+            ));
+        }
+        // Straight to a page of the server's settings, as the web's menu goes.
+        let settings_page = |label: String, glyph: &'static str, page: crate::ui::server_settings::Page| {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            Item::act(
+                label,
+                glyph,
+                run(move |this, window, cx| {
+                    this.open_server_settings(&k, &s, window, cx);
+                    if let Some(view) = &this.server_settings {
+                        view.update(cx, |view, cx| view.show(page, cx));
+                    }
+                }),
+            )
+        };
+        if applications && access.has(P::KickMembers) {
+            let waiting = self.waiting_applications.get(&format!("{key}/{server}")).copied().unwrap_or(0);
+            manage.push(
+                settings_page(
+                    t("workspace.sidebar.applications"),
+                    "clipboard-list",
+                    crate::ui::server_settings::Page::Applications,
+                )
+                .hint(match waiting {
+                    0 => String::new(),
+                    1..=99 => waiting.to_string(),
+                    _ => "99+".into(),
+                }),
+            );
+        }
+        if admin || access.has(P::ManageServer) {
+            manage.push(settings_page(
+                t("workspace.sidebar.usage"),
+                "chart-column",
+                crate::ui::server_settings::Page::Usage,
             ));
         }
         manage.extend(self.mod_view_item(key, server));
@@ -973,6 +1080,14 @@ impl FuwaApp {
             ));
         }
         about.extend(self.live_tile_menu_items(key, server));
+        let profile = {
+            let (k, s) = (key.to_owned(), server.to_owned());
+            vec![Item::act(
+                t("workspace.sidebar.editServerProfile"),
+                "id-card",
+                run(move |this, window, cx| this.open_server_profile(&k, &s, window, cx)),
+            )]
+        };
         let mut danger = Vec::new();
         if !access.owner {
             let (k, s) = (key.to_owned(), server.to_owned());
@@ -987,7 +1102,26 @@ impl FuwaApp {
                 .danger(),
             );
         }
-        Built::of(vec![manage, about, developer, danger])
+        Built::of(vec![manage, about, profile, developer, danger])
+    }
+
+    /// Deleting a row of the open channel, asked in the row itself (`chat_rows::confirm_delete`).
+    fn ask_delete_item(&self, id: &str, can: bool, label: &str) -> Vec<Item> {
+        if !can {
+            return Vec::new();
+        }
+        let id = id.to_owned();
+        vec![
+            Item::act(
+                t(label),
+                "trash",
+                run(move |this, _, cx| {
+                    this.msg_ui.deleting = Some(id.clone());
+                    cx.notify();
+                }),
+            )
+            .danger(),
+        ]
     }
 
     /// "Mod View", with how many cases are open, for people with Use Mod View.

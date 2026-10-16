@@ -149,7 +149,11 @@ impl FuwaApp {
         let Some(flow) = self.onboarding.flow.as_ref() else { return };
         let Some(step) = flow.steps.get(flow.at).filter(|s| s.kind == SAY_HELLO) else { return };
         let text = flow.hellos.get(&step.id).cloned().unwrap_or_else(|| {
-            if step.hello.trim().is_empty() { onboarding::HELLO.to_owned() } else { step.hello.clone() }
+            if step.hello.trim().is_empty() {
+                crate::core::i18n::t("join.onboarding.hello")
+            } else {
+                step.hello.clone()
+            }
         });
         self.onboarding.pending_hello = Some(text);
         cx.notify();

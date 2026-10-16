@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, px,
-    rgb,
+    AnyElement, AppContext as _, Context, Entity, ExternalPaths, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ObjectFit, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    StyledImage as _, Window, div, px, rgb,
 };
 
 use crate::core::config::Prefs;
@@ -741,6 +741,10 @@ impl SettingsView {
                     .cursor_pointer()
                     .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).translate_y(px(-2.0)))
                     .active(|s| s.scale(0.95))
+                    .drag_over::<ExternalPaths>({
+                        let lit = alpha(hover_fg, 0.08);
+                        move |s, _, _, _| s.border_color(hover_fg).text_color(hover_fg).bg(lit).scale(1.05)
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| this.upload_background_to(key.clone(), target, cx)))
                     .child(icon(if uploading { "loader-circle" } else { "image-plus" }).size(px(20.0)))
                     .child(tracked(t("appsettings.backdrop.add").to_uppercase(), WIDE))
@@ -812,6 +816,14 @@ impl SettingsView {
             grid = grid.child(row);
         }
         let grid = grid.when(moving, |el| el.child(gliding));
+        // A picture dropped anywhere on them is uploaded, as on the add tile (the web's BackdropForm).
+        let grid = grid.when_some(key.clone(), |el, key| {
+            el.on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
+                if let Some(path) = paths.paths().first() {
+                    this.upload_background_from(key.clone(), target, path.clone(), cx);
+                }
+            }))
+        });
         div()
             .flex()
             .flex_col()
@@ -836,23 +848,36 @@ impl SettingsView {
             multiple: false,
             prompt: Some(t("desktop.account.choosePicture").into()),
         });
-        let core = self.core.clone();
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(path) = paths.into_iter().next() else { return };
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Some(kind) = crate::core::account::picture_type(&name) else {
-                let _ = this.update(cx, |this, cx| {
-                    this.themes.picture_error = Some(t("appsettings.backdrop.pickType"));
-                    cx.notify();
-                });
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                this.themes.uploading = true;
-                this.themes.picture_error = None;
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.upload_background_from(key, target, path, cx));
+        })
+        .detach();
+    }
+
+    /// Uploads a picture (picked, or dropped on the pictures) as a background and uses it.
+    fn upload_background_from(
+        &mut self,
+        key: String,
+        target: Target,
+        path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.themes.uploading {
+            return;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let Some(kind) = crate::core::account::picture_type(&name) else {
+            self.themes.picture_error = Some(t("appsettings.backdrop.pickType"));
+            cx.notify();
+            return;
+        };
+        self.themes.uploading = true;
+        self.themes.picture_error = None;
+        cx.notify();
+        let core = self.core.clone();
+        cx.spawn(async move |this, cx| {
             let rx = core.spawn({
                 let (core, key) = (core.clone(), key.clone());
                 async move {
@@ -1097,8 +1122,26 @@ impl SettingsView {
             return motion::slide_in(div().child(self.theme_editor(prefs, p, window, cx)), "theme-editor", 24.0)
                 .into_any_element();
         }
-        motion::slide_in(div().child(self.theme_library(prefs, p, window, cx)), "theme-library", -24.0)
-            .into_any_element()
+        // A theme file dropped anywhere on the page is imported (the web's Themes drop).
+        let full = prefs.custom_themes.len() >= themes::MAX_CUSTOM_THEMES;
+        let (ring, wash) = (p.primary, alpha(p.primary, 0.05));
+        let library = div()
+            .id("theme-library-drop")
+            .rounded(radius_xl())
+            .border_2()
+            .border_dashed()
+            .border_color(gpui_kit::transparent_black())
+            .when(!full, |el| {
+                el.drag_over::<ExternalPaths>(move |s, _, _, _| s.border_color(ring).bg(wash)).on_drop(cx.listener(
+                    |this, paths: &ExternalPaths, window, cx| {
+                        if let Some(path) = paths.paths().first() {
+                            this.import_theme_from(path.clone(), window, cx);
+                        }
+                    },
+                ))
+            })
+            .child(self.theme_library(prefs, p, window, cx));
+        motion::slide_in(library, "theme-library", -24.0).into_any_element()
     }
 
     fn theme_library(&mut self, prefs: &Prefs, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

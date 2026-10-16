@@ -1025,14 +1025,44 @@ impl FuwaApp {
             .channel_in(key, server)
             .and_then(|id| self.core.shared.read(|s| s.instance(key).and_then(|i| i.channel(server, &id).cloned())));
         let Some(channel) = channel else {
-            let loading = self.core.shared.read(|s| s.instance(key).is_some_and(|i| !i.channels.contains_key(server)));
-            return empty_state(
-                &p,
-                if loading { "loader-circle" } else { "hash" },
-                if loading { "Getting the server ready…" } else { "No text channels here yet" },
-                if loading { "" } else { "Someone who can manage channels can add one from the web app." },
-            )
-            .into_any_element();
+            let (loading, manage) = self.core.shared.read(|s| {
+                s.instance(key).map_or((false, false), |i| {
+                    (!i.channels.contains_key(server), i.access(server).has(pb::Permission::ManageChannels))
+                })
+            });
+            if loading {
+                return empty_state(&p, "loader-circle", "Getting the server ready…", "").into_any_element();
+            }
+            // The web's ServerIndex: make the first channel, or why there's none to see.
+            let (title, body) = (
+                t("workspace.serverIndex.empty"),
+                if manage { String::new() } else { t("workspace.serverIndex.noneVisible") },
+            );
+            let (key, server) = (key.to_owned(), server.to_owned());
+            return empty_state(&p, "hash", &title, &body)
+                .when(manage, |el| {
+                    el.child(
+                        crate::ui::settings_controls::button(
+                            "server-index-create",
+                            t("workspace.serverIndex.create"),
+                            Some("plus"),
+                            crate::ui::settings_controls::Look::Primary,
+                            false,
+                            &p,
+                        )
+                        .rounded(crate::ui::theme::radius_xl())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let dialog = Dialog::CreateChannel {
+                                key: key.clone(),
+                                server: server.clone(),
+                                parent: String::new(),
+                                kind: pb::ChannelType::Text,
+                            };
+                            this.open_dialog(dialog, window, cx);
+                        })),
+                    )
+                })
+                .into_any_element();
         };
         if channel.r#type == pb::ChannelType::Board as i32 {
             return self.board_view(key, server, &channel, window, cx);
@@ -1072,7 +1102,7 @@ impl FuwaApp {
                 .when(!channel.topic.is_empty(), |el| {
                     el.child(div().flex_none().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
                         div()
-                            .flex_1()
+                            .flex_shrink(1.0)
                             .min_w_0()
                             .overflow_hidden()
                             .text_sm()
@@ -1082,7 +1112,7 @@ impl FuwaApp {
                             .child(channel.topic.clone()),
                     )
                 })
-                .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
+                .children(self.header_marks(key, server, &channel, &p, cx))
         }
         .when(!secure, |el| el.child(self.search_field(window, cx)));
         // A secure channel's header has its own buttons (`secure_header`).
@@ -1150,6 +1180,114 @@ impl FuwaApp {
             (!access.has_in(channel_id, pb::Permission::SendMessages))
                 .then(|| Blocked { text: "You can't send messages in this channel.".into(), action: None })
         })
+    }
+
+    /// The web's header marks after the name and topic: Copy ID (with
+    /// Developer Mode), slow mode's wait, then, past the gap, how the
+    /// connection is doing while it isn't live.
+    fn header_marks(
+        &self,
+        key: &str,
+        server: &str,
+        channel: &pb::Channel,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        if self.prefs.developer_mode {
+            let id = channel.id.clone();
+            let what = t("common.copy.channelId");
+            let label: SharedString =
+                crate::core::i18n::t_with("common.copyThing", &[("what", Arg::Str(&what))]).into();
+            let hover = p.muted;
+            let fg = p.foreground;
+            out.push(
+                div()
+                    .id("header-copy-id")
+                    .size(px(32.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .text_color(p.muted_foreground)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover).text_color(fg))
+                    .active(|s| s.scale(0.85))
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| crate::ui::context_menu::copy(this, id.clone(), &what, cx)),
+                    )
+                    .child(icon("fingerprint").size(px(16.0)))
+                    .into_any_element(),
+            );
+        }
+        if channel.slowmode_seconds > 0 {
+            let unslowed = self.core.shared.read(|s| {
+                s.instance(key).is_some_and(|i| {
+                    let a = i.access(server);
+                    a.has_in(&channel.id, pb::Permission::ManageMessages)
+                        || a.has_in(&channel.id, pb::Permission::ManageChannels)
+                })
+            });
+            let duration = crate::ui::composer::format_duration(i64::from(channel.slowmode_seconds));
+            let label: SharedString = crate::core::i18n::t_with(
+                if unslowed { "chat.channel.slowModeNotYou" } else { "chat.channel.slowMode" },
+                &[("duration", Arg::Str(&duration))],
+            )
+            .into();
+            out.push(
+                crate::ui::widgets::popped(
+                    div()
+                        .id("header-slowmode")
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .rounded_full()
+                        .bg(p.muted)
+                        .px(px(8.0))
+                        .py(px(2.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .tooltip(move |window, cx| crate::ui::overlay::Tip::new(label.clone()).build(window, cx))
+                        .child(icon("snail").size(px(14.0)))
+                        .child(crate::ui::composer::short_duration(i64::from(channel.slowmode_seconds))),
+                    SharedString::from(format!("header-slowmode-in|{}", channel.id)),
+                    0.6,
+                    0.0,
+                )
+                .into_any_element(),
+            );
+        }
+        out.push(div().flex_1().into_any_element());
+        let connection = self.core.shared.read(|s| s.instance(key).map(|i| i.connection));
+        if let Some(c) = connection.filter(|c| *c != crate::core::store::Connection::Live) {
+            out.push(
+                crate::ui::widgets::popped(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .rounded_full()
+                        .bg(p.muted)
+                        .px(px(10.0))
+                        .py(px(4.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .child(crate::ui::widgets::conn_dot(c, p).size(px(8.8)).border_0())
+                        .child(crate::ui::instance_home::connection_label(c)),
+                    SharedString::from(format!("header-conn-in|{key}")),
+                    0.9,
+                    0.0,
+                )
+                .into_any_element(),
+            );
+        }
+        out
     }
 
     /// A channel header's bell and member list buttons.
@@ -1934,7 +2072,12 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                     .markdown_extensions(crate::ui::emoji::markdown_extensions())
                     .selectable(true)
                     .style(chat_markdown(p))
-                    .on_link_click(move |url, _, window, cx| match url.strip_prefix(SCHEME) {
+                    .on_link_click(move |url, ev, window, cx| match url.strip_prefix(SCHEME) {
+                        // Right-clicked: the message's menu, with the link in it.
+                        _ if ev.is_right_click() => {
+                            let link = (!url.starts_with(SCHEME)).then_some(url.as_ref());
+                            _ = this.update(cx, |this, cx| this.open_pending_menu(link, window, cx));
+                        }
                         Some(mention) => {
                             let Some(username) = mention.strip_prefix("user/") else { return };
                             let username = username.split('/').next().unwrap_or_default();
@@ -2270,15 +2413,22 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 .filter(|(id, _)| *id == msg.id)
                 .map(|(_, n)| n);
             let selection = gpui_kit::base::TextSelection::selected_text(window, cx);
-            MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture, selection }
+            MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture, selection, link: None }
         }
     };
+    // Links in its words: whether one was right-clicked is known only when the button comes up.
+    let links = m.shown.contains("://") || m.shown.contains("mailto:") || m.shown.contains(SCHEME);
     let hover_of = {
         let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
         let key = crate::ui::chat_rows::hover_key(&m.id, ctx);
         move |hovered: &bool, _: &mut Window, cx: &mut App| {
-            let of =
-                MenuOf::Message { msg: msg.clone(), thread: thread.clone(), picture: None, selection: String::new() };
+            let of = MenuOf::Message {
+                msg: msg.clone(),
+                thread: thread.clone(),
+                picture: None,
+                selection: String::new(),
+                link: None,
+            };
             let id = key.clone();
             let _ = this.update(cx, |this, cx| {
                 this.set_hover_target(of, *hovered);
@@ -2289,10 +2439,20 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     div()
         .id(SharedString::from(format!("msg|{}", m.id)))
         .group("msg")
-        .on_mouse_down(
-            MouseButton::Right,
-            context_menu::on_right_click(ctx.this.clone(), move |w, cx| Some(menu_of(w, cx))),
-        )
+        .map(|el| {
+            if links {
+                el.on_mouse_down(
+                    MouseButton::Right,
+                    context_menu::on_right_click_later(ctx.this.clone(), move |w, cx| Some(menu_of(w, cx))),
+                )
+                .on_mouse_up(MouseButton::Right, context_menu::on_right_up(ctx.this.clone()))
+            } else {
+                el.on_mouse_down(
+                    MouseButton::Right,
+                    context_menu::on_right_click(ctx.this.clone(), move |w, cx| Some(menu_of(w, cx))),
+                )
+            }
+        })
         .on_hover(hover_of)
         .relative()
         .flex()
@@ -3014,7 +3174,7 @@ fn home_splash(p: &Palette, window: &Window) -> impl IntoElement {
 }
 
 /// A quiet message in the middle of a pane.
-fn empty_state(p: &Palette, glyph: &str, title: &str, body: &str) -> impl IntoElement {
+fn empty_state(p: &Palette, glyph: &str, title: &str, body: &str) -> gpui_kit::Div {
     div()
         .size_full()
         .flex()
@@ -3034,7 +3194,9 @@ fn empty_state(p: &Palette, glyph: &str, title: &str, body: &str) -> impl IntoEl
                 .child(icon(glyph).size(px(28.0))),
         )
         .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title.to_owned()))
-        .when(!body.is_empty(), |el| el.child(div().text_color(p.muted_foreground).child(body.to_owned())))
+        .when(!body.is_empty(), |el| {
+            el.child(div().max_w(px(420.0)).text_center().text_color(p.muted_foreground).child(body.to_owned()))
+        })
 }
 
 /// An emoji to pick: a server's own picture, or the character.

@@ -196,6 +196,21 @@ impl FuwaApp {
                 let (_, deaf) = self.core.selves();
                 self.core.set_self_deaf(!deaf);
             }
+            // The call's own camera and screen buttons, where you may film (call_parts.rs).
+            "toggleCamera" => {
+                if let Some(call) = self.core.call().filter(|c| crate::ui::call_parts::may_film(self, c)) {
+                    self.core.set_camera(!call.self_video);
+                }
+            }
+            "toggleScreen" => {
+                if let Some(call) = self.core.call().filter(|c| crate::ui::call_parts::may_film(self, c)) {
+                    if call.self_stream {
+                        self.core.set_screen(false, None, false);
+                    } else {
+                        self.open_share_picker(window, cx);
+                    }
+                }
+            }
             "toggleOverlay" => self.toggle_overlay(window, cx),
             "toggleRecording" => {
                 if let Some(call) = self.core.call() {
