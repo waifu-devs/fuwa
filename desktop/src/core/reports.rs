@@ -348,6 +348,20 @@ pub fn sent() {
     }
 }
 
+std::thread_local! {
+    /// Set while [`catch`] runs something on this thread.
+    static CATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f`, catching a panic in it (a library's `unwrap` on an answer the
+/// system may refuse). One caught counts as `panic_caught`, not as a crash.
+pub fn catch<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
+    let outer = CATCHING.replace(true);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    CATCHING.set(outer);
+    result
+}
+
 /// Counts panics by where they happened and writes them down, then lets the
 /// usual hook print them.
 pub fn catch_panics() {
@@ -358,11 +372,13 @@ pub fn catch_panics() {
                 .location()
                 .map(|at| format!("{}:{}", source_path(at.file()), at.line()))
                 .unwrap_or_else(|| "unknown".into());
+            let caught = CATCHING.get();
             // A panic while the counts are locked must not wait on them here.
             if let Some(mut held) = HELD.try_lock() {
-                held.error("panic", &place, 1);
+                held.error(if caught { "panic_caught" } else { "panic" }, &place, 1);
             }
-            if let Some(file) = CRASH_FILE.try_lock().and_then(|file| file.clone()) {
+            // Only one that may end the app is written down to outlive it.
+            if !caught && let Some(file) = CRASH_FILE.try_lock().and_then(|file| file.clone()) {
                 note_crash(&file, &place);
             }
         }
@@ -386,6 +402,13 @@ fn note_crash(file: &Path, place: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_caught_panic_is_handed_back() {
+        assert!(catch(|| panic!("a library unwrapped")).is_err());
+        assert_eq!(catch(|| 2).ok(), Some(2));
+        assert!(!CATCHING.get());
+    }
 
     #[test]
     fn durations_land_in_their_buckets() {

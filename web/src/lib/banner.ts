@@ -63,7 +63,7 @@ async function colorsAt(url: string, count: number): Promise<number[]> {
       const img = new Image();
       img.decoding = "async";
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("picture"));
+      img.onerror = () => reject(new Error("unloadable"));
       img.src = url;
     });
     const w = 48;
@@ -76,8 +76,10 @@ async function colorsAt(url: string, count: number): Promise<number[]> {
     ctx.drawImage(image, 0, 0, w, h);
     return pickColors(ctx.getImageData(0, 0, w, h).data, count);
   } catch (err) {
-    // A picture from another origin can't be read back (SecurityError): there's simply nothing to offer.
-    if (!(err instanceof DOMException && err.name === "SecurityError")) reportError("BannerColors", "settings/welcome");
+    // A picture from another origin can't be read back (SecurityError), and one that's gone or isn't a
+    // picture doesn't load: either way there's simply nothing to offer.
+    const expected = (err instanceof DOMException && err.name === "SecurityError") || (err instanceof Error && err.message === "unloadable");
+    if (!expected) reportError("BannerColors", "settings/welcome");
     return [];
   }
 }

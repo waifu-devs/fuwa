@@ -421,7 +421,7 @@ fn all_targets() -> Vec<zed_scap::Target> {
     if !zed_scap::is_supported() || !zed_scap::has_permission() {
         return Vec::new();
     }
-    std::panic::catch_unwind(zed_scap::get_all_targets).ok().and_then(Result::ok).unwrap_or_default()
+    crate::core::reports::catch(zed_scap::get_all_targets).ok().and_then(Result::ok).unwrap_or_default()
 }
 
 /// Whether the system lets the app see the screen: macOS asks the first
@@ -493,8 +493,7 @@ pub fn thumbnail(id: u32, width: u32) -> Option<Picture> {
                 output_type: zed_scap::frame::FrameType::BGRAFrame,
                 ..Default::default()
             };
-            let Ok(mut capturer) = zed_scap::capturer::Capturer::build(options) else { return };
-            capturer.start_capture();
+            let Some(mut capturer) = start_capturer(options) else { return };
             let picture = capturer.get_next_frame().ok().and_then(|frame| {
                 let (w, h, data, layout) = pixels(&frame)?;
                 let stride = data.len() / h as usize;
@@ -508,7 +507,7 @@ pub fn thumbnail(id: u32, width: u32) -> Option<Picture> {
                 vp8::yuv_to_bgra(&yuv, false, &mut picture.bgra);
                 Some(picture)
             });
-            capturer.stop_capture();
+            stop_capturer(&mut capturer);
             let _ = tx.send(picture);
         })
         .ok()?;
@@ -527,8 +526,7 @@ fn take_screen(id: Option<u32>, share: Share, stop: &AtomicBool, latest: &Latest
         output_type: zed_scap::frame::FrameType::BGRAFrame,
         ..Default::default()
     };
-    let mut capturer = zed_scap::capturer::Capturer::build(options).map_err(|_| Failure::Failed)?;
-    capturer.start_capture();
+    let mut capturer = start_capturer(options).ok_or(Failure::Failed)?;
     let mut yuv = Yuv::default();
     let result = loop {
         if stop.load(Ordering::Relaxed) {
@@ -547,8 +545,28 @@ fn take_screen(id: Option<u32>, share: Share, stop: &AtomicBool, latest: &Latest
         vp8::from_rgb(data, stride, w, h, layout, &mut yuv);
         yuv = latest.put(yuv, taken);
     };
-    capturer.stop_capture();
+    stop_capturer(&mut capturer);
     result
+}
+
+/// A capturer for `options`, started; None when the system won't capture it.
+/// On macOS scap unwraps ScreenCaptureKit's answers while building and
+/// starting (a window that closed or was minimized meanwhile, or access taken
+/// away), so those panics are caught here and read as a capture that failed.
+fn start_capturer(options: zed_scap::capturer::Options) -> Option<zed_scap::capturer::Capturer> {
+    crate::core::reports::catch(move || {
+        let mut capturer = zed_scap::capturer::Capturer::build(options).ok()?;
+        capturer.start_capture();
+        Some(capturer)
+    })
+    .ok()
+    .flatten()
+}
+
+/// Stops a capturer; scap unwraps stopping on macOS too, and a stream the
+/// system already ended has nothing left to stop.
+fn stop_capturer(capturer: &mut zed_scap::capturer::Capturer) {
+    let _ = crate::core::reports::catch(|| capturer.stop_capture());
 }
 
 // ───────────────────────── The test pattern ─────────────────────────

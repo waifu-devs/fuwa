@@ -352,14 +352,22 @@ pub async fn call_named<T>(
     result
 }
 
-/// A failure inside the instance: Internal, DataLoss, or Unknown when it
-/// isn't the connection failing.
+/// A failure inside the instance: Internal, DataLoss or Unknown, as the
+/// instance answered it. tonic gives the same codes to a connection that
+/// dropped (a laptop waking from sleep, a network that changed: the h2 or
+/// hyper error is kept as the status's source) and to an answer a proxy cut
+/// short or a page in its place; those are the way to the instance failing.
 fn broke_inside(status: &Status) -> bool {
-    match status.code() {
-        Code::Internal | Code::DataLoss => true,
-        Code::Unknown => !unreachable(status),
-        _ => false,
-    }
+    use std::error::Error as _;
+    let answered = status.source().is_none()
+        && !status.message().starts_with("protocol error:")
+        && !status.message().starts_with("grpc-status header missing");
+    answered
+        && match status.code() {
+            Code::Internal | Code::DataLoss => true,
+            Code::Unknown => !unreachable(status),
+            _ => false,
+        }
 }
 
 /// The instance couldn't be reached at all.
@@ -414,6 +422,23 @@ pub fn instance_key(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_instances_own_failures_count_as_inside() {
+        assert!(broke_inside(&Status::internal("something went wrong on the server")));
+        assert!(broke_inside(&Status::data_loss("lost")));
+        assert!(!broke_inside(&Status::not_found("no such channel")));
+        // A connection that dropped: tonic keeps the transport's error as the source.
+        let dropped = Status::from_error(Box::new(std::io::Error::other("connection reset by peer")));
+        assert_eq!(dropped.code(), Code::Unknown);
+        assert!(!broke_inside(&dropped));
+        // An answer a proxy cut short, or a page where an answer should be.
+        assert!(!broke_inside(&Status::unknown(
+            "protocol error: missing grpc-status trailer, stream was terminated without a final status"
+        )));
+        assert!(!broke_inside(&Status::unknown("grpc-status header missing, mapped from HTTP status code 500")));
+        assert!(!broke_inside(&Status::unknown("error trying to connect: dns error")));
+    }
 
     #[test]
     fn addresses_are_normalized() {
