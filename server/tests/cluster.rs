@@ -184,6 +184,8 @@ struct Clients {
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
     shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
     automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
+    economy: pb::economy_service_client::EconomyServiceClient<Channel>,
+    profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -202,7 +204,9 @@ async fn clients(part: &Part) -> Clients {
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
         shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
-        automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel),
+        automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
+        economy: pb::economy_service_client::EconomyServiceClient::new(channel.clone()),
+        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel),
     }
 }
 
@@ -1773,6 +1777,49 @@ async fn servers_live_in_their_region_and_move() {
     let short = short.media.unwrap();
     assert!(!picture_at(&shard_b, &short.id).exists());
     assert!(cluster.directory.app().node().unwrap().media(&short.id).await.unwrap().is_none());
+    // So do an effect's own pictures and a gacha banner's art.
+    let stored = |purpose: pb::MediaPurpose| {
+        let (http, server_id, juan, png) = (http.clone(), server.id.clone(), juan.clone(), with_text.clone());
+        async move {
+            let reserved = reserve(purpose, &server_id, &juan).await.unwrap();
+            assert_eq!(http.put(&reserved.upload_url).body(png).send().await.unwrap().status(), 204);
+            reserved.media.unwrap()
+        }
+    };
+    let leaf = stored(pb::MediaPurpose::Decoration).await;
+    let item = pb::NewProfileItem {
+        kind: pb::ProfileItemKind::Effect as i32,
+        name: "Leaves".into(),
+        effect: r#"{"layers":[{"image":0,"motion":"fall","phase":"idle","count":4,"from":"top","size":[20,28],"duration":[4000,6000]}]}"#.into(),
+        picture_urls: vec![leaf.url.clone()],
+        ..Default::default()
+    };
+    let request = pb::CreateServerProfileItemRequest { server_id: server.id.clone(), item: Some(item) };
+    c.profile_items.create_server_profile_item(authed(&juan, request)).await.unwrap();
+    let request = pb::CreateCurrencyRequest {
+        server_id: server.id.clone(),
+        currency: Some(pb::CurrencyChange { name: Some("Gems".into()), ..Default::default() }),
+    };
+    let gems = c.economy.create_currency(authed(&juan, request)).await.unwrap().into_inner().currency.unwrap();
+    let art = stored(pb::MediaPurpose::ShopArt).await;
+    let gacha = pb::GachaBanner {
+        name: "Starlight".into(),
+        currency_id: gems.id.clone(),
+        pull_price: 10,
+        tiers: vec![pb::GachaTier { id: "r".into(), name: "R".into(), color: None, rate: 1_000_000 }],
+        prizes: vec![pb::GachaPrize {
+            tier_id: "r".into(),
+            currency_id: gems.id.clone(),
+            amount: 5,
+            weight: 1,
+            ..Default::default()
+        }],
+        art_url: art.url.clone(),
+        available: true,
+        ..Default::default()
+    };
+    let request = pb::CreateGachaBannerRequest { server_id: server.id.clone(), banner: Some(gacha) };
+    c.economy.create_gacha_banner(authed(&juan, request)).await.unwrap();
     // Uploads the server never used are swept from its shard and bucket.
     let unused = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
     assert_eq!(http.put(&unused.upload_url).body(with_text.clone()).send().await.unwrap().status(), 204);
@@ -1782,6 +1829,8 @@ async fn servers_live_in_their_region_and_move() {
     assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
     assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
     assert!(picture_at(&shard_b, &banner.id).exists(), "and so does its banner");
+    assert!(picture_at(&shard_b, &leaf.id).exists(), "and an effect's pictures");
+    assert!(picture_at(&shard_b, &art.id).exists(), "and a gacha banner's art");
     assert_eq!(http.get(&banner.url).send().await.unwrap().bytes().await.unwrap().to_vec(), png);
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
     // A file attached to a message goes straight to the server's region too,
