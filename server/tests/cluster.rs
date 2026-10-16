@@ -1750,9 +1750,12 @@ async fn servers_live_in_their_region_and_move() {
     // A server's banner goes to its region too.
     let banner = reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap();
     assert!(banner.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
+    assert_eq!(http.put(&banner.upload_url).body(with_text.clone()).send().await.unwrap().status(), 204);
+    let banner = banner.media.unwrap();
     let request = pb::UpdateServerRequest {
         server_id: server.id.clone(),
         icon_url: Some(direct.url.clone()),
+        banner_url: Some(banner.url.clone()),
         ..Default::default()
     };
     c.servers.update_server(authed(&juan, request)).await.unwrap();
@@ -1778,6 +1781,8 @@ async fn servers_live_in_their_region_and_move() {
     fuwa_server::cluster::pictures::sweep(cluster.shards[1].app(), later).await.unwrap();
     assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
     assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
+    assert!(picture_at(&shard_b, &banner.id).exists(), "and so does its banner");
+    assert_eq!(http.get(&banner.url).send().await.unwrap().bytes().await.unwrap().to_vec(), png);
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
     // A file attached to a message goes straight to the server's region too,
     // is served there (as a download) while the message has it, and goes
