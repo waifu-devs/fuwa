@@ -220,7 +220,7 @@ Both apps show, where the server has currencies:
 - **Server settings > Economy** (Manage Economy): currencies with their
   icon, description, transfer switch and earn rules; the shop's listings
   (and whether each is gacha-only); and the gacha banners, with their
-  art, tiers, prizes, rates, pity and duplicates (the art on the web).
+  art, tiers, prizes, rates, pity and duplicates.
 - **Banners** in the Shop: each open banner with its art, its price, its drop
   rates (every tier and prize, with its chance), the member's pity count,
   and Pull buttons that show what dropped.

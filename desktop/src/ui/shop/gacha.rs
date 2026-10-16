@@ -530,8 +530,15 @@ impl ShopView {
                 window,
                 |el, t| el.left(relative((t / 0.6).min(1.0) * 1.5 - 0.4)),
             );
+            // How pity works, on hover, as the web's title.
+            let about = t_with(
+                "chattools.economy.gacha.pityAbout",
+                &[("tier", Arg::Str(&b.tiers[at].name)), ("count", Arg::Num(i64::from(b.pity_pulls)))],
+            );
             col = col.child(
                 div()
+                    .id(SharedString::from(format!("shop-gacha-pity-box-{}", b.id)))
+                    .tooltip(move |window, cx| crate::ui::overlay::Tip::new(about.clone()).build(window, cx))
                     .p(px(12.0))
                     .flex()
                     .flex_col()

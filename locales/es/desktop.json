@@ -354,7 +354,6 @@
   "economy.listing.priceRange": "El precio va de 1 a 1.000.000.000.000.",
   "economy.listing.deleteAsk": "¿Eliminar este artículo? Lo que ya se compró sigue siendo de quien lo compró.",
   "economy.listing.gachaOnly": "Solo gacha",
-  "economy.listing.gachaOnlyHint": "Los miembros no pueden comprarlo; solo sale en los banners de gacha que lo incluyan. Los banners se configuran en la app web.",
   "economy.edit": "Editar",
   "economy.delete": "Eliminar",
   "economy.finances.none": "Crea una moneda en la página Economía para ver sus finanzas.",

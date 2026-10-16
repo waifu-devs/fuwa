@@ -445,7 +445,8 @@
     `settings/server/Economy.tsx` and `Finances.tsx`; desktop:
     `core/economy.rs`, `ui/economy.rs` (the wallet and Give currency),
     `ui/shop.rs` (and `ui/shop/gacha.rs`, the banners and the pull's reveal)
-    and `ui/server_settings/economy.rs` and `finances.rs`.
+    and `ui/server_settings/economy.rs` (and `economy/gacha.rs`, the banner
+    editor) and `finances.rs`.
   - `search.rs` and `api/search.rs`: searching a server's messages
     (`SearchService`). Turso's own full-text search needs a new dependency
     and doesn't run in MVCC, so the index is plain tables in the server's file
