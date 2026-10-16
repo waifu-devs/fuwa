@@ -201,7 +201,6 @@
   "server.audit.webhookUpdate": "{actor}: изменён вебхук {name}",
   "server.audit.sharedRequest": "{actor}: запрос на показ {channel} с {server}",
   "server.audit.sharedUpdate": "{actor}: изменено, что может другой сервер в {channel}",
-  "server.agents.none": "Агентов здесь пока нет. Добавьте агента по имени пользователя; агенты создаются в веб-приложении в разделе «Настройки», «Агенты».",
   "server.automod.rule": "Правило",
   "server.automod.namePlaceholder": "Дайте ему название",
   "server.automod.morePings": "Больше {count} упоминаний",
@@ -770,5 +769,12 @@
   "economy.send.have": "У вас {amount}",
   "economy.send.sending": "Отправка…",
   "economy.send.sent": "Отправлено!",
-  "economy.audit.value.changed": "изменено"
+  "economy.audit.value.changed": "изменено",
+  "media.play": "Воспроизвести",
+  "media.pause": "Пауза",
+  "media.mute": "Выключить звук",
+  "media.unmute": "Включить звук",
+  "media.cantPlay": "Приложение не может воспроизвести такой файл. Сохраните его, чтобы воспроизвести.",
+  "media.broken": "Не удалось прочитать этот файл.",
+  "media.noSpeakers": "Не удалось открыть динамики."
 }

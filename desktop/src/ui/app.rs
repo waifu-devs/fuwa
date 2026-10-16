@@ -174,6 +174,11 @@ pub enum Dialog {
         channel: String,
         message: String,
     },
+    /// Everyone who reacted to a message in the open place, an emoji at a
+    /// time (`reactions.rs`; what's shown is in `reactions_open`).
+    Reactions {
+        msg: String,
+    },
     /// Time out, kick or ban someone, with a reason for the audit log.
     Moderate {
         key: String,
@@ -384,6 +389,13 @@ pub struct FuwaApp {
     pub(crate) hover_target: Option<crate::ui::context_menu::MenuOf>,
     /// A picture right-clicked in a message, as (message, which of its files), for its menu.
     pub right_picture: Option<(String, usize)>,
+    /// A message with links right-clicked, its menu waiting for the button to
+    /// come up: only then does its text say whether a link was under it.
+    /// How many applications wait in each server ("instance/server"), as the sidebar last read them.
+    pub(crate) waiting_applications: HashMap<String, usize>,
+    /// Who else in your call was recording it when the window last drew (`watch_recording`).
+    pub(crate) recording_seen: HashSet<String>,
+    pub(crate) pending_menu: Option<(crate::ui::context_menu::MenuOf, gpui_kit::Point<gpui_kit::Pixels>)>,
     /// The emoji picker over the composer, and its search box.
     pub emoji_open: bool,
     pub emoji_query: Entity<InputState>,
@@ -399,6 +411,8 @@ pub struct FuwaApp {
     pub reacting: Option<crate::ui::reactions::ReactAt>,
     /// Who reacted with what, as last asked of the instance (`ui::reactions`).
     pub reactors: std::collections::HashMap<String, crate::ui::reactions::SeenReactors>,
+    /// "See who reacted", while it's open (`ui::reactions`).
+    pub reactions_open: Option<crate::ui::reactions::ReactorsView>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The activity link the open card asks about following (`ui::presence`).
@@ -758,6 +772,9 @@ impl FuwaApp {
             picked_from: None,
             hover_target: None,
             right_picture: None,
+            pending_menu: None,
+            waiting_applications: HashMap::new(),
+            recording_seen: HashSet::new(),
             welcome: None,
             welcome_checked: HashSet::new(),
             sso_waiting: None,
@@ -780,6 +797,7 @@ impl FuwaApp {
             pins: None,
             reacting: None,
             reactors: Default::default(),
+            reactions_open: None,
             profile: None,
             profile_leaving: None,
             profile_tick: None,
@@ -1531,6 +1549,7 @@ impl FuwaApp {
                     SettingsEvent::Toast { icon, title } => {
                         this.toast(icon, title.clone(), String::new(), None, None, cx)
                     }
+                    SettingsEvent::Shop { key, server } => this.open_shop(key, server, window, cx),
                 }
                 cx.notify();
             },
@@ -1562,6 +1581,19 @@ impl FuwaApp {
         self.instance_settings = Some(view);
         self.focus.focus(window, cx);
         cx.notify();
+    }
+
+    /// Settings at Server profiles, on this server (the web's "Edit server profile").
+    pub(crate) fn open_server_profile(&mut self, key: &str, server: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        if let Some(view) = &self.settings {
+            let (key, server) = (key.to_owned(), server.to_owned());
+            view.update(cx, |view, cx| {
+                view.account.key = Some(key);
+                view.servers.server = Some(server);
+                view.choose(crate::ui::settings::Page::ServerProfiles, None, cx);
+            });
+        }
     }
 
     /// A server's settings, over everything but dialogs.
@@ -1845,6 +1877,7 @@ impl FuwaApp {
         self.polls.editor = None;
         self.polls.voters = None;
         self.board.settings = None;
+        self.reactions_open = None;
         self.profile_leaving = None;
         cx.notify();
     }
@@ -1982,9 +2015,11 @@ impl FuwaApp {
                 }
             }
             Dialog::Invite { .. } => self.copy_invite(cx),
-            Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } | Dialog::Picture { .. } => {
-                self.close_dialog(cx)
-            }
+            Dialog::Welcome { .. }
+            | Dialog::Secure { .. }
+            | Dialog::PollVoters { .. }
+            | Dialog::Reactions { .. }
+            | Dialog::Picture { .. } => self.close_dialog(cx),
             Dialog::Onboarding { .. } => self.step_do(false, window, cx),
             Dialog::Poll { .. } => self.send_poll(cx),
             Dialog::BoardSettings { .. } => self.save_board_settings(cx),
@@ -2278,6 +2313,7 @@ impl FuwaApp {
             self.focus.focus(window, cx);
         }
         self.covers = covers;
+        self.watch_recording(cx);
         let empty = self.core.shared.read(|s| s.order.is_empty());
         // Server settings cover the whole window with a solid page.
         crate::ui::effects::hold(

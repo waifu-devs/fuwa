@@ -534,8 +534,15 @@ pub(crate) fn join_row(j: &JoinLine, ctx: &Rc<RowCtx>, p: &Palette) -> AnyElemen
         .on_mouse_down(
             MouseButton::Right,
             context_menu::on_right_click(ctx.this.clone(), {
-                let (key, server, uid) = (ctx.key.clone(), ctx.server.clone(), j.user_id.clone());
-                move |_, _| Some(MenuOf::Member { key: key.clone(), server: server.clone(), user_id: uid.clone() })
+                let of = MenuOf::Join {
+                    key: ctx.key.clone(),
+                    server: ctx.server.clone(),
+                    id: j.id.clone(),
+                    user_id: j.user_id.clone(),
+                    wave: j.user.as_ref().filter(|_| !j.mine && j.can_wave).map(|u| u.username.clone()),
+                    can_delete: j.can_delete,
+                };
+                move |_, _| Some(of.clone())
             }),
         )
         .child(
@@ -788,6 +795,13 @@ pub(crate) fn alert_row(
                 let _ = this.update(cx, |this, cx| this.hover_row(&id, *on, false, cx));
             }
         })
+        .on_mouse_down(
+            MouseButton::Right,
+            context_menu::on_right_click(ctx.this.clone(), {
+                let of = MenuOf::Alert { id: a.id.clone(), can_delete: a.can_delete };
+                move |_, _| Some(of.clone())
+            }),
+        )
         .child(badge)
         .child(div().flex_1().min_w_0().child(head).child(card));
     let row = if a.can_delete && tools_shown(&a.id, ctx) { row.child(delete_tools(&a.id, ctx, p)) } else { row };

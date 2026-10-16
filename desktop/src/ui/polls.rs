@@ -1736,13 +1736,14 @@ fn field(input: &Entity<InputState>, height: f32, focused: bool, p: &Palette) ->
         .child(div().flex_1().min_w_0().child(Input::new(input).appearance(false)))
 }
 
-fn dialog_head(
+pub(crate) fn dialog_head(
     glyph: &'static str,
-    title: &'static str,
+    title: impl Into<SharedString>,
     body: String,
     p: &Palette,
     cx: &mut Context<FuwaApp>,
 ) -> gpui_kit::Div {
+    let bare = body.is_empty();
     div()
         .flex()
         .items_start()
@@ -1766,13 +1767,20 @@ fn dialog_head(
                 .flex()
                 .flex_col()
                 .gap(px(4.0))
-                .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title))
-                .child(div().text_sm().text_color(p.muted_foreground).child(body)),
+                .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title.into()))
+                .when(!bare, |el| el.child(div().text_sm().text_color(p.muted_foreground).child(body))),
         )
+        // Without words under it, the title sits level with its tile.
+        .when(bare, |el| el.items_center())
         .child(icon_button("dialog-close", "x", p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))))
 }
 
-fn dialog_frame(panel: gpui_kit::Div, tag: &'static str, p: &Palette, cx: &mut Context<FuwaApp>) -> AnyElement {
+pub(crate) fn dialog_frame(
+    panel: gpui_kit::Div,
+    tag: &'static str,
+    p: &Palette,
+    cx: &mut Context<FuwaApp>,
+) -> AnyElement {
     motion::fade_in(
         scrim("dialog-scrim", p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
             crate::ui::overlay::roomy(

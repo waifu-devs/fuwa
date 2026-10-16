@@ -74,8 +74,14 @@ sha2 = "0.10"
 # Echo cancellation, noise suppression and automatic gain for the microphone:
 # WebRTC's audio processing, ported to Rust (no C++ to build).
 sonora = "0.2"
-# Sound files people pick for the app's sounds (Ogg Opus goes through `opus`).
-symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "mp3", "flac", "ogg", "vorbis", "adpcm"] }
+# Sound files people pick for the app's sounds (Ogg Opus goes through `opus`),
+# and the sound of videos and sound files in messages (core/media).
+symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "mp3", "flac", "ogg", "vorbis", "adpcm", "aac", "isomp4", "mkv"] }
+# Videos in messages (core/media): their frames read from MP4 and WebM files,
+# and H.264 decoded by OpenH264 built from its source (VP8 and VP9 go through libvpx).
+matroska-demuxer = "0.8"
+mp4 = "0.14"
+openh264 = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util"] }
 tokio-util = "0.7"
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }

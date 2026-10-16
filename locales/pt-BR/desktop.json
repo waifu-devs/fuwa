@@ -193,7 +193,6 @@
   "server.audit.webhookUpdate": "{actor} alterou o webhook {name}",
   "server.audit.sharedRequest": "{actor} pediu para mostrar {channel} de {server}",
   "server.audit.sharedUpdate": "{actor} alterou o que o outro servidor pode fazer em {channel}",
-  "server.agents.none": "Nenhum agente aqui ainda. Adicione um pelo nome de usuário; agentes são criados em Configurações, Agentes, no app web.",
   "server.automod.rule": "Regra",
   "server.automod.namePlaceholder": "Dê um nome a ela",
   "server.automod.morePings": "Mais de {count} menções",
@@ -726,5 +725,12 @@
   "economy.send.have": "Você tem {amount}",
   "economy.send.sending": "Enviando…",
   "economy.send.sent": "Enviado!",
-  "economy.audit.value.changed": "alterado"
+  "economy.audit.value.changed": "alterado",
+  "media.play": "Reproduzir",
+  "media.pause": "Pausar",
+  "media.mute": "Silenciar",
+  "media.unmute": "Ativar som",
+  "media.cantPlay": "O app não consegue reproduzir esse tipo de arquivo. Salve-o para reproduzir.",
+  "media.broken": "Não foi possível ler este arquivo.",
+  "media.noSpeakers": "Não foi possível abrir os alto-falantes."
 }

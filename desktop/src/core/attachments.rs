@@ -272,21 +272,18 @@ impl Core {
         })
     }
 
-    /// Saves an attached file from its instance to `path`, as it streams in.
-    /// `size` is the file's size as its message gives it (0 if unknown): a
-    /// download that runs past it (or past `MOST_READ`), or stalls, stops.
-    pub async fn save_attachment(&self, key: &str, url: &str, size: i64, path: &Path) -> Result<(), Problem> {
+    /// Asks the instance for an attached file, giving its body as it comes.
+    /// Fetched from the instance this app talks to, whatever address the
+    /// link names, and only its files.
+    pub(crate) async fn request_attachment(&self, key: &str, url: &str) -> Result<hyper::body::Incoming, Problem> {
         let api = self.api(key).ok_or_else(|| Problem::new(Code::Unavailable, "That instance isn't here."))?;
         let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
-        let unwritable = || Problem::new(Code::PermissionDenied, "Couldn't save the file there.");
         let too_long = || Problem::new(Code::DeadlineExceeded, "That took too long.");
-        // Fetched from the instance this app talks to, whatever address the link names, and only its files.
         let wanted = url::Url::parse(url).map_err(|_| unreachable())?;
         if !wanted.path().starts_with("/media/") {
             return Err(Problem::new(Code::InvalidArgument, "That isn't a file on this instance."));
         }
         let target = format!("{}{}", api.url.trim_end_matches('/'), wanted.path());
-        let most = most_saved(size);
         let roots = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
             Ok(roots) => roots,
             Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),
@@ -300,14 +297,24 @@ impl Core {
             .map_err(|_| too_long())?
             .map_err(|_| unreachable())?;
         match response.status().as_u16() {
-            200 => {}
-            404 | 410 => return Err(Problem::new(Code::NotFound, "That file isn't on the instance anymore.")),
-            _ => return Err(unreachable()),
+            200 => Ok(response.into_body()),
+            404 | 410 => Err(Problem::new(Code::NotFound, "That file isn't on the instance anymore.")),
+            _ => Err(unreachable()),
         }
+    }
+
+    /// Saves an attached file from its instance to `path`, as it streams in.
+    /// `size` is the file's size as its message gives it (0 if unknown): a
+    /// download that runs past it (or past `MOST_READ`), or stalls, stops.
+    pub async fn save_attachment(&self, key: &str, url: &str, size: i64, path: &Path) -> Result<(), Problem> {
+        let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
+        let unwritable = || Problem::new(Code::PermissionDenied, "Couldn't save the file there.");
+        let too_long = || Problem::new(Code::DeadlineExceeded, "That took too long.");
+        let most = most_saved(size);
+        let mut body = self.request_attachment(key, url).await?;
         // Written beside the target first, so a cut-off download never looks finished,
         // and never over a file that's already there.
         let (partial, mut file) = open_partial(path).await.ok_or_else(unwritable)?;
-        let mut body = response.into_body();
         let result = async {
             let mut written: u64 = 0;
             loop {
@@ -342,7 +349,7 @@ const STALL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The most a download may bring: the file's own size and a little more (the
 /// instance has the last word on its size), never past `MOST_READ`.
-fn most_saved(size: i64) -> u64 {
+pub(crate) fn most_saved(size: i64) -> u64 {
     match u64::try_from(size) {
         Ok(size) if size > 0 => size.saturating_add(64 * 1024).min(MOST_READ),
         _ => MOST_READ,

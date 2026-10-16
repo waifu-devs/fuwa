@@ -32,12 +32,14 @@ pub(crate) fn run(f: impl Fn(&mut FuwaApp, &mut Window, &mut Context<FuwaApp>) +
 #[derive(Clone)]
 pub(crate) enum MenuOf {
     /// A message in the open channel or conversation; `thread` when it's in the
-    /// open thread's panel, `picture` the file right-clicked in it.
+    /// open thread's panel, `picture` the file right-clicked in it, `link` the
+    /// link in its words.
     Message {
         msg: Rc<Msg>,
         thread: Option<String>,
         picture: Option<usize>,
         selection: String,
+        link: Option<String>,
     },
     /// Someone's name or picture, in a server or not.
     Member {
@@ -94,6 +96,21 @@ pub(crate) enum MenuOf {
         channel: String,
         menu: crate::ui::board::BoardMenu,
     },
+    /// "Someone joined" in the open channel (`chat_rows::join_row`): `wave`
+    /// when you may wave at them, by their username.
+    Join {
+        key: String,
+        server: Option<String>,
+        id: String,
+        user_id: String,
+        wave: Option<String>,
+        can_delete: bool,
+    },
+    /// An AutoMod alert in the open channel (`chat_rows::alert_row`).
+    Alert {
+        id: String,
+        can_delete: bool,
+    },
     /// A reaction chip under a message, for someone who can clear it (`reactions.rs`).
     Reaction {
         msg: String,
@@ -118,6 +135,7 @@ impl MenuOf {
             MenuOf::RailAdd => "rail-add".into(),
             MenuOf::Composer => "composer".into(),
             MenuOf::Reaction { msg, .. } => format!("msg|{msg}"),
+            MenuOf::Join { id, .. } | MenuOf::Alert { id, .. } => format!("msg|{id}"),
             MenuOf::Board { channel, menu, .. } => format!("board|{channel}|{menu:?}"),
         }
     }
@@ -935,6 +953,43 @@ pub(crate) fn on_right_click(
         cx.stop_propagation();
         let at = ev.position;
         let _ = this.update(cx, |this, cx| this.open_context_menu(of, at, window, cx));
+    }
+}
+
+/// Right-clicking a message whose words have links: its menu opens when the
+/// button comes up, by then knowing whether it was on a link (the link's own
+/// handler opens it, `open_pending_menu`), or by `up` when it wasn't.
+pub(crate) fn on_right_click_later(
+    this: gpui_kit::WeakEntity<FuwaApp>,
+    of: impl Fn(&mut Window, &mut App) -> Option<MenuOf> + 'static,
+) -> impl Fn(&gpui_kit::MouseDownEvent, &mut Window, &mut App) + 'static {
+    move |ev, window, cx| {
+        let Some(of) = of(window, cx) else { return };
+        cx.stop_propagation();
+        let at = ev.position;
+        let _ = this.update(cx, |this, _| this.pending_menu = Some((of, at)));
+    }
+}
+
+/// The button coming up over a message whose menu waits (`on_right_click_later`).
+pub(crate) fn on_right_up(
+    this: gpui_kit::WeakEntity<FuwaApp>,
+) -> impl Fn(&gpui_kit::MouseUpEvent, &mut Window, &mut App) + 'static {
+    move |_, window, cx| {
+        let _ = this.update(cx, |this, cx| this.open_pending_menu(None, window, cx));
+    }
+}
+
+impl FuwaApp {
+    /// Opens the message menu waiting for the button to come up, with the link it came up on.
+    pub(crate) fn open_pending_menu(&mut self, url: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((mut of, at)) = self.pending_menu.take() else { return };
+        if let (MenuOf::Message { link, .. }, Some(url)) = (&mut of, url)
+            && crate::ui::text::safe_link(url)
+        {
+            *link = Some(url.to_owned());
+        }
+        self.open_context_menu(of, at, window, cx);
     }
 }
 

@@ -585,6 +585,71 @@ impl FuwaApp {
     }
 }
 
+impl FuwaApp {
+    /// The web's `RecordingWatch`: when someone else in your call starts
+    /// recording it, on their device or on the server, a cue and a note
+    /// saying who. Looked at as the window draws; `recording_seen` is who was
+    /// recording last time ("server:" before an id for the server).
+    pub(crate) fn watch_recording(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.core.call() else {
+            self.recording_seen.clear();
+            return;
+        };
+        let (now, names, video) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&call.instance) else { return (Vec::new(), Vec::new(), false) };
+            let me = i.me.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+            let states: Vec<&pb::VoiceState> = if call.is_dm() {
+                i.dms.calls.get(&call.conversation_id).map(|c| c.participants.iter().collect()).unwrap_or_default()
+            } else {
+                i.voice
+                    .get(&call.server_id)
+                    .map(|l| l.iter().filter(|v| v.channel_id == call.channel_id).collect())
+                    .unwrap_or_default()
+            };
+            let now: Vec<String> = states
+                .iter()
+                .filter(|v| v.user_id != me)
+                .flat_map(|v| {
+                    let device = v.self_record.then(|| v.user_id.clone());
+                    let server = v.server_record.then(|| format!("server:{}", v.user_id));
+                    device.into_iter().chain(server)
+                })
+                .collect();
+            let server = (!call.is_dm()).then_some(call.server_id.as_str());
+            let names =
+                now.iter().map(|id| (id.clone(), i.display_name(server, id.trim_start_matches("server:")))).collect();
+            let video = !call.is_dm() && i.server(&call.server_id).is_some_and(|s| s.record_video);
+            (now, names, video)
+        });
+        let fresh: Vec<&String> = now.iter().filter(|id| !self.recording_seen.contains(*id)).collect();
+        if !fresh.is_empty() {
+            let name = |server: bool| {
+                fresh
+                    .iter()
+                    .filter(|id| id.starts_with("server:") == server)
+                    .filter_map(|id| names.iter().find(|(n, _)| n == *id).map(|(_, name)| name.clone()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let (device, server) = (name(false), name(true));
+            self.core.cue(crate::core::sounds::Sound::Recording);
+            if !device.is_empty() {
+                let note = t_with("dms-calls.calls.video.startedCall", &[("names", Arg::Str(&device))]);
+                self.toast("circle-dot", note, String::new(), None, None, cx);
+            }
+            if !server.is_empty() {
+                let key = if video {
+                    "dms-calls.calls.video.startedServerVideo"
+                } else {
+                    "dms-calls.calls.video.startedServer"
+                };
+                self.toast("circle-dot", t_with(key, &[("names", Arg::Str(&server))]), String::new(), None, None, cx);
+            }
+        }
+        self.recording_seen = now.into_iter().collect();
+    }
+}
+
 /// Whether you may record in the call you're in: RECORD in a voice channel, always in a conversation.
 pub(crate) fn may_record(app: &FuwaApp, call: &CallView) -> bool {
     if call.is_dm() {
