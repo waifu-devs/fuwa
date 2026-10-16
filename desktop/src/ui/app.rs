@@ -149,6 +149,12 @@ pub enum Dialog {
         host: String,
         code: String,
     },
+    /// A board's columns and labels (the editor's state is in `board.settings`).
+    BoardSettings {
+        key: String,
+        server: String,
+        channel: String,
+    },
     /// Making a poll in a channel (the editor's state is in `polls`).
     Poll {
         key: String,
@@ -1870,6 +1876,7 @@ impl FuwaApp {
         }
         self.polls.editor = None;
         self.polls.voters = None;
+        self.board.settings = None;
         self.reactions_open = None;
         self.profile_leaving = None;
         cx.notify();
@@ -2015,6 +2022,7 @@ impl FuwaApp {
             | Dialog::Picture { .. } => self.close_dialog(cx),
             Dialog::Onboarding { .. } => self.step_do(false, window, cx),
             Dialog::Poll { .. } => self.send_poll(cx),
+            Dialog::BoardSettings { .. } => self.save_board_settings(cx),
             Dialog::Moderate { key, server, user_id, action } => {
                 let reason: String = value.chars().take(512).collect();
                 self.moderate(key, server, user_id, action, reason, cx);

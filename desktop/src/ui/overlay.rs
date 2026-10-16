@@ -286,6 +286,9 @@ impl FuwaApp {
         if let Dialog::Safety { key, conversation } = &dialog {
             return Some(self.render_encryption(key, conversation, window, cx));
         }
+        if let Dialog::BoardSettings { .. } = &dialog {
+            return Some(self.render_board_settings(window, cx));
+        }
         if let Dialog::Poll { .. } = &dialog {
             return Some(self.render_poll_editor(window, cx));
         }
@@ -357,6 +360,7 @@ impl FuwaApp {
             | Dialog::Secure { .. }
             | Dialog::Safety { .. }
             | Dialog::Poll { .. }
+            | Dialog::BoardSettings { .. }
             | Dialog::PollVoters { .. }
             | Dialog::Reactions { .. }
             | Dialog::Picture { .. }
@@ -435,6 +439,7 @@ impl FuwaApp {
             Dialog::SsoJoin { .. } => "sso",
             Dialog::AllowGame { .. } => "game",
             Dialog::Poll { .. } => "poll",
+            Dialog::BoardSettings { .. } => "board-settings",
             Dialog::PollVoters { .. } => "voters",
             Dialog::Reactions { .. } => "reactions",
             Dialog::Picture { .. } => "picture",
