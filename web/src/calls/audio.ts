@@ -196,6 +196,8 @@ export class Speakers {
   private sink = "";
   /** While recording: where everyone's sound (and yours) also goes. */
   private tap: { gain: GainNode; out: MediaStreamAudioDestinationNode; mine: MediaStreamAudioSourceNode | null } | null = null;
+  /** Soundboard sounds playing now, each through its own volume. */
+  private readonly sounds = new Set<GainNode>();
   deafened = false;
 
   constructor(
@@ -237,6 +239,35 @@ export class Speakers {
     if (v.talking) this.onSpeaking(userId, false);
   }
 
+  /**
+   * A soundboard sound, at `volume` (0 to 1), over whatever else plays and
+   * over other sounds: through your call volume to your output device, and
+   * into a recording on this device, which records what you hear. Stops
+   * itself, and answers a way to stop it sooner.
+   */
+  play(buffer: AudioBuffer, volume: number): () => void {
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.ctx.createGain();
+    gain.gain.value = volume;
+    source.connect(gain).connect(this.master);
+    if (this.tap) gain.connect(this.tap.gain);
+    this.sounds.add(gain);
+    source.onended = () => {
+      this.sounds.delete(gain);
+      source.disconnect();
+      gain.disconnect();
+    };
+    source.start();
+    return () => {
+      try {
+        source.stop();
+      } catch {
+        // Already over.
+      }
+    };
+  }
+
   /** Volumes, deafening and the output device, as the settings say now. */
   apply() {
     const p = getPrefs();
@@ -273,6 +304,7 @@ export class Speakers {
     const out = this.ctx.createMediaStreamDestination();
     gain.connect(out);
     for (const v of this.voices.values()) v.analyser.connect(gain);
+    for (const sound of this.sounds) sound.connect(gain);
     const source = mine ? this.ctx.createMediaStreamSource(new MediaStream([mine])) : null;
     source?.connect(gain);
     this.tap = { gain, out, mine: source };
@@ -282,6 +314,7 @@ export class Speakers {
   stopRecording() {
     if (!this.tap) return;
     for (const v of this.voices.values()) v.analyser.disconnect(this.tap.gain);
+    for (const sound of this.sounds) sound.disconnect(this.tap.gain);
     this.tap.mine?.disconnect();
     this.tap.gain.disconnect();
     this.tap = null;
@@ -292,8 +325,37 @@ export class Speakers {
     this.unsubscribe();
     this.stopRecording();
     for (const id of [...this.voices.keys()]) this.remove(id);
+    for (const sound of this.sounds) sound.disconnect();
+    this.sounds.clear();
     this.master.disconnect();
   }
+}
+
+/**
+ * A sound played outside any call (a soundboard preview in settings): to
+ * the system's output, at `volume`, from `offset` seconds for `duration`
+ * (all of it when left out). Answers a way to stop it.
+ */
+export function playLoose(buffer: AudioBuffer, volume: number, onEnd?: () => void, offset = 0, duration?: number): () => void {
+  const ctx = audioContext();
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gain = ctx.createGain();
+  gain.gain.value = volume;
+  source.connect(gain).connect(ctx.destination);
+  source.onended = () => {
+    source.disconnect();
+    gain.disconnect();
+    onEnd?.();
+  };
+  source.start(0, offset, duration);
+  return () => {
+    try {
+      source.stop();
+    } catch {
+      // Already over.
+    }
+  };
 }
 
 /** Whether this browser can send sound to a device other than the default one. */

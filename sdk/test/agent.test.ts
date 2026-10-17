@@ -29,6 +29,7 @@ import {
   createEndpoint,
   createFuwa,
   messages,
+  uploadPicture,
   listEvents,
   type Fuwa,
   type Message,
@@ -734,6 +735,27 @@ test("a voice connection rejoins after the instance restarts", async () => {
   await conn.speak([Uint8Array.of(0xfc, 9, 9, 9)]);
   await agent.stop();
   await assert.doesNotReject(conn.closed);
+});
+
+test("an agent in a voice channel plays the server's sounds for everyone", async () => {
+  const { channel: voice } = await person.channels.createChannel({ serverId, name: "Soundboard", type: ChannelType.VOICE });
+  const file = new OggOpusWriter();
+  for (let i = 0; i < 25; i++) file.add(Uint8Array.of(0xf8, 0xff, 0xfe));
+  const media = await uploadPicture(person, { purpose: MediaPurpose.SOUND, data: file.finish(), contentType: "audio/ogg", serverId });
+  const { sound } = await person.soundboard.createSound({ serverId, name: "Horn", url: media.url, emoji: "📯", durationMs: 500 });
+  const agent = newAgent();
+  const played: string[] = [];
+  agent.on("soundPlayed", (payload) => void played.push(`${payload.userId}/${payload.sound?.name}`));
+  await agent.start();
+  assert.deepEqual((await agent.sounds(serverId)).map((s) => s.name), ["Horn"]);
+  const conn = await agent.joinVoice(serverId, voice!.id);
+  await conn.playSound(sound!.id);
+  await until("the sound played", () => played.includes(`${agent.me.id}/Horn`) || undefined);
+  // Muted, it can't.
+  await conn.setState({ selfMute: true });
+  await assert.rejects(conn.playSound(sound!.id), FailedPreconditionError);
+  await conn.leave();
+  await agent.stop();
 });
 
 test("a reset token stops a running agent with UnauthenticatedError", async () => {

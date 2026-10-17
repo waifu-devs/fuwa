@@ -116,6 +116,7 @@ nothing comes back as `{"done": true}`.
 | Roles | `create_role`, `update_role`, `reorder_roles`, `delete_role` | `RoleService` |
 | Invites | `list_invites`, `create_invite`, `delete_invite` | `InviteService` |
 | Emoji | `rename_emoji`, `delete_emoji` | `EmojiService.UpdateEmoji`, `DeleteEmoji` |
+| Soundboard | `list_sounds`, `play_sound`, `update_sound`, `delete_sound` | `SoundboardService` ([docs/soundboard.md](soundboard.md)) |
 | Webhooks | `list_webhooks`, `create_webhook`, `update_webhook`, `reset_webhook_token`, `delete_webhook` | `WebhookService` |
 | AutoMod | `list_automod_rules`, `save_automod_rule`, `test_automod_rule`, `delete_automod_rule` | `AutoModService` |
 | The way in | `get_join_form`, `set_join_form`, `list_applications`, `review_application`, `get_welcome_screen`, `set_welcome_screen`, `get_onboarding`, `set_onboarding` | `JoinService` |

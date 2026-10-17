@@ -750,6 +750,46 @@ mod tests {
         assert_eq!(sniff(b""), None);
     }
 
+    /// One Ogg page of `packets`, its CRC left out (nothing here reads it).
+    fn page(serial: u32, granule: i64, packets: &[&[u8]]) -> Vec<u8> {
+        let mut out = b"OggS\0\0".to_vec();
+        out.extend_from_slice(&granule.to_le_bytes());
+        out.extend_from_slice(&serial.to_le_bytes());
+        out.extend_from_slice(&[0; 8]);
+        out.push(packets.len() as u8);
+        out.extend(packets.iter().map(|p| p.len() as u8));
+        packets.iter().for_each(|p| out.extend_from_slice(p));
+        out
+    }
+
+    fn opus_head(pre_skip: u16) -> Vec<u8> {
+        let mut head = b"OpusHead\x01\x01".to_vec();
+        head.extend_from_slice(&pre_skip.to_le_bytes());
+        head.extend_from_slice(&[0x80, 0xbb, 0, 0, 0, 0, 0]);
+        head
+    }
+
+    #[test]
+    fn sounds_say_how_long_they_play() {
+        let frame: &[u8] = &[0xf8, 0xff, 0xfe];
+        let mut file = page(1, 0, &[&opus_head(312)]);
+        file.extend(page(1, 0, &[b"OpusTags"]));
+        file.extend(page(1, 48_000 + 312, &[frame; 50]));
+        assert_eq!(ogg_opus_ms(&file), Some(1_000));
+        // A page with no packet ending on it (-1) leaves the last one standing.
+        file.extend(page(1, -1, &[frame]));
+        assert_eq!(ogg_opus_ms(&file), Some(1_000));
+        file.extend(page(1, 5 * 48_000 + 312, &[frame; 200]));
+        assert_eq!(ogg_opus_ms(&file), Some(5_000));
+        // A second stream, a cut-off page, or no OpusHead isn't a sound.
+        let mut two = file.clone();
+        two.extend(page(2, 6 * 48_000, &[frame]));
+        assert_eq!(ogg_opus_ms(&two), None);
+        assert_eq!(ogg_opus_ms(&file[..file.len() - 1]), None);
+        assert_eq!(ogg_opus_ms(&page(1, 48_000, &[b"OpusTags"])), None);
+        assert_eq!(ogg_opus_ms(b"ID3 not ogg at all"), None);
+    }
+
     #[test]
     fn attachments_are_told_apart_by_their_bytes() {
         assert_eq!(kind_of(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"), "image/png");

@@ -93,7 +93,10 @@ async fn checked_emoji(conn: &turso::Connection, server_id: &str, emoji: &str) -
         return Ok(String::new());
     }
     let emojis = store::load_emojis(conn, server_id).await?;
-    super::join::checked_emoji(&emojis, emoji, "sound")
+    // A moving emoji is kept as `<:name:id>` too: its id says it moves.
+    let emoji = emoji.trim();
+    let emoji = emoji.strip_prefix("<a:").map_or_else(|| emoji.to_string(), |rest| format!("<:{rest}"));
+    super::join::checked_emoji(&emojis, &emoji, "sound")
 }
 
 /// Every sound the server has now, as the event members get.

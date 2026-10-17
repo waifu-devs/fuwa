@@ -20,6 +20,7 @@ import { useI18n } from "@/i18n/react";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
 import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
 import { RecordingsButton } from "./Recordings";
+import { PlayedBubble, SoundboardButton } from "./Soundboard";
 import { useVoiceIn } from "./VoiceUsers";
 
 /**
@@ -132,6 +133,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
               <CameraButton size="lg" />
               <ScreenButton size="lg" />
               <RecordButton size="lg" />
+              <SoundboardButton size="lg" />
               <HangUpButton size="lg" onClick={() => void hangUp(null)} />
             </motion.div>
           ) : (
@@ -208,6 +210,7 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
         </button>
       </ParticipantMenu>
       {joined && <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId }} name={name} className="absolute top-2 right-2" />}
+      <PlayedBubble instanceKey={instanceKey} serverId={serverId} channelId={channelId} userId={state.userId} name={name} className="absolute top-2 left-2" />
     </motion.li>
   );
 }

@@ -13,7 +13,7 @@ import { cue } from "@/lib/sounds";
 import { reportTiming, reportUsage } from "@/lib/reports";
 import { toast } from "@/lib/ui";
 import { i18n, type Key } from "@/i18n/i18n";
-import { Mic, micProblem, Speakers } from "./audio";
+import { Mic, micProblem, playLoose, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
 import { watchQuality } from "./quality";
 import { getCalls, sameTarget, setCalls, type CallTarget } from "./state";
@@ -224,6 +224,11 @@ class Session {
 
   applyVolumes() {
     this.speakers.apply();
+  }
+
+  /** A soundboard sound, through this call's speakers. */
+  playSound(buffer: AudioBuffer, volume: number) {
+    return this.speakers.play(buffer, volume);
   }
 
   /** Connects (or connects again) to the media server, with the place this session has. */
@@ -971,6 +976,20 @@ export function setPushing(down: boolean) {
   if (getCalls().talking === down) return;
   setCalls(() => ({ talking: down }));
   session?.applyMute();
+}
+
+/**
+ * Plays a soundboard sound through the call you're in (your call volume and
+ * output device, and a recording on this device), wherever it was played;
+ * outside a call, to the system's output. Answers a way to stop it.
+ */
+export function playThroughCall(buffer: AudioBuffer, volume: number, onEnd?: () => void): () => void {
+  if (session) {
+    const stop = session.playSound(buffer, volume);
+    if (onEnd) setTimeout(onEnd, buffer.duration * 1000);
+    return stop;
+  }
+  return playLoose(buffer, volume, onEnd);
 }
 
 /** Someone's volume, or the output device, changed. */

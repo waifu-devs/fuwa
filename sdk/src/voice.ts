@@ -528,6 +528,16 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
     for (const speech of this.#speeches) this.#interrupt(speech);
   }
 
+  /**
+   * Plays one of the server's soundboard sounds for everyone in the channel
+   * (SoundboardService.PlaySound, docs/soundboard.md). Each app plays the
+   * file itself, so others' programs and recordings on the server don't hear
+   * it. Needs Use Soundboard and Speak here, and not to be muted.
+   */
+  async playSound(soundId: string): Promise<void> {
+    await this.#fuwa.soundboard.playSound({ serverId: this.serverId, channelId: this.channelId, soundId });
+  }
+
   /** Changes the account's own mute and deafen, as people do. */
   async setState(state: { selfMute?: boolean; selfDeaf?: boolean }): Promise<VoiceState | undefined> {
     this.#opts = { ...this.#opts, ...state };

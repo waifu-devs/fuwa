@@ -233,6 +233,21 @@
     device keeps only ones with a picture under `/media/` on the
     conversation's instance (docs/e2ee.md#server-emoji); the server is
     untouched.
+    The soundboard (`api/soundboard.rs`, `SoundboardService`,
+    docs/soundboard.md): sounds in the server file's `sounds` (name unique
+    by `name_key`, emoji, volume 0 to 1), their files uploads
+    (`MEDIA_PURPOSE_SOUND`, Ogg Opus checked by `media::ogg_opus_ms` for at
+    most `MAX_SOUND_MS` when they arrive) counted in the server's
+    attachments; every change sends the whole list (`SoundsUpdated`), under
+    Manage Soundboard. `PlaySound` takes a place in that channel's call, Use
+    Soundboard and Speak, and not being muted or deafened, and publishes
+    `SoundPlayed` with sequence 0 scoped by channel, like voice states; apps
+    play the file themselves (never through the media part, so programs and
+    server recordings don't hear it). `sound_plays_per_minute` paces it,
+    unlimited unless set. Web: `fuwa/soundboard.ts`, `lib/soundboard.ts`,
+    `voice/sound-file.ts`, `components/calls/Soundboard.tsx` and
+    `settings/server/Soundboard.tsx`; desktop: `core/soundboard.rs`,
+    `ui/soundboard.rs` and `ui/server_settings/soundboard.rs`.
     Threads (`api/threads.rs`, docs/threads.md): a reply is a message with
     `thread_id` (its parent) and `in_channel`; `threads` sums each one up
     and every send or delete of a reply calls `threads::refresh` in the

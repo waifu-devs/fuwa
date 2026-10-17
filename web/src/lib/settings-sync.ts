@@ -48,6 +48,7 @@ export const SYNCED = [
   "inputMode",
   "pttRelease",
   "userVolumes",
+  "soundboardVolume",
   "mirrorVideo",
   "cameraHeight",
   "cameraFps",

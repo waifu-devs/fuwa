@@ -1,5 +1,8 @@
 import {
   ArrowDownUpIcon,
+  AudioLinesIcon,
+  Volume2Icon,
+  VolumeXIcon,
   PinIcon,
   PinOffIcon,
   BarChart3Icon,
@@ -117,6 +120,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.EMOJI_CREATE]: { label: "serversettings.audit.kind.emojiCreate", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.EMOJI_UPDATE]: { label: "serversettings.audit.kind.emojiUpdate", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.EMOJI_DELETE]: { label: "serversettings.audit.kind.emojiDelete", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SOUND_CREATE]: { label: "serversettings.audit.kind.soundCreate", icon: Volume2Icon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SOUND_UPDATE]: { label: "serversettings.audit.kind.soundUpdate", icon: AudioLinesIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SOUND_DELETE]: { label: "serversettings.audit.kind.soundDelete", icon: VolumeXIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.WEBHOOK_CREATE]: { label: "serversettings.audit.kind.webhookCreate", icon: WebhookIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.WEBHOOK_UPDATE]: { label: "serversettings.audit.kind.webhookUpdate", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.WEBHOOK_DELETE]: { label: "serversettings.audit.kind.webhookDelete", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
@@ -213,6 +219,8 @@ const FIELD: Record<string, Key> = {
   target: "serversettings.audit.field.listingTarget",
   gacha_only: "serversettings.audit.field.gachaOnly",
   rates: "serversettings.audit.field.rates",
+  emoji: "serversettings.soundboard.emoji",
+  volume: "serversettings.soundboard.volume",
 };
 
 /** A changed field's name in the app's language. */
@@ -226,6 +234,8 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.AUTO_MOD_RULE_DELETE]: "before",
   [AuditAction.EMOJI_CREATE]: "after",
   [AuditAction.EMOJI_DELETE]: "before",
+  [AuditAction.SOUND_CREATE]: "after",
+  [AuditAction.SOUND_DELETE]: "before",
   [AuditAction.WEBHOOK_CREATE]: "after",
   [AuditAction.WEBHOOK_DELETE]: "before",
   [AuditAction.PROFILE_ITEM_CREATE]: "after",
@@ -692,6 +702,15 @@ function sentence(lang: Lang, entry: AuditEntry, users: Record<string, User>, ch
     }
     case AuditAction.EMOJI_DELETE:
       return say("serversettings.audit.s.emojiDelete", { name: <b>:{change("name")?.before}:</b> });
+    case AuditAction.SOUND_CREATE:
+      return say("serversettings.audit.s.soundCreate", { name: <b>{change("name")?.after}</b> });
+    case AuditAction.SOUND_UPDATE: {
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1) return say("serversettings.audit.s.renamed", { before: <b>{renamed.before}</b>, after: <b>{renamed.after}</b> });
+      return say("serversettings.audit.s.soundUpdate", { name: <b>{renamed?.after || lang.t("serversettings.audit.aSound")}</b> });
+    }
+    case AuditAction.SOUND_DELETE:
+      return say("serversettings.audit.s.soundDelete", { name: <b>{change("name")?.before}</b> });
     case AuditAction.WEBHOOK_CREATE:
       return say("serversettings.audit.s.webhookCreate", { name: <b>{change("name")?.after}</b>, channel: named });
     case AuditAction.WEBHOOK_UPDATE: {

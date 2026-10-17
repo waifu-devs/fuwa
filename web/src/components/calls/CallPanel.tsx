@@ -14,6 +14,7 @@ import { type Key, useI18n } from "@/i18n/react";
 import { clock } from "./call-clock";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
+import { SoundboardButton } from "./Soundboard";
 import { CameraButton, RecordButton, ScreenButton } from "./Video";
 
 const STATUS: Record<ActiveCall["status"], Key> = {
@@ -96,6 +97,7 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
         <CameraButton className="h-8 flex-1" />
         <ScreenButton className="h-8 flex-1" />
         <RecordButton className="h-8 flex-1" />
+        <SoundboardButton className="h-8 flex-1" />
       </div>
       <AnimatePresence initial={false} mode="popLayout">
         {call.problem && (

@@ -2,6 +2,7 @@ import type { I18n } from "@/i18n/react";
 
 export const voiceSettings = (t: I18n["t"]) => [
   { id: "devices", label: t("appsettings.voice.devices"), keywords: "input output device headset" },
+  { id: "soundboard", label: t("appsettings.voice.soundboard"), keywords: "sounds soundboard volume air horn" },
   { id: "mic-test", label: t("appsettings.voice.micTest"), keywords: "check level meter" },
   { id: "input-mode", label: t("appsettings.voice.inputMode"), keywords: "voice activity push to talk ptt" },
   { id: "sensitivity", label: t("appsettings.voice.sensitivity"), keywords: "threshold gate noise" },

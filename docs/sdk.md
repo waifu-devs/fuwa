@@ -422,6 +422,11 @@ await voice.leave();
   arrive), `oggOpusPackets` (a stream) and `OggOpusWriter` (`flush` and
   `take` to send pages as they're written) read and write Ogg Opus in plain
   TypeScript.
+- **The soundboard**: `voice.playSound(soundId)` plays one of the server's
+  sounds (`agent.sounds(serverId)` lists them) for everyone in the channel,
+  with Use Soundboard and Speak there and not muted (docs/soundboard.md).
+  Apps play the file themselves, so it doesn't come back as frames;
+  `soundPlayed` events say who played what.
 - **Staying in**: when the connection drops or the instance restarts, it
   joins again with the same place (`reconnecting`, then `rejoined`), and
   `speak` waits for it. A stream that goes silent without closing counts

@@ -165,6 +165,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
 | `FUWA_LIMIT_COMMANDS_PER_MINUTE` | unlimited | Times one account may run agents' slash commands or press their buttons in a minute |
+| `FUWA_LIMIT_SOUND_PLAYS_PER_MINUTE` | unlimited | Soundboard sounds one account may play in voice channels in a minute (also set from the app: Instance settings, Limits) |
 | `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE` | unlimited | Messages a minute all the people of one server on another instance may send together to channels shared from here (also set from the app: Instance settings, Other instances) |
 | `FUWA_LIMIT_SHARED_REMOTE_PEOPLE` | unlimited | People one server on another instance may bring to a server's shared channels; past it, no one new from that server joins in (also set from the app: Instance settings, Other instances) |
 | `FUWA_LIMIT_SHARED_REMOTE_FILE_BYTES_PER_DAY` | unlimited | Bytes of files one server on another instance may send into channels shared from here in a day (UTC), like `1GiB` (also set from the app: Instance settings, Other instances) |
