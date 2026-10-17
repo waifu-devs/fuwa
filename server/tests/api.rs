@@ -13194,6 +13194,23 @@ async fn gacha_banners_pulls_pity_and_duplicates() {
     assert_eq!(mine.pulls.len(), 6);
     // Its picture goes with it.
     assert_eq!(fetch(&instance, &box_art).await.0, reqwest::StatusCode::NOT_FOUND);
+
+    // A shared card that won a profile item names it, so apps draw it worn; others name none.
+    assert!(gacha.cards.iter().all(|card| card.item_id.is_empty()));
+    let request = pb::CreateServerProfileItemRequest { server_id: sid.clone(), item: Some(new_effect("Petals")) };
+    let petals =
+        c.profile_items.create_server_profile_item(authed(&juan, request)).await.unwrap().into_inner().item.unwrap();
+    let sold =
+        list_item(&mut c, &juan, &sid, listing(pb::ShopListingKind::ProfileItem, &petals.id, "", None)).await.unwrap();
+    let petal_banner =
+        pb::GachaBanner { tiers: vec![tier("r", 1_000_000)], prizes: vec![item("r", &sold.id)], ..banner.clone() };
+    let petal_banner = pb::GachaBanner { pity_pulls: 0, pity_tier_id: String::new(), ..petal_banner };
+    let made =
+        c.economy.create_gacha_banner(authed(&juan, create(petal_banner))).await.unwrap().into_inner().banner.unwrap();
+    let pulled = pull(&mut c, &rin, &sid, &made.id, 1, 10).await.unwrap();
+    let shared = c.messages.send_message(authed(&rin, share(&pulled.pull.unwrap().id))).await.unwrap().into_inner();
+    let cards = shared.message.unwrap().gacha.unwrap().cards;
+    assert_eq!(cards.iter().map(|card| card.item_id.as_str()).collect::<Vec<_>>(), [petals.id.as_str()]);
     instance.stop().await;
 }
 

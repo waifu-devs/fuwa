@@ -29,6 +29,17 @@ use crate::ui::server_settings::spinner;
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_lg, radius_xl};
 use crate::ui::widgets::{icon, picture};
 
+/// How wide each of a pull's `count` cards is in a window `w` wide.
+fn card_width(count: usize, w: f32) -> f32 {
+    if count == 1 {
+        return 208.0;
+    }
+    let room = w.min(896.0 + 32.0) - 32.0;
+    let cols = 5usize.min(count);
+    // Floored: a fraction over and the row wraps a card early.
+    ((room - 12.0 * (cols as f32 - 1.0)) / cols as f32).floor()
+}
+
 /// The overlay's night, behind every theme.
 const NIGHT: u32 = 0x0b0a14;
 /// A card's face.
@@ -837,6 +848,7 @@ impl ShopView {
     ) -> Option<AnyElement> {
         let due = self.show.as_mut()?.due();
         self.cue(&due);
+        let mut arts = self.won_art(f, f32::from(window.viewport_size().width), p, cx);
         let show = self.show.as_ref()?;
         let reduced = cx.reduce_motion();
         let e = show.elapsed();
@@ -1010,13 +1022,11 @@ impl ShopView {
         } else {
             let single = count == 1;
             let room = w.min(896.0 + 32.0) - 32.0;
-            let cols = if single { 1 } else { 5usize.min(count) };
-            // Floored: a fraction over and the row wraps a card early.
-            let card_w = if single { 208.0 } else { ((room - 12.0 * (cols as f32 - 1.0)) / cols as f32).floor() };
+            let card_w = card_width(count, w);
             let mut grid =
                 div().flex().flex_wrap().justify_center().gap(px(12.0)).w(px(if single { card_w } else { room }));
-            for n in 0..count {
-                grid = grid.child(self.card(show, n, e, card_w, f, p));
+            for (n, art) in arts.iter_mut().enumerate() {
+                grid = grid.child(self.card(show, n, e, card_w, art.take(), f, p));
             }
             middle = middle.child(grid);
         }
@@ -1258,8 +1268,46 @@ impl ShopView {
         cx.notify();
     }
 
+    /// What each card of the pull showing won, when it's a profile item: worn by you, an
+    /// effect playing once its card has turned (`item_art`).
+    fn won_art(&mut self, f: &Facts, w: f32, p: &Palette, cx: &mut Context<Self>) -> Vec<Option<AnyElement>> {
+        let Some(show) = self.show.as_ref() else { return Vec::new() };
+        let e = show.elapsed();
+        let count = show.pull.results.len();
+        let won: Vec<(Option<pb::ProfileItem>, bool)> = show
+            .pull
+            .results
+            .iter()
+            .zip(&show.plan.flips)
+            .map(|(r, &flip)| {
+                let item = f
+                    .economy
+                    .listing(&r.listing_id)
+                    .filter(|l| l.kind == Kind::ProfileItem as i32)
+                    .and_then(|l| f.items.iter().find(|i| i.id == l.target_id))
+                    .cloned();
+                (item, e >= flip)
+            })
+            .collect();
+        let width = card_width(count, w) * 0.42;
+        won.iter()
+            .enumerate()
+            .map(|(n, (item, turned))| self.item_art(item.as_ref(), f, &format!("gacha|{n}"), width, *turned, p, cx))
+            .collect()
+    }
+
     /// One card of the pull: dealt face down, then turned to show its tier and prize.
-    fn card(&self, show: &Show, n: usize, e: u64, w: f32, f: &Facts, p: &Palette) -> AnyElement {
+    #[allow(clippy::too_many_arguments)]
+    fn card(
+        &self,
+        show: &Show,
+        n: usize,
+        e: u64,
+        w: f32,
+        art: Option<AnyElement>,
+        f: &Facts,
+        p: &Palette,
+    ) -> AnyElement {
         let _ = p;
         let b = &show.banner;
         let r = &show.pull.results[n];
@@ -1345,7 +1393,7 @@ impl ShopView {
             slot = slot.child(back);
         }
         if face_x > 0.0 {
-            slot = slot.child(self.face(show, n, w, color, rank, face_x * pop, pop, e, f));
+            slot = slot.child(self.face(show, n, w, color, rank, face_x * pop, pop, e, art, f));
         }
         // Sparks flying out as a rare one turns.
         if rank >= 2 && since > flip && since < flip + 800.0 {
@@ -1381,6 +1429,7 @@ impl ShopView {
         scale_x: f32,
         pop: f32,
         e: u64,
+        art: Option<AnyElement>,
         f: &Facts,
     ) -> AnyElement {
         let b = &show.banner;
@@ -1471,8 +1520,9 @@ impl ShopView {
         }
         face = face
             .child(div().relative().child(star_row(eco::stars(b, &r.tier_id), color, 12.0)))
-            .child(
-                div()
+            .child(match art {
+                Some(art) => div().relative().my_auto().flex_none().child(art),
+                None => div()
                     .relative()
                     .my_auto()
                     .size(px(56.0))
@@ -1484,7 +1534,7 @@ impl ShopView {
                     .items_center()
                     .justify_center()
                     .child(glyph),
-            )
+            })
             .child(
                 div()
                     .relative()

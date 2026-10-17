@@ -1,7 +1,9 @@
 //! A gacha pull shared in chat (`Message.gacha`, docs/economy.md), drawn like
 //! the web's `components/chat/GachaShareCard.tsx`: the pull's cards as the
 //! server kept them, the rarest glowing, and a button to save a picture of
-//! them (`core::gacha_share`).
+//! them (`core::gacha_share`). A profile item the server still has shows
+//! itself, worn by whoever pulled it: a decoration over their avatar, an
+//! effect's still on a tiny card of theirs.
 
 use std::rc::Rc;
 
@@ -13,15 +15,86 @@ use gpui_kit::{
 
 use crate::core::gacha_share::{self as gs, Chip, ImageLabels, ShareCards};
 use crate::core::i18n::{Arg, t, t_with};
+use crate::core::profile_effects::{self as fx, Particle};
+use crate::core::profile_items::item_effect;
+use crate::pb;
 use crate::ui::app::FuwaApp;
-use crate::ui::theme::{alpha, radius_2xl, radius_xl};
-use crate::ui::widgets::icon;
+use crate::ui::profile_effect::{mini_card, still_effect};
+use crate::ui::theme::{Palette, alpha, radius_2xl, radius_xl};
+use crate::ui::widgets::{avatar, decorated, icon};
 
 const NIGHT: u32 = 0x0b0a14;
 const FACE: u32 = 0x15131f;
 
 fn rgb(c: u32) -> Rgba {
     gpui_kit::rgb(c)
+}
+
+/// How wide the tiny card under a shared effect is.
+const EFFECT_CARD: f32 = 29.0;
+
+/// A shared pull as a message draws it: its cards, and the item each one won.
+pub struct SharedPull {
+    pub cards: ShareCards,
+    worn: Vec<Option<Worn>>,
+}
+
+/// What a card won, as it's worn.
+enum Worn {
+    /// A decoration's picture.
+    Decoration(String),
+    /// An effect, and its particles planned once for its still.
+    Effect(fx::Spec, Vec<Particle>),
+}
+
+impl SharedPull {
+    /// The pull a message shares, each card's item found among its server's `items`; `seed`
+    /// is whoever pulled it.
+    pub fn new(share: &pb::GachaShare, items: &[pb::ProfileItem], seed: &str) -> Self {
+        let worn = share
+            .cards
+            .iter()
+            .map(|c| {
+                let item = items.iter().find(|i| !c.item_id.is_empty() && i.id == c.item_id)?;
+                if item.kind == pb::ProfileItemKind::Decoration as i32 {
+                    return (!item.picture_url.is_empty()).then(|| Worn::Decoration(item.picture_url.clone()));
+                }
+                let spec = item_effect(item)?;
+                let particles = fx::plan(&spec, EFFECT_CARD, EFFECT_CARD * 5.0 / 4.0, seed);
+                Some(Worn::Effect(spec, particles))
+            })
+            .collect();
+        Self { cards: gs::cards_of_share(share), worn }
+    }
+
+    /// What of `items` the cards would draw, for knowing when a message must be drawn again.
+    pub fn digest(share: &pb::GachaShare, items: &[pb::ProfileItem], h: &mut impl std::hash::Hasher) {
+        use std::hash::Hash as _;
+        (&share.pull_id, share.cards.len()).hash(h);
+        for c in &share.cards {
+            items
+                .iter()
+                .find(|i| !c.item_id.is_empty() && i.id == c.item_id)
+                .map(|i| (&i.picture_url, &i.effect))
+                .hash(h);
+        }
+    }
+}
+
+/// A card's item as it's worn by `author`, or None to draw its sparkle.
+fn worn(worn: Option<&Worn>, author: Option<&pb::User>, p: &Palette) -> Option<AnyElement> {
+    let seed = author.map_or("?", |u| u.id.as_str());
+    match worn? {
+        Worn::Decoration(url) => {
+            Some(div().mt(px(9.0)).child(decorated(avatar(author, 26.0, p), 26.0, Some(url))).into_any_element())
+        }
+        Worn::Effect(spec, particles) => Some(
+            div()
+                .mt(px(4.0))
+                .child(mini_card(seed, -1, EFFECT_CARD, p).child(still_effect(spec, particles, seed, -1, p)))
+                .into_any_element(),
+        ),
+    }
 }
 
 /// What a card's chip says, in the app's language.
@@ -57,12 +130,20 @@ pub fn save_image(cards: &ShareCards, who: &str, cx: &mut App) -> Task<Option<St
 }
 
 /// The card under a message that shares a pull.
-pub fn share_card(mid: &str, cards: &Rc<ShareCards>, author: &str, this: &WeakEntity<FuwaApp>) -> AnyElement {
+pub fn share_card(
+    mid: &str,
+    pull: &Rc<SharedPull>,
+    author: &str,
+    user: Option<&pb::User>,
+    p: &Palette,
+    this: &WeakEntity<FuwaApp>,
+) -> AnyElement {
+    let cards = &pull.cards;
     let glow = rgb(gs::best_card(&cards.cards).map_or(0xf59e0b, |c| c.color));
     let save = {
-        let (cards, author, this) = (cards.clone(), author.to_owned(), this.clone());
+        let (pull, author, this) = (pull.clone(), author.to_owned(), this.clone());
         move |_: &gpui_kit::ClickEvent, _: &mut gpui_kit::Window, cx: &mut App| {
-            let task = save_image(&cards, &author, cx);
+            let task = save_image(&pull.cards, &author, cx);
             let this = this.clone();
             cx.spawn(async move |cx| {
                 if let Some(why) = task.await {
@@ -101,8 +182,22 @@ pub fn share_card(mid: &str, cards: &Rc<ShareCards>, author: &str, this: &WeakEn
                 .child(icon("download").size(px(14.0))),
         );
     let mut grid = div().flex().flex_wrap().gap(px(6.0));
-    for card in &cards.cards {
+    for (n, card) in cards.cards.iter().enumerate() {
         let color = rgb(card.color);
+        let sparkle = || {
+            div()
+                .mt(px(6.0))
+                .size(px(28.0))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(alpha(color, 0.22))
+                .text_color(color)
+                .child(icon("sparkles").size(px(if card.rarity >= 2 { 16.0 } else { 14.0 })))
+                .into_any_element()
+        };
+        let art = worn(pull.worn.get(n).and_then(Option::as_ref), user, p).unwrap_or_else(sparkle);
         let chip = gs::chip(card);
         grid = grid.child(
             div()
@@ -146,18 +241,7 @@ pub fn share_card(mid: &str, cards: &Rc<ShareCards>, author: &str, this: &WeakEn
                                 .text_color(color)
                                 .child("★".repeat(card.stars)),
                         )
-                        .child(
-                            div()
-                                .mt(px(6.0))
-                                .size(px(28.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(alpha(color, 0.22))
-                                .text_color(color)
-                                .child(icon("sparkles").size(px(if card.rarity >= 2 { 16.0 } else { 14.0 }))),
-                        )
+                        .child(art)
                         .child(div().flex_1())
                         .child(
                             div()

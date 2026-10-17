@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, m as motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { Balance, Currency, GachaBanner, GachaProgress, GachaPull, GachaResult, Role, ShopListing } from "@/gen/fuwa/v1/types_pb";
+import type { Balance, Currency, GachaBanner, GachaProgress, GachaPull, GachaResult, ProfileItem, Role, ShopListing, User } from "@/gen/fuwa/v1/types_pb";
 import { economyMessage, pull, shareHere, sharePull } from "@/fuwa/economy";
 import { useAccess, useInstance, useMyMember } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
@@ -31,7 +31,7 @@ import { displayName } from "@/lib/format";
 import { cardsOfPull } from "@/lib/gacha-share";
 import { hasIn } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
-import { Amount, CurrencyIcon, listingName } from "@/components/economy/shared";
+import { Amount, CurrencyIcon, hasArt, ItemArt, listingName } from "@/components/economy/shared";
 import { Count } from "@/components/motion";
 import { T, useI18n } from "@/i18n/react";
 import { LISTING_PROFILE_ITEM, LISTING_ROLE, num } from "@/lib/economy";
@@ -43,6 +43,7 @@ import { setPrefs, usePrefs } from "@/lib/prefs";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { shownPicture } from "@/lib/shown";
 import { gachaCue, RARITY_CUES } from "@/lib/sounds";
+import { ITEM_DECORATION } from "@/lib/profile-items";
 import { cn } from "@/lib/utils";
 
 /*
@@ -634,7 +635,8 @@ function Show({
 }) {
   const { t } = useI18n();
   const reduced = !!useReducedMotion();
-  const { name, roles } = usePrizeName(instanceKey, serverId, shop);
+  const { name, roles, items } = usePrizeName(instanceKey, serverId, shop);
+  const me = useInstance(instanceKey)?.me;
   const art = shownPicture(banner.artUrl);
   const ranks = useMemo(() => shown.results.map((r) => rarity(banner, r.tierId)), [banner, shown]);
   const plan = useMemo(() => revealPlan(ranks, reduced), [ranks, reduced]);
@@ -753,6 +755,8 @@ function Show({
                   currencies={currencies}
                   shop={shop}
                   roles={roles}
+                  items={items}
+                  me={me}
                   name={r.listingId ? r.prizeName || name(r.listingId) : r.prizeName}
                 />
               ))}
@@ -896,6 +900,8 @@ function Card({
   currencies,
   shop,
   roles,
+  items,
+  me,
   name,
 }: {
   instanceKey: string;
@@ -911,6 +917,8 @@ function Card({
   currencies: Currency[];
   shop: ShopListing[];
   roles: Role[];
+  items: readonly ProfileItem[] | undefined;
+  me: User | null | undefined;
   name: string;
 }) {
   const { t } = useI18n();
@@ -922,6 +930,9 @@ function Card({
   const role = listing?.kind === LISTING_ROLE ? roles.find((r) => r.id === listing.targetId) : undefined;
   const flip = 0.11;
   const n = stars(banner, result.tierId);
+  // A profile item shows itself, worn by you; anything else a glyph in a disc.
+  const item = listing?.kind === LISTING_PROFILE_ITEM ? items?.find((i) => i.id === listing.targetId) : undefined;
+  const worn = item && me && hasArt(item) ? item : undefined;
   let glyph: ReactNode;
   if (!result.listingId) glyph = <CurrencyIcon instanceKey={instanceKey} currency={currency} className="size-10 text-4xl" />;
   else if (listing?.kind === LISTING_ROLE) glyph = <ShieldIcon className="size-9" style={role?.color !== undefined ? { color: cssColor(role.color) } : undefined} />;
@@ -982,9 +993,15 @@ function Card({
         <span className="relative text-xs leading-none" style={{ color }} aria-label={t("chattools.economy.gacha.stars", { count: n })}>
           {"★".repeat(n)}
         </span>
-        <span className="relative my-auto grid size-14 place-items-center rounded-full" style={{ backgroundColor: `${color}2e`, color }}>
-          {glyph}
-        </span>
+        {worn && me ? (
+          <span className={cn("relative my-auto grid place-items-center", worn.kind === ITEM_DECORATION ? "h-[30%]" : "h-[46%]")}>
+            <ItemArt item={worn} me={me} play={turned} />
+          </span>
+        ) : (
+          <span className="relative my-auto grid size-14 place-items-center rounded-full" style={{ backgroundColor: `${color}2e`, color }}>
+            {glyph}
+          </span>
+        )}
         <span className="relative line-clamp-2 text-xs leading-tight font-extrabold break-words sm:text-sm">{name}</span>
         <span className="relative mt-0.5 text-[0.6rem] font-extrabold tracking-wide uppercase" style={{ color }}>
           {result.tierName}

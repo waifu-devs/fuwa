@@ -733,6 +733,13 @@ pub(super) async fn share(
     .await?
     .ok_or(Error::NotFound("pull"))?;
     let banner = banners(conn, server_id).await?.into_iter().find(|b| b.id == banner_id);
+    let shop = listings(conn, server_id).await?;
+    let item_of = |listing_id: &str| {
+        shop.iter()
+            .find(|l| !listing_id.is_empty() && l.id == listing_id && l.kind == pb::ShopListingKind::ProfileItem as i32)
+            .map(|l| l.target_id.clone())
+            .unwrap_or_default()
+    };
     let cards = GachaResults::decode(bytes.as_slice())?
         .results
         .into_iter()
@@ -743,6 +750,7 @@ pub(super) async fn share(
                 None => (0, 1, MAX_TIERS as i32, None),
             };
             pb::GachaShareCard {
+                item_id: item_of(&r.listing_id),
                 tier_name: r.tier_name,
                 prize_name: r.prize_name,
                 rarity,
