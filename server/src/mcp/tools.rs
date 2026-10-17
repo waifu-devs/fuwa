@@ -545,6 +545,24 @@ const TOOLS: &[Tool] = &[
         read_only: false,
         destructive: false,
     },
+    Tool {
+        name: "create_sound",
+        title: "Add a sound",
+        description: "Adds a sound to a server's soundboard from an Ogg Opus file of at most 10 seconds, uploading it \
+                      and counting it in the server's files. Needs Manage Soundboard.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "name": { "type": "string", "description": "1 to 32 characters, not another of the server's sounds." },
+                "emoji": { "type": "string", "description": "A Unicode emoji, or one of the server's own as <:name:id>. Empty for none." },
+                "volume": { "type": "number", "description": "From 0 to 1; left out plays it as it was made." },
+                "data_base64": { "type": "string", "description": "The Ogg Opus file's bytes, base64." }
+            })
+        },
+        required: &["server_id", "name", "data_base64"],
+        read_only: false,
+        destructive: false,
+    },
 ];
 
 /// Every tool, as `tools/list` answers: these, then the ones for running a server.
@@ -1066,6 +1084,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 .map(|r| json!({ "member": r.member.as_ref().map(view::member) }))
         }
         "upload_picture" => upload_picture(cx, args).await?,
+        "create_sound" => create_sound(cx, args).await?,
         "create_emoji" => {
             let req = pb::CreateEmojiRequest { server_id: sid()?, name: args.text("name")?, url: args.text("url")? };
             call!(cx, emoji_service_client::EmojiServiceClient.create_emoji(req))
@@ -1137,7 +1156,7 @@ async fn head(cx: &Cx, server_id: String) -> Result<i64, Status> {
         .unwrap_or_else(|_| Err(Status::unavailable("the server's events took too long; try again")))
 }
 
-/// CreateUpload, then the PUT of its bytes, both through the instance's router.
+/// Stores a picture, for the tools that take one's url.
 async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status>, RpcError> {
     let purpose = match args.text("purpose")?.as_str() {
         "emoji" => pb::MediaPurpose::Emoji,
@@ -1152,22 +1171,36 @@ async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status
             ));
         }
     };
+    let data = base64_data(args, "picture")?;
+    let upload = match upload(cx, purpose, args.text("content_type")?, args.text("server_id")?, data).await? {
+        Ok(upload) => upload,
+        Err(status) => return Ok(Err(status)),
+    };
+    let media = upload.media.unwrap_or_default();
+    Ok(Ok(json!({ "url": media.url, "content_type": media.content_type, "size": media.size })))
+}
+
+/// The `data_base64` argument's bytes.
+fn base64_data(args: &Args<'_>, what: &str) -> Result<Vec<u8>, RpcError> {
     let encoded = match args.0.get("data_base64") {
         Some(Value::String(s)) if !s.trim().is_empty() => s.trim(),
         _ => return Err(RpcError::invalid("data_base64 is needed, as a string")),
     };
     if encoded.len() > super::MAX_BODY {
-        return Err(RpcError::invalid("that picture is too big"));
+        return Err(RpcError::invalid(format!("that {what} is too big")));
     }
-    let data = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|_| RpcError::invalid("data_base64 isn't base64"))?;
-    let req = pb::CreateUploadRequest {
-        purpose: purpose as i32,
-        content_type: args.text("content_type")?,
-        size: data.len() as i64,
-        server_id: args.text("server_id")?,
-    };
+    base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| RpcError::invalid("data_base64 isn't base64"))
+}
+
+/// CreateUpload, then the PUT of its bytes, both through the instance's router.
+async fn upload(
+    cx: &Cx,
+    purpose: pb::MediaPurpose,
+    content_type: String,
+    server_id: String,
+    data: Vec<u8>,
+) -> Result<Result<pb::CreateUploadResponse, Status>, RpcError> {
+    let req = pb::CreateUploadRequest { purpose: purpose as i32, content_type, size: data.len() as i64, server_id };
     let upload = match call!(cx, media_service_client::MediaServiceClient.create_upload(req)) {
         Ok(upload) => upload,
         Err(status) => return Ok(Err(status)),
@@ -1182,8 +1215,43 @@ async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status
     let mut router = cx.inner.clone();
     let stored = tonic::codegen::Service::call(&mut router, put).await.is_ok_and(|r| r.status().is_success());
     if !stored {
-        return Ok(Err(Status::invalid_argument("the instance didn't take those bytes as that kind of picture")));
+        let what = if purpose == pb::MediaPurpose::Sound {
+            "an Ogg Opus sound of at most 10 seconds"
+        } else {
+            "that kind of picture"
+        };
+        return Ok(Err(Status::invalid_argument(format!("the instance didn't take those bytes as {what}"))));
     }
-    let media = upload.media.unwrap_or_default();
-    Ok(Ok(json!({ "url": media.url, "content_type": media.content_type, "size": media.size })))
+    Ok(Ok(upload))
+}
+
+/// Uploads a sound, then CreateSound with it.
+async fn create_sound(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status>, RpcError> {
+    let server_id = args.text("server_id")?;
+    let data = base64_data(args, "sound")?;
+    let Some(duration_ms) = crate::media::ogg_opus_ms(&data) else {
+        return Ok(Err(Status::invalid_argument("a sound is an Ogg Opus file")));
+    };
+    let volume = match args.0.get("volume") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().ok_or_else(|| RpcError::invalid("volume is a number from 0 to 1"))? as f32),
+    };
+    let emoji = match args.0.get("emoji") {
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
+    };
+    let upload = match upload(cx, pb::MediaPurpose::Sound, "audio/ogg".into(), server_id.clone(), data).await? {
+        Ok(upload) => upload,
+        Err(status) => return Ok(Err(status)),
+    };
+    let req = pb::CreateSoundRequest {
+        server_id,
+        name: args.text("name")?,
+        url: upload.media.unwrap_or_default().url,
+        emoji,
+        volume,
+        duration_ms: duration_ms as i32,
+    };
+    Ok(call!(cx, soundboard_service_client::SoundboardServiceClient.create_sound(req))
+        .map(|r| json!({ "sound": r.sound.as_ref().map(view::sound) })))
 }

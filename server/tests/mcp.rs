@@ -334,7 +334,7 @@ async fn tools_do_what_the_agent_could_do_anyway() {
             pb::CreateRoleRequest {
                 server_id: sid.into(),
                 name: "Emoji".into(),
-                permissions: vec![pb::Permission::ManageEmoji as i32],
+                permissions: vec![pb::Permission::ManageEmoji as i32, pb::Permission::ManageSoundboard as i32],
                 ..Default::default()
             },
         ))
@@ -367,6 +367,25 @@ async fn tools_do_what_the_agent_could_do_anyway() {
     assert!(made["emoji"]["write_as"].as_str().unwrap().starts_with("<:fuwa:"));
     let emojis = tool(&instance, &w.agent, "list_emojis", json!({ "server_id": sid })).await.unwrap();
     assert_eq!(emojis["emojis"].as_array().unwrap().len(), 1);
+
+    // And a sound for the soundboard, from its Ogg Opus bytes.
+    let ogg = base64::engine::general_purpose::STANDARD.encode(ogg_opus(1500));
+    let sound = tool(
+        &instance,
+        &w.agent,
+        "create_sound",
+        json!({ "server_id": sid, "name": "Boom", "emoji": "💥", "volume": 0.5, "data_base64": ogg }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(sound["sound"]["name"], "Boom");
+    assert_eq!(sound["sound"]["emoji"], "💥");
+    assert_eq!(sound["sound"]["duration_ms"], 1500);
+    let not_ogg =
+        tool(&instance, &w.agent, "create_sound", json!({ "server_id": sid, "name": "x", "data_base64": png })).await;
+    assert!(not_ogg.is_err(), "a PNG isn't a sound");
+    let sounds = tool(&instance, &w.agent, "list_sounds", json!({ "server_id": sid })).await.unwrap();
+    assert_eq!(sounds["sounds"].as_array().unwrap().len(), 1);
 
     let deleted = tool(&instance, &w.agent, "delete_message", json!({ "server_id": sid, "message_id": message_id }))
         .await
@@ -846,4 +865,34 @@ fn png() -> Vec<u8> {
         &chunk(b"IEND", &[]),
     ]
     .concat()
+}
+
+/// An Ogg Opus file of `ms` milliseconds of silence (CRCs left out, which the
+/// instance doesn't read).
+fn ogg_opus(ms: u64) -> Vec<u8> {
+    fn page(out: &mut Vec<u8>, packets: &[&[u8]], granule: i64, sequence: u32, flags: u8) {
+        out.extend_from_slice(b"OggS\0");
+        out.push(flags);
+        out.extend_from_slice(&granule.to_le_bytes());
+        out.extend_from_slice(&7u32.to_le_bytes());
+        out.extend_from_slice(&sequence.to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        out.push(packets.len() as u8);
+        out.extend(packets.iter().map(|p| p.len() as u8));
+        for packet in packets {
+            out.extend_from_slice(packet);
+        }
+    }
+    let mut head = b"OpusHead".to_vec();
+    head.extend_from_slice(&[1, 1]);
+    head.extend_from_slice(&312u16.to_le_bytes());
+    head.extend_from_slice(&48_000u32.to_le_bytes());
+    head.extend_from_slice(&[0, 0, 0]);
+    let mut out = Vec::new();
+    page(&mut out, &[&head], 0, 0, 2);
+    page(&mut out, &[b"OpusTags\0\0\0\0\0\0\0\0"], 0, 1, 0);
+    let frames = (ms / 20) as usize;
+    let silence: &[u8] = &[0xf8, 0xff, 0xfe];
+    page(&mut out, &vec![silence; frames], (ms as i64) * 48 + 312, 2, 4);
+    out
 }

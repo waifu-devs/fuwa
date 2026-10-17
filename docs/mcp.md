@@ -96,6 +96,7 @@ can't do in the apps' API, it can't do here.
 | `add_member_role`, `remove_member_role` | `RoleService.AddMemberRole`, `RemoveMemberRole` |
 | `upload_picture` | `MediaService.CreateUpload` and the upload itself (emoji, server icons and banners, webhook pictures, decorations, gacha banner art) |
 | `create_emoji` | `EmojiService.CreateEmoji` |
+| `create_sound` | `MediaService.CreateUpload`, the upload itself and `SoundboardService.CreateSound` (an Ogg Opus file of at most 10 seconds, base64) |
 | `set_commands`, `list_commands` | `CommandService.SetCommands`, `ListCommands` ([docs/commands.md](commands.md)) |
 
 #### Running a server
