@@ -342,6 +342,8 @@
   "privacy.activityHint": "デスクトップアプリが検出したゲームやアプリを、同じサーバーにいる人に表示します。何も保存されず、やめると消えます。",
   "privacy.activityOff": "{instance}ではアクティビティは表示されません。ステータスは引き続き表示されます。",
   "privacy.saveFailed": "保存できませんでした：{error}",
+  "privacy.typing": "入力中であることを表示",
+  "privacy.typingHint": "メッセージを書いている間、他の人に入力中の表示が見えます。オフにすると誰にも表示されませんが、他の人の入力中の表示は引き続き見えます。",
   "privacy.shareHere": "ここでアクティビティを共有",
   "privacy.shareIn": "{server}でアクティビティを共有",
   "signIn.yours": "ログイン方法",

@@ -1,0 +1,9 @@
+{
+  "name": "繁體中文",
+  "english": "Chinese (Traditional)",
+  "dir": "ltr",
+  "plural": "other",
+  "reviewed": false,
+  "group": ",",
+  "decimal": "."
+}

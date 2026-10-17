@@ -1,0 +1,23 @@
+{
+  "build.commit": "Dibuat dari commit {commit}",
+  "update.updated": "fuwa telah diperbarui",
+  "update.reload": "Muat ulang",
+  "update.later": "Nanti",
+  "update.laterHint": "Nanti: tetap gunakan versi ini sampai Anda memuat ulang",
+  "update.hasFeature": "{instance} punya {feature}. Perbarui fuwa untuk menggunakannya",
+  "update.hasFeatures": {
+    "other": "{instance} punya {feature} dan {count} lainnya. Perbarui fuwa untuk menggunakannya"
+  },
+  "update.tooOld": "{instance} memerlukan fuwa yang lebih baru agar semuanya berfungsi",
+  "update.anInstance": "Sebuah instans",
+  "update.somethingNew": "sesuatu yang baru",
+  "announcement.until": "Hingga {time}",
+  "announcement.close": "Tutup pengumuman",
+  "hosted.label": "Di-hosting oleh Waifu Devs",
+  "hosted.who": "Orang-orang yang membuat fuwa menjalankan instans ini.",
+  "hosted.checked": "{host} · browser Anda telah memeriksa sertifikatnya",
+  "hosted.why": "Hanya instans di alamat milik kami yang mendapat lencana ini. Aplikasi hanya berpatokan pada alamat, karena server mana pun bisa mengaku apa saja tentang dirinya.",
+  "hosted.about": "Tentang fuwa",
+  "signInNotice.added": "{name} ditambahkan sebagai cara masuk ke akun Anda pada {date}. Bukan Anda?",
+  "signInNotice.review": "Tinjau"
+}

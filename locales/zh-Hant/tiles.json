@@ -1,0 +1,54 @@
+{
+  "strip.label": "正在進行",
+  "strip.options": "動態磚選項",
+  "strip.hide": "隱藏這個",
+  "strip.quiet": "此伺服器沒有動態磚",
+  "strip.off": "關閉動態磚",
+  "strip.remove": "為所有人移除",
+  "strip.removeFailed": "無法移除動態磚",
+  "menu.show": "動態磚",
+  "menu.server": "所有人的動態磚",
+  "menu.bigServer": {
+    "other": "在 {count} 位以上成員的伺服器中，語音室預設為關閉"
+  },
+  "menu.everyone": "這裡的所有人只會看到這些類型",
+  "menu.reset": "恢復預設值",
+  "menu.failed": "無法變更伺服器的動態磚",
+  "kind.voice": "語音室",
+  "kind.poll": "投票",
+  "kind.thread": "追蹤的討論串",
+  "kind.shared": "共用頻道",
+  "kind.app": "來自應用程式",
+  "voice.title": {
+    "other": "{channel} 中有 {count} 人"
+  },
+  "voice.since": "自 {time} 開始通話",
+  "voice.video": "鏡頭已開啟",
+  "voice.screen": "正在分享螢幕",
+  "voice.join": "加入",
+  "poll.title": "#{channel} 中的投票",
+  "poll.closesMinutes": {
+    "other": "{count} 分鐘後截止"
+  },
+  "poll.closesHours": {
+    "other": "{count} 小時後截止"
+  },
+  "poll.noEnd": "開放至手動結束",
+  "poll.voters": {
+    "other": "{count} 人已投票"
+  },
+  "poll.vote": "投票",
+  "thread.title": "你追蹤的討論串",
+  "thread.unread": {
+    "other": "{count} 則新回覆"
+  },
+  "thread.open": "開啟",
+  "shared.title": "#{channel} 很熱鬧",
+  "shared.text": {
+    "other": "來自 {servers} 個伺服器的 {count} 則新訊息"
+  },
+  "shared.open": "查看最新",
+  "app.by": "來自 {app}",
+  "app.live": "直播中",
+  "app.open": "開啟"
+}

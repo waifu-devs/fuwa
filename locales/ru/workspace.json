@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "Картинка открыта, чтобы её можно было сохранить оттуда",
   "menu.message.openThread": "Открыть ветку",
   "menu.message.replyInThread": "Ответить в ветке",
+  "menu.message.reply": "Ответить",
   "menu.message.edit": "Изменить сообщение",
   "menu.message.copyText": "Копировать текст",
   "menu.message.keepOut": "Закрыть доступ для {name}",

@@ -401,6 +401,64 @@
   "economy.gaveToPeople": {
     "other": "{count}人に合計{amount} {currency}を付与しました"
   },
+  "economy.gacha.empty": "現在開催中のガチャはありません",
+  "economy.gacha.emptyHint": "サーバーがガチャを開くと、ここで運試しができます。",
+  "economy.gacha.opensIn": "{time}後に開始",
+  "economy.gacha.only": "ガチャ限定",
+  "economy.gacha.closesIn": "{time}後に終了",
+  "economy.gacha.always": "常設",
+  "economy.gacha.again": "もう一度引く",
+  "economy.gacha.aBanner": "ガチャ",
+  "economy.gacha.pityAbout": "少なくとも{count}回に1回は{tier}の景品が確定します。",
+  "economy.gacha.pityIn": {
+    "other": "あと{count}回以内に{tier}確定"
+  },
+  "economy.gacha.pullsLeft": {
+    "other": "残り{count}回"
+  },
+  "economy.gacha.pulled": {
+    "other": "これまでに{count}回"
+  },
+  "economy.gacha.pullOnce": "引く",
+  "economy.gacha.pullMany": "{count}連",
+  "economy.gacha.notOpen": "未開始",
+  "economy.gacha.noPulls": "残り回数なし",
+  "economy.gacha.new": "NEW",
+  "economy.gacha.rates": "排出率",
+  "economy.gacha.ratesNote": "1回ごとに、まず確率に従ってレアリティが選ばれ、次にその中から重みに従って景品が選ばれます。現在手に入らない景品は除外され、その分の確率は残りの景品で分け合います。",
+  "economy.gacha.revealTitle": "{banner}",
+  "economy.gacha.revealAbout": {
+    "other": "{count}回の結果です。"
+  },
+  "economy.gacha.refunded": "払い戻し済み",
+  "economy.gacha.done": "完了",
+  "economy.gacha.duplicate": "重複",
+  "economy.gacha.dropsFrom": "{banners}で排出",
+  "economy.gacha.guaranteed": "確定",
+  "economy.gacha.tryLuck": "運試し",
+  "economy.gacha.banners": "ガチャ",
+  "economy.gacha.topPrizes": "目玉景品",
+  "economy.gacha.youHave": "所持：{amount}",
+  "economy.gacha.opening": "{banner}を開封中…",
+  "economy.gacha.skip": "スキップ",
+  "economy.gacha.soundsOn": "ガチャの効果音オン",
+  "economy.gacha.soundsOff": "ガチャの効果音オフ",
+  "economy.gacha.stars": {
+    "other": "星{count}"
+  },
+  "economy.gacha.pityMeter": "{done}/{total}",
+  "economy.gacha.share": "共有",
+  "economy.gacha.shareIn": "チャンネルで共有",
+  "economy.gacha.sharedIn": "#{channel}で共有しました",
+  "economy.gacha.noChannels": "ここには投稿できるチャンネルがありません。",
+  "economy.gacha.saveImage": "画像を保存",
+  "economy.gacha.imageFailed": "画像を保存できませんでした。",
+  "economy.gacha.sharedHeader": {
+    "other": "{banner}で{count}回引きました"
+  },
+  "economy.gacha.imageSubtitle": {
+    "other": "{name} · {count}回"
+  },
   "economy.give": "付与",
   "economy.giveAbout": "付与または回収した通貨は、理由とともに監査ログに記録されます。",
   "economy.giveAmount": "{amount}を付与",
@@ -410,6 +468,7 @@
   "economy.giveTitle": "{name}に通貨を付与",
   "economy.kind.earn": "獲得",
   "economy.kind.grant": "付与と回収",
+  "economy.kind.gacha": "ガチャ",
   "economy.kind.purchase": "購入",
   "economy.kind.transfer": "送金",
   "economy.kindCustom": "その他",
@@ -430,12 +489,15 @@
   "economy.line.given": "{who}が付与",
   "economy.line.givenRole": "{role}を持つ全員に付与",
   "economy.line.givenSomeone": "付与",
+  "economy.line.gachaWon": "{banner}で獲得",
+  "economy.line.gachaRefund": "{banner}の重複払い戻し",
   "economy.line.other": "変更",
   "economy.line.received": "{who}から",
   "economy.line.sent": "{who}に送金",
   "economy.line.taken": "{who}が回収",
   "economy.line.takenRole": "{role}を持つ全員から回収",
   "economy.line.takenSomeone": "回収",
+  "economy.line.pulled": "{banner}を引いた",
   "economy.nextClaim": "あと{time}で再び受け取れます",
   "economy.noCurrencies": "このサーバーにはまだ通貨がありません。",
   "economy.noHistory": "まだ何もありません",
@@ -467,6 +529,7 @@
   "economy.tab.history": "履歴",
   "economy.tab.send": "送る",
   "economy.tab.shop": "ショップ",
+  "economy.tab.gacha": "ガチャ",
   "economy.take": "回収",
   "economy.takeAmount": "{amount}を回収",
   "economy.takeHint": "回収は0で止まります。残高がマイナスになることはありません。",
@@ -484,10 +547,18 @@
   "economy.problem.soldOut": "たった今売り切れました。",
   "economy.problem.claimed": "今日の報酬はすでに受け取りました。また明日来てください！",
   "economy.problem.notTransferable": "{currency}はメンバー間で送ることができません。",
+  "economy.problem.nothingToDrop": "このガチャには、現在あなたが手に入れられる景品がありません。",
   "economy.problem.noDaily": "{currency}にはデイリー報酬がありません。",
+  "economy.problem.noPullsLeft": "このガチャで引ける回数をすべて使いました。",
   "economy.problem.full": "これ以上持てません。",
   "economy.problem.buyFirst": "このアイテムはサーバーのショップで販売されています。身につけるには、まず購入してください。",
+  "economy.problem.bannerSoon": "このガチャはまだ始まっていません。",
+  "economy.problem.bannerClosed": "このガチャは終了しました。",
   "economy.problem.powerfulRole": "ショップのロールには、サーバーをモデレートまたは管理する権限を付けられません。",
+  "economy.problem.pullsLeft": {
+    "other": "このガチャで引けるのはあと{count}回です。"
+  },
+  "economy.problem.gachaOnly": "これはサーバーのガチャでしか手に入りません。",
   "board.addCard": "カードを追加",
   "board.addCardTo": "{column}にカードを追加",
   "board.addColumn": "列を追加",

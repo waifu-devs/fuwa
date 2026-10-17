@@ -302,5 +302,10 @@
   "secure.dialog.resetAbout": "Se a criptografia do canal parar de funcionar para todos, recomece. As mensagens já lidas continuam nos dispositivos que as leram.",
   "secure.resetAsk": "Recomeçar para todos?",
   "secure.reset": "Recomeçar a criptografia",
-  "threads.jumpTooFar": "Essa mensagem é antiga demais para pular até ela"
+  "threads.jumpTooFar": "Essa mensagem é antiga demais para pular até ela",
+  "typing.one": "{name} está digitando",
+  "typing.two": "{first} e {second} estão digitando",
+  "typing.three": "{first}, {second} e {third} estão digitando",
+  "typing.several": "Várias pessoas estão digitando",
+  "typing.someone": "Alguém"
 }

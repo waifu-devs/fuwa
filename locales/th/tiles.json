@@ -1,0 +1,54 @@
+{
+  "strip.label": "กำลังเกิดขึ้นตอนนี้",
+  "strip.options": "ตัวเลือกไทล์",
+  "strip.hide": "ซ่อนอันนี้",
+  "strip.quiet": "ไม่มีไทล์สดในเซิร์ฟเวอร์นี้",
+  "strip.off": "ปิดไทล์สด",
+  "strip.remove": "นำออกสำหรับทุกคน",
+  "strip.removeFailed": "นำไทล์ออกไม่ได้",
+  "menu.show": "ไทล์สด",
+  "menu.server": "ไทล์สำหรับทุกคนที่นี่",
+  "menu.bigServer": {
+    "other": "ห้องเสียงปิดไว้โดยค่าเริ่มต้นในเซิร์ฟเวอร์ที่มีสมาชิก {count} คนขึ้นไป"
+  },
+  "menu.everyone": "ทุกคนที่นี่จะเห็นเฉพาะประเภทเหล่านี้",
+  "menu.reset": "กลับเป็นค่าเริ่มต้น",
+  "menu.failed": "เปลี่ยนไทล์ของเซิร์ฟเวอร์ไม่ได้",
+  "kind.voice": "ห้องเสียง",
+  "kind.poll": "โพล",
+  "kind.thread": "เธรดที่ติดตาม",
+  "kind.shared": "ช่องที่แชร์",
+  "kind.app": "จากแอป",
+  "voice.title": {
+    "other": "{count} คนใน {channel}"
+  },
+  "voice.since": "คุยกันตั้งแต่ {time}",
+  "voice.video": "เปิดกล้องอยู่",
+  "voice.screen": "กำลังแชร์หน้าจอ",
+  "voice.join": "เข้าร่วม",
+  "poll.title": "โพลใน #{channel}",
+  "poll.closesMinutes": {
+    "other": "ปิดในอีก {count} นาที"
+  },
+  "poll.closesHours": {
+    "other": "ปิดในอีก {count} ชั่วโมง"
+  },
+  "poll.noEnd": "เปิดจนกว่าจะสิ้นสุด",
+  "poll.voters": {
+    "other": "โหวตแล้ว {count} คน"
+  },
+  "poll.vote": "โหวต",
+  "thread.title": "เธรดที่คุณติดตาม",
+  "thread.unread": {
+    "other": "{count} การตอบกลับใหม่"
+  },
+  "thread.open": "เปิด",
+  "shared.title": "คึกคักใน #{channel}",
+  "shared.text": {
+    "other": "{count} ข้อความใหม่จาก {servers} เซิร์ฟเวอร์"
+  },
+  "shared.open": "ตามอ่าน",
+  "app.by": "จาก {app}",
+  "app.live": "สด",
+  "app.open": "เปิด"
+}

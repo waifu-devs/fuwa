@@ -1,0 +1,23 @@
+{
+  "build.commit": "Được build từ commit {commit}",
+  "update.updated": "fuwa đã được cập nhật",
+  "update.reload": "Tải lại",
+  "update.later": "Để sau",
+  "update.laterHint": "Để sau: tiếp tục dùng phiên bản này cho đến khi bạn tải lại",
+  "update.hasFeature": "{instance} có {feature}. Hãy cập nhật fuwa để sử dụng",
+  "update.hasFeatures": {
+    "other": "{instance} có {feature} và {count} tính năng khác. Hãy cập nhật fuwa để sử dụng"
+  },
+  "update.tooOld": "{instance} cần phiên bản fuwa mới hơn để mọi thứ hoạt động",
+  "update.anInstance": "Một instance",
+  "update.somethingNew": "tính năng mới",
+  "announcement.until": "Đến {time}",
+  "announcement.close": "Đóng thông báo",
+  "hosted.label": "Được vận hành bởi Waifu Devs",
+  "hosted.who": "Những người tạo ra fuwa vận hành instance này.",
+  "hosted.checked": "{host} · trình duyệt của bạn đã kiểm tra chứng chỉ của nó",
+  "hosted.why": "Chỉ các instance ở địa chỉ của chính chúng tôi mới có huy hiệu này. Ứng dụng chỉ dựa vào địa chỉ, vì bất kỳ máy chủ nào cũng có thể tự nói bất cứ điều gì về mình.",
+  "hosted.about": "Giới thiệu về fuwa",
+  "signInNotice.added": "{name} đã được thêm làm phương thức đăng nhập vào tài khoản của bạn vào {date}. Không phải bạn?",
+  "signInNotice.review": "Xem lại"
+}

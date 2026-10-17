@@ -352,6 +352,8 @@
   "privacy.activityHint": "Les jeux et apps que l’app pour ordinateur détecte, affichés aux personnes qui partagent un serveur avec toi. Rien n’est conservé : ça disparaît quand tu arrêtes.",
   "privacy.activityOff": "{instance} n’affiche pas ce que font les gens. Ton statut reste affiché.",
   "privacy.saveFailed": "Impossible d’enregistrer : {error}",
+  "privacy.typing": "Montrer quand j’écris",
+  "privacy.typingHint": "Les autres voient une ligne « en train d’écrire » pendant que tu rédiges un message. Désactive-la et personne ne la voit ; tu vois toujours la leur.",
   "privacy.shareHere": "Partager mon activité ici",
   "privacy.shareIn": "Partager mon activité sur {server}",
   "signIn.yours": "Comment tu te connectes",

@@ -1,0 +1,23 @@
+{
+  "build.commit": "บิลด์จากคอมมิต {commit}",
+  "update.updated": "fuwa อัปเดตแล้ว",
+  "update.reload": "โหลดใหม่",
+  "update.later": "ไว้ทีหลัง",
+  "update.laterHint": "ไว้ทีหลัง: ใช้เวอร์ชันนี้ต่อจนกว่าคุณจะโหลดใหม่",
+  "update.hasFeature": "{instance} มี {feature} อัปเดต fuwa เพื่อใช้งาน",
+  "update.hasFeatures": {
+    "other": "{instance} มี {feature} และอีก {count} อย่าง อัปเดต fuwa เพื่อใช้งาน"
+  },
+  "update.tooOld": "{instance} ต้องใช้ fuwa เวอร์ชันใหม่กว่านี้เพื่อให้ทุกอย่างทำงานได้",
+  "update.anInstance": "อินสแตนซ์หนึ่ง",
+  "update.somethingNew": "ฟีเจอร์ใหม่",
+  "announcement.until": "จนถึง {time}",
+  "announcement.close": "ปิดประกาศ",
+  "hosted.label": "โฮสต์โดย Waifu Devs",
+  "hosted.who": "ทีมผู้สร้าง fuwa เป็นผู้ดูแลอินสแตนซ์นี้",
+  "hosted.checked": "{host} · เบราว์เซอร์ของคุณตรวจสอบใบรับรองแล้ว",
+  "hosted.why": "เฉพาะอินสแตนซ์ที่อยู่ในที่อยู่ของเราเองเท่านั้นที่ได้รับป้ายนี้ แอปพิจารณาจากที่อยู่อย่างเดียว เพราะเซิร์ฟเวอร์ใดก็อ้างอะไรเกี่ยวกับตัวเองก็ได้",
+  "hosted.about": "เกี่ยวกับ fuwa",
+  "signInNotice.added": "{name} ถูกเพิ่มเป็นช่องทางเข้าสู่ระบบบัญชีของคุณเมื่อ {date} ไม่ใช่คุณใช่ไหม",
+  "signInNotice.review": "ตรวจสอบ"
+}

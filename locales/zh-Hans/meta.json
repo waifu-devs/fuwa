@@ -1,0 +1,9 @@
+{
+  "name": "简体中文",
+  "english": "Chinese (Simplified)",
+  "dir": "ltr",
+  "plural": "other",
+  "reviewed": false,
+  "group": ",",
+  "decimal": "."
+}

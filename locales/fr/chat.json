@@ -302,5 +302,10 @@
   "secure.dialog.resetAbout": "Si le chiffrement du salon ne fonctionne plus pour personne, redémarre-le. Les messages déjà lus restent sur les appareils qui les ont lus.",
   "secure.resetAsk": "Redémarrer pour tout le monde ?",
   "secure.reset": "Redémarrer le chiffrement",
-  "threads.jumpTooFar": "Ce message est trop ancien pour y accéder directement"
+  "threads.jumpTooFar": "Ce message est trop ancien pour y accéder directement",
+  "typing.one": "{name} écrit",
+  "typing.two": "{first} et {second} écrivent",
+  "typing.three": "{first}, {second} et {third} écrivent",
+  "typing.several": "Plusieurs personnes écrivent",
+  "typing.someone": "Quelqu’un"
 }

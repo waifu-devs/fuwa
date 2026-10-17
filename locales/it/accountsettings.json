@@ -352,6 +352,8 @@
   "privacy.activityHint": "Giochi e app che l'app desktop rileva, mostrati a chi condivide un server con te. Non viene conservato nulla: sparisce quando smetti.",
   "privacy.activityOff": "{instance} non mostra cosa fanno le persone. Il tuo stato resta visibile.",
   "privacy.saveFailed": "Impossibile salvare: {error}",
+  "privacy.typing": "Mostra quando sto scrivendo",
+  "privacy.typingHint": "Gli altri vedono un avviso mentre scrivi un messaggio. Se lo disattivi non lo vede nessuno; tu continui a vedere il loro.",
   "privacy.shareHere": "Condividi la mia attività qui",
   "privacy.shareIn": "Condividi la mia attività in {server}",
   "signIn.yours": "Come accedi",

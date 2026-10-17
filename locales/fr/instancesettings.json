@@ -185,6 +185,8 @@
   "limits.voicePerDayHint": "Ce qu’un compte peut envoyer en une journée (UTC), compté à part des images et des fichiers.",
   "limits.pollVotes": "Votes de sondage par minute",
   "limits.pollVotesHint": "Combien de fois un compte peut voter, changer ou retirer un vote dans les sondages en une minute. Chaque vote est une mise à jour en direct pour tout le monde dans le salon.",
+  "limits.soundPlays": "Sons joués par minute",
+  "limits.soundPlaysHint": "Le nombre de sons de soundboard qu’un compte peut jouer en une minute. Chaque son est joué pour tout le monde dans le salon vocal.",
   "limits.commands": "Commandes d’agents par minute",
   "limits.commandsHint": "Combien de fois un compte peut exécuter les commandes slash des agents ou appuyer sur leurs boutons en une minute. Chaque action réveille un agent.",
   "limits.pinsPerChannel": "Messages épinglés par salon",

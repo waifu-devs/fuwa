@@ -1,0 +1,24 @@
+{
+  "build.commit": "कमिट {commit} से बना",
+  "update.updated": "fuwa अपडेट हो गया",
+  "update.reload": "रीलोड करें",
+  "update.later": "बाद में",
+  "update.laterHint": "बाद में: रीलोड करने तक यही वर्शन इस्तेमाल करते रहें",
+  "update.hasFeature": "{instance} में {feature} है। इसे इस्तेमाल करने के लिए fuwa अपडेट करें",
+  "update.hasFeatures": {
+    "one": "{instance} में {feature} और {count} और सुविधा है। इन्हें इस्तेमाल करने के लिए fuwa अपडेट करें",
+    "other": "{instance} में {feature} और {count} और सुविधाएं हैं। इन्हें इस्तेमाल करने के लिए fuwa अपडेट करें"
+  },
+  "update.tooOld": "सब कुछ ठीक से चलाने के लिए {instance} को fuwa का नया वर्शन चाहिए",
+  "update.anInstance": "एक इंस्टेंस",
+  "update.somethingNew": "कुछ नया",
+  "announcement.until": "{time} तक",
+  "announcement.close": "घोषणा बंद करें",
+  "hosted.label": "Waifu Devs द्वारा होस्ट किया गया",
+  "hosted.who": "fuwa बनाने वाले लोग ही यह इंस्टेंस चलाते हैं।",
+  "hosted.checked": "{host} · आपके ब्राउज़र ने इसका सर्टिफ़िकेट जांचा",
+  "hosted.why": "यह बैज सिर्फ़ हमारे अपने पतों वाले इंस्टेंस को मिलता है। ऐप सिर्फ़ पते पर भरोसा करता है, क्योंकि कोई भी सर्वर अपने बारे में कुछ भी कह सकता है।",
+  "hosted.about": "fuwa के बारे में",
+  "signInNotice.added": "{date} को {name} को आपके खाते में साइन इन करने के तरीके के रूप में जोड़ा गया। यह आप नहीं थे?",
+  "signInNotice.review": "समीक्षा करें"
+}

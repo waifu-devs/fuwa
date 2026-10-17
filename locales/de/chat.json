@@ -302,5 +302,10 @@
   "secure.dialog.resetAbout": "Wenn die Verschlüsselung des Kanals für alle nicht mehr funktioniert, starte sie neu. Bereits gelesene Nachrichten bleiben auf den Geräten, die sie gelesen haben.",
   "secure.resetAsk": "Für alle neu starten?",
   "secure.reset": "Verschlüsselung neu starten",
-  "threads.jumpTooFar": "Diese Nachricht liegt zu weit zurück, um dorthin zu springen"
+  "threads.jumpTooFar": "Diese Nachricht liegt zu weit zurück, um dorthin zu springen",
+  "typing.one": "{name} tippt",
+  "typing.two": "{first} und {second} tippen",
+  "typing.three": "{first}, {second} und {third} tippen",
+  "typing.several": "Mehrere Leute tippen",
+  "typing.someone": "Jemand"
 }

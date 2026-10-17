@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "画像を開きました。そこから保存してください",
   "menu.message.openThread": "スレッドを開く",
   "menu.message.replyInThread": "スレッドで返信",
+  "menu.message.reply": "返信",
   "menu.message.edit": "メッセージを編集",
   "menu.message.copyText": "テキストをコピー",
   "menu.message.keepOut": "{name}を締め出す",

@@ -1,0 +1,23 @@
+{
+  "build.commit": "커밋 {commit}에서 빌드됨",
+  "update.updated": "fuwa가 업데이트되었어요",
+  "update.reload": "새로고침",
+  "update.later": "나중에",
+  "update.laterHint": "나중에: 새로고침할 때까지 이 버전을 계속 사용해요",
+  "update.hasFeature": "{instance}에 {feature} 기능이 있어요. 사용하려면 fuwa를 업데이트하세요",
+  "update.hasFeatures": {
+    "other": "{instance}에 {feature} 외 {count}개 기능이 있어요. 사용하려면 fuwa를 업데이트하세요"
+  },
+  "update.tooOld": "{instance}의 모든 기능을 사용하려면 더 새로운 fuwa가 필요해요",
+  "update.anInstance": "한 인스턴스",
+  "update.somethingNew": "새로운 기능",
+  "announcement.until": "{time}까지",
+  "announcement.close": "공지 닫기",
+  "hosted.label": "Waifu Devs 호스팅",
+  "hosted.who": "fuwa를 만드는 사람들이 이 인스턴스를 운영해요.",
+  "hosted.checked": "{host} · 브라우저가 인증서를 확인했어요",
+  "hosted.why": "저희 소유 주소의 인스턴스만 이 배지를 받아요. 어떤 서버든 자신에 대해 무엇이든 주장할 수 있으므로 앱은 주소만 보고 판단해요.",
+  "hosted.about": "fuwa 정보",
+  "signInNotice.added": "{date}에 {name}이(가) 계정 로그인 수단으로 추가되었어요. 본인이 아닌가요?",
+  "signInNotice.review": "검토"
+}

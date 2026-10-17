@@ -292,5 +292,10 @@
   "secure.dialog.resetAbout": "チャンネルの暗号化が全員で動作しなくなった場合は、やり直してください。すでに読まれたメッセージは、読んだデバイスに残ります。",
   "secure.resetAsk": "全員に対してやり直しますか？",
   "secure.reset": "暗号化をやり直す",
-  "threads.jumpTooFar": "そのメッセージは古すぎて移動できません"
+  "threads.jumpTooFar": "そのメッセージは古すぎて移動できません",
+  "typing.one": "{name}が入力中",
+  "typing.two": "{first}と{second}が入力中",
+  "typing.three": "{first}、{second}、{third}が入力中",
+  "typing.several": "複数の人が入力中",
+  "typing.someone": "誰か"
 }

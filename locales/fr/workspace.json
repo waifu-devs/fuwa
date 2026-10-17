@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "L’image a été ouverte pour que tu l’enregistres depuis là",
   "menu.message.openThread": "Ouvrir le fil",
   "menu.message.replyInThread": "Répondre dans le fil",
+  "menu.message.reply": "Répondre",
   "menu.message.edit": "Modifier le message",
   "menu.message.copyText": "Copier le texte",
   "menu.message.keepOut": "Écarter {name}",

@@ -185,6 +185,8 @@
   "limits.voicePerDayHint": "Was ein Konto pro Tag (UTC) senden darf, getrennt von Bildern und Dateien gezählt.",
   "limits.pollVotes": "Umfragestimmen pro Minute",
   "limits.pollVotesHint": "Wie oft ein Konto pro Minute in Umfragen abstimmen, eine Stimme ändern oder zurückziehen darf. Jede Stimme ist ein Live-Update an alle im Kanal.",
+  "limits.soundPlays": "Abgespielte Sounds pro Minute",
+  "limits.soundPlaysHint": "Wie viele Soundboard-Sounds ein Konto pro Minute abspielen darf. Jeder Sound wird für alle im Sprachkanal abgespielt.",
   "limits.commands": "Agentenbefehle pro Minute",
   "limits.commandsHint": "Wie oft ein Konto pro Minute Slash-Befehle von Agenten ausführen oder ihre Buttons drücken darf. Jeder davon weckt einen Agenten.",
   "limits.pinsPerChannel": "Angeheftete pro Kanal",

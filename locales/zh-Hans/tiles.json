@@ -1,0 +1,54 @@
+{
+  "strip.label": "正在进行",
+  "strip.options": "磁贴选项",
+  "strip.hide": "隐藏此项",
+  "strip.quiet": "此服务器暂无动态磁贴",
+  "strip.off": "关闭动态磁贴",
+  "strip.remove": "为所有人移除",
+  "strip.removeFailed": "无法移除磁贴",
+  "menu.show": "动态磁贴",
+  "menu.server": "对所有人显示的磁贴",
+  "menu.bigServer": {
+    "other": "在成员数达到 {count} 人及以上的服务器中，语音房间默认关闭"
+  },
+  "menu.everyone": "此处所有人只会看到这些类型",
+  "menu.reset": "恢复默认",
+  "menu.failed": "无法更改服务器的磁贴",
+  "kind.voice": "语音房间",
+  "kind.poll": "投票",
+  "kind.thread": "关注的子区",
+  "kind.shared": "共享频道",
+  "kind.app": "来自应用",
+  "voice.title": {
+    "other": "{channel} 中有 {count} 人"
+  },
+  "voice.since": "从 {time} 开始通话",
+  "voice.video": "摄像头已开启",
+  "voice.screen": "正在共享屏幕",
+  "voice.join": "加入",
+  "poll.title": "#{channel} 中的投票",
+  "poll.closesMinutes": {
+    "other": "{count} 分钟后截止"
+  },
+  "poll.closesHours": {
+    "other": "{count} 小时后截止"
+  },
+  "poll.noEnd": "结束前一直开放",
+  "poll.voters": {
+    "other": "{count} 人已投票"
+  },
+  "poll.vote": "投票",
+  "thread.title": "你关注的子区",
+  "thread.unread": {
+    "other": "{count} 条新回复"
+  },
+  "thread.open": "打开",
+  "shared.title": "#{channel} 很热闹",
+  "shared.text": {
+    "other": "来自 {servers} 个服务器的 {count} 条新消息"
+  },
+  "shared.open": "查看新消息",
+  "app.by": "来自 {app}",
+  "app.live": "直播中",
+  "app.open": "打开"
+}
