@@ -1673,7 +1673,13 @@ fn ogg_opus(ms: u64) -> Vec<u8> {
     out
 }
 
-async fn upload_sound(c: &mut Clients, instance: &Instance, token: &str, sid: &str, bytes: Vec<u8>) -> Result<String, u16> {
+async fn upload_sound(
+    c: &mut Clients,
+    instance: &Instance,
+    token: &str,
+    sid: &str,
+    bytes: Vec<u8>,
+) -> Result<String, u16> {
     let reserved = c
         .media
         .create_upload(authed(
@@ -1738,9 +1744,8 @@ async fn soundboard_sounds_play_for_everyone_in_the_channel() {
     assert_eq!(upload_sound(&mut c, &instance, &juan, &sid, ogg_opus(10_500)).await, Err(422));
     assert_eq!(upload_sound(&mut c, &instance, &juan, &sid, b"RIFF....WAVEfmt ".to_vec()).await, Err(415));
     let url = upload_sound(&mut c, &instance, &juan, &sid, ogg_opus(1_000)).await.unwrap();
-    let served = reqwest::get(format!("http://{}{}", instance.addr, reqwest::Url::parse(&url).unwrap().path()))
-        .await
-        .unwrap();
+    let served =
+        reqwest::get(format!("http://{}{}", instance.addr, reqwest::Url::parse(&url).unwrap().path())).await.unwrap();
     assert_eq!(served.headers()["content-type"], "audio/ogg; codecs=opus");
 
     // Adding one takes Manage Soundboard, which members don't have.

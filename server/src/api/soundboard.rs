@@ -77,10 +77,11 @@ fn name_taken(err: Error, name: &str) -> Error {
 
 /// Refuses a name another of the server's sounds has, whatever its case.
 async fn check_free(conn: &turso::Connection, name: &str, except: &str) -> Result<()> {
-    let taken = query_one(conn, "SELECT 1 FROM sounds WHERE name_key = ?1 AND id <> ?2", (name_key(name), except), |r| {
-        r.get::<i64>(0)
-    })
-    .await?;
+    let taken =
+        query_one(conn, "SELECT 1 FROM sounds WHERE name_key = ?1 AND id <> ?2", (name_key(name), except), |r| {
+            r.get::<i64>(0)
+        })
+        .await?;
     match taken {
         Some(_) => Err(Error::AlreadyExists(format!("there's already a sound called \"{name}\""))),
         None => Ok(()),
