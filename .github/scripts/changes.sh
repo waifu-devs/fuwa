@@ -12,7 +12,7 @@
 # runs too.
 set -euo pipefail
 
-parts=(server desktop proto docker image sdk fuwafuwa)
+parts=(server desktop proto docker image sdk fuwafuwa migrate)
 
 everything() {
   for part in "${parts[@]}"; do echo "$part=true"; done
@@ -112,7 +112,15 @@ for_fuwafuwa() {
   return 1
 }
 
-server=false desktop=false proto=false docker=false image=false sdk=false fuwafuwa=false
+# discord-migrate (agents/discord-migrate), the bot that moves Discord servers to fuwa: the same.
+for_migrate() {
+  case $1 in
+    agents/discord-migrate/* | .github/workflows/ci.yml | .github/scripts/*) return 0 ;;
+  esac
+  return 1
+}
+
+server=false desktop=false proto=false docker=false image=false sdk=false fuwafuwa=false migrate=false
 count=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -124,8 +132,9 @@ while IFS= read -r f; do
   not_for_image "$f" || image=true
   for_sdk "$f" && sdk=true
   for_fuwafuwa "$f" && fuwafuwa=true
+  for_migrate "$f" && migrate=true
 done <<< "$files"
 # Nothing changed (an empty commit, or a merge that only moved history): run nothing.
 echo "changed files: $count" >&2
-printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\nsdk=%s\nfuwafuwa=%s\n' \
-  "$server" "$desktop" "$proto" "$docker" "$image" "$sdk" "$fuwafuwa"
+printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\nsdk=%s\nfuwafuwa=%s\nmigrate=%s\n' \
+  "$server" "$desktop" "$proto" "$docker" "$image" "$sdk" "$fuwafuwa" "$migrate"

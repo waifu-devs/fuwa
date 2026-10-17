@@ -70,6 +70,14 @@ const HANDOFF = 240;
  * fuwa.chat, in a server it's been added to. Empty, it isn't deployed at all.
  */
 const FEEDBACK_CHANNEL = "01M3YTPEZBVSPZVWGFZ5AGGE6R/01M4ARF2YAS9698KE30AKZ2DG1";
+/**
+ * Whether to run the Discord migration bot (agents/discord-migrate), which copies a
+ * Discord server into a fuwa.chat server. It needs two shared variables first; see
+ * where it's declared below. False removes the service but keeps its volume.
+ */
+const DISCORD_MIGRATE = true;
+/** The migration bot's volume, where each migration's progress is kept: small JSON files. */
+const MIGRATE_VOLUME_MB = 1000;
 
 /**
  * How fuwa.chat runs (see "Scaling out" in the README). `null` is one `fuwa` process
@@ -202,7 +210,48 @@ export default defineRailway((ctx) => {
         }),
       ]
     : [];
-  const agents = fuwafuwa.length ? group("Agents", fuwafuwa) : [];
+
+  // The Discord migration bot (agents/discord-migrate): a Discord bot and a fuwa agent in
+  // one process. Built by Railway from this repository like @fuwafuwa. It keeps each
+  // migration's progress on a volume (DATA_DIR, /data in its image), so a migration that
+  // stops, on a deploy or a restart, picks up where it left off; declared either way, so
+  // turning DISCORD_MIGRATE off never deletes it. One replica: Discord and fuwa would send
+  // both the same commands. Set by hand as shared variables, before DISCORD_MIGRATE is
+  // true (agents/discord-migrate/README.md, "Deploying on Railway"):
+  // DISCORD_MIGRATE_DISCORD_TOKEN, the Discord bot's token (Developer Portal > Bot, with
+  // the Message Content intent on), and DISCORD_MIGRATE_FUWA_TOKEN, its fuwa agent's
+  // token (Settings > Agents on fuwa.chat).
+  const migrateData = volume("discord-migrate-data", { region: REGION, sizeMB: MIGRATE_VOLUME_MB });
+  const discordMigrate = DISCORD_MIGRATE
+    ? [
+        service("discord-migrate", {
+          source: github("waifu-devs/fuwa", {
+            branch: "master",
+            rootDirectory: "agents/discord-migrate",
+            checkSuites: true,
+          }),
+          build: {
+            builder: "DOCKERFILE",
+            dockerfilePath: "Dockerfile",
+            watchPatterns: ["/agents/discord-migrate/**"],
+          },
+          regions: { [REGION]: 1 },
+          volumeMounts: { "/data": migrateData },
+          // A migration under way stops at the next message and saves where it is.
+          deploy: { drainingSeconds: 15 },
+          env: {
+            FUWA_URL: `https://${DOMAIN}`,
+            DISCORD_TOKEN: ctx.shared.DISCORD_MIGRATE_DISCORD_TOKEN,
+            FUWA_TOKEN: ctx.shared.DISCORD_MIGRATE_FUWA_TOKEN,
+            DATA_DIR: "/data",
+            // The image runs as `node`, and Railway mounts volumes as root.
+            RAILWAY_RUN_UID: "0",
+          },
+        }),
+      ]
+    : [];
+  const agentParts = [...fuwafuwa, migrateData, ...discordMigrate];
+  const agents = group("Agents", agentParts);
 
   if (!SPLIT) {
     const fuwa = service("fuwa", {
@@ -232,8 +281,8 @@ export default defineRailway((ctx) => {
   if (!Number.isInteger(gateways) || gateways < 1) {
     throw new Error("SPLIT.gateways must be a whole number, at least 1");
   }
-  if (!Number.isInteger(shards) || shards < 1 || shards > MAX_VOLUMES - 1) {
-    throw new Error(`SPLIT.shards must be a whole number from 1 to ${MAX_VOLUMES - 1}`);
+  if (!Number.isInteger(shards) || shards < 1 || shards > MAX_VOLUMES - 2) {
+    throw new Error(`SPLIT.shards must be a whole number from 1 to ${MAX_VOLUMES - 2}`);
   }
   for (const r of REGIONS) {
     if (!/^[a-z0-9-]{1,32}$/.test(r.id) || r.id === HOME.id || REGIONS.filter((o) => o.id === r.id).length > 1) {
@@ -241,8 +290,9 @@ export default defineRailway((ctx) => {
     }
     if (!Number.isInteger(r.shards) || r.shards < 1) throw new Error(`region ${r.id} needs at least one shard`);
   }
-  if (1 + shards + REGIONS.reduce((n, r) => n + r.shards, 0) > MAX_VOLUMES) {
-    throw new Error(`the directory and every region's shards need at most ${MAX_VOLUMES} volumes`);
+  // The directory, every shard, and the migration bot's.
+  if (2 + shards + REGIONS.reduce((n, r) => n + r.shards, 0) > MAX_VOLUMES) {
+    throw new Error(`the directory, every region's shards and the migration bot need at most ${MAX_VOLUMES} volumes`);
   }
   // Labels go on the parts only once there's more than one region, so a single-region
   // fuwa.chat keeps the settings it has always had.

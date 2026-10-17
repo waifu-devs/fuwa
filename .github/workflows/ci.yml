@@ -37,6 +37,7 @@ jobs:
       docker: ${{ steps.changes.outputs.docker }}
       sdk: ${{ steps.changes.outputs.sdk }}
       fuwafuwa: ${{ steps.changes.outputs.fuwafuwa }}
+      migrate: ${{ steps.changes.outputs.migrate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: changes
@@ -283,10 +284,38 @@ jobs:
       - name: The image Railway builds
         run: docker build -t fuwafuwa .
 
+  migrate:
+    # The Discord migration bot (agents/discord-migrate): it typechecks, its
+    # tests pass, and its Dockerfile builds.
+    name: discord-migrate (typecheck, tests)
+    needs: changes
+    if: needs.changes.outputs.migrate == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agents/discord-migrate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: agents/discord-migrate/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: agents/discord-migrate/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      # ffmpeg turns Discord's sounds into Ogg Opus; its test runs only with it.
+      - run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
+      - run: pnpm test
+      - name: Its image
+        run: docker build -t discord-migrate .
+
   # The one check to require: it passes when every job this change needed passed.
   passed:
     name: CI passed
-    needs: [changes, server, desktop, proto, docker, sdk, fuwafuwa]
+    needs: [changes, server, desktop, proto, docker, sdk, fuwafuwa, migrate]
     if: always() && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:

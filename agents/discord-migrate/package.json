@@ -1,0 +1,27 @@
+{
+  "name": "discord-migrate",
+  "private": true,
+  "description": "A Discord bot that copies a Discord server into a fuwa server: its roles, channels, emoji, sounds, history and threads, and an invite for its members.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test test/*.test.ts",
+    "test:instance": "node --test test/instance.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.16.0",
+    "@connectrpc/connect": "^2.2.0",
+    "@waifu-devs/fuwa": "^0.6.0",
+    "discord.js": "^14.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
