@@ -133,6 +133,13 @@ pub fn emoji(e: &pb::Emoji) -> Value {
     trim(json!({ "id": e.id, "name": e.name, "animated": e.animated, "write_as": emoji_tag(e) }))
 }
 
+/// A soundboard sound.
+pub fn sound(s: &pb::Sound) -> Value {
+    trim(
+        json!({ "id": s.id, "name": s.name, "emoji": s.emoji, "volume": s.volume, "duration_ms": s.duration_ms, "url": s.url }),
+    )
+}
+
 fn emoji_tag(e: &pb::Emoji) -> String {
     format!("<{}:{}:{}>", if e.animated { "a" } else { "" }, e.name, e.id)
 }
