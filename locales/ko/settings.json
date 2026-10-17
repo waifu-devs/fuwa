@@ -4,7 +4,6 @@
   "language.matchSystem": "컴퓨터 설정 따르기",
   "language.matchBrowserNote": "현재 {language}",
   "language.coverage": "{percent} 번역됨",
-  "language.draft": "기계 번역 초안이며 아직 원어민 검토를 거치지 않았어요",
   "language.failed": "언어를 불러오지 못했어요. 연결 상태를 확인하고 다시 시도하세요.",
   "screen.title": "설정",
   "screen.allSettings": "모든 설정",

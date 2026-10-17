@@ -4,7 +4,6 @@
   "language.matchSystem": "मेरे कंप्यूटर जैसी",
   "language.matchBrowserNote": "अभी यह {language} है",
   "language.coverage": "{percent} अनुवादित",
-  "language.draft": "मशीन ड्राफ़्ट, अभी किसी मूल वक्ता ने नहीं जांचा",
   "language.failed": "वह भाषा लोड नहीं हो सकी। अपना कनेक्शन जांचें और फिर से कोशिश करें।",
   "screen.title": "सेटिंग्स",
   "screen.allSettings": "सभी सेटिंग्स",

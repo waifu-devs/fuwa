@@ -106,13 +106,14 @@ test("English is there and every language folder is a tag with a meta.json", () 
     assert.ok(meta.dir === "ltr" || meta.dir === "rtl", `${code}: dir`);
     assert.ok(RULES.has(meta.plural), `${code}: unknown plural rule ${meta.plural}`);
     assert.equal(typeof meta.reviewed, "boolean");
+    assert.ok(existsSync(join(root, code, "flag.svg")), `locales/${code}/flag.svg is missing`);
   }
 });
 
 test("every translation matches English's keys, placeholders and plural shape", () => {
   for (const code of codes) {
     for (const file of readdirSync(join(root, code))) {
-      if (file === "meta.json") continue;
+      if (file === "meta.json" || !file.endsWith(".json")) continue;
       const ns = file.replace(/\.json$/, "");
       const source = english[ns];
       assert.ok(source, `locales/${code}/${file}: English has no ${file}`);

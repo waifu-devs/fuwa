@@ -51,11 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// The translations (locales/ at the repo root, shared with the web app), built
-/// in: every <language>/<namespace>.json, so a new language is only a new folder.
+/// in: every <language>/<namespace>.json and its flag.svg, so a new language is only a new folder.
 fn locales() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::fs::canonicalize("../locales")?;
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
+    let mut flags = Vec::new();
     for language in std::fs::read_dir(&root)? {
         let language = language?.path();
         if !language.is_dir() {
@@ -64,7 +65,11 @@ fn locales() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={}", language.display());
         for file in std::fs::read_dir(&language)? {
             let file = file?.path();
-            if file.extension().is_some_and(|e| e == "json") {
+            if file.file_name().is_some_and(|n| n == "flag.svg") {
+                let code = language.file_name().and_then(|n| n.to_str()).ok_or("odd folder name")?.to_string();
+                assert!(is_tag(&code), "locales/{code} isn't a language tag like en, es or pt-BR");
+                flags.push((code, file));
+            } else if file.extension().is_some_and(|e| e == "json") {
                 let code = language.file_name().and_then(|n| n.to_str()).ok_or("odd folder name")?.to_string();
                 let ns = file.file_stem().and_then(|n| n.to_str()).ok_or("odd file name")?.to_string();
                 // Only names shaped like ours go into the generated code.
@@ -78,12 +83,22 @@ fn locales() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     files.sort();
+    flags.sort();
+    let flag_rows: String = flags
+        .iter()
+        .map(|(code, path)| format!("    ({code:?}, include_bytes!({:?})),\n", path.display().to_string()))
+        .collect();
     let rows: String = files
         .iter()
         .map(|(code, ns, path)| format!("    ({code:?}, {ns:?}, include_str!({:?})),\n", path.display().to_string()))
         .collect();
     let out = PathBuf::from(std::env::var("OUT_DIR")?).join("locales.rs");
-    std::fs::write(out, format!("pub(crate) static FILES: &[(&str, &str, &str)] = &[\n{rows}];\n"))?;
+    std::fs::write(
+        out,
+        format!(
+            "pub(crate) static FILES: &[(&str, &str, &str)] = &[\n{rows}];\n\npub(crate) static FLAGS: &[(&str, &[u8])] = &[\n{flag_rows}];\n"
+        ),
+    )?;
     Ok(())
 }
 

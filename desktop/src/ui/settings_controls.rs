@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, BoxShadow, Context, Div, ElementId, Entity, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Rgba, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, point, px, relative,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, img, point, px, relative,
 };
 
 use crate::core::config::Prefs;
@@ -439,13 +439,21 @@ pub(crate) struct Opt {
     pub label: String,
     pub hint: String,
     pub glyph: &'static str,
+    /// A picture in full color in place of the glyph (a language's flag).
+    pub picture: Option<SharedString>,
     /// Why it can't be picked now, in place of the hint.
     pub disabled: Option<String>,
 }
 
 impl Opt {
     pub(crate) fn new(label: impl Into<String>, hint: impl Into<String>, glyph: &'static str) -> Self {
-        Self { label: label.into(), hint: hint.into(), glyph, disabled: None }
+        Self { label: label.into(), hint: hint.into(), glyph, picture: None, disabled: None }
+    }
+
+    /// The same card with a language's flag for its icon.
+    pub(crate) fn flag(mut self, code: &str) -> Self {
+        self.picture = Some(SharedString::from(format!("flags/{code}.svg")));
+        self
     }
 }
 
@@ -539,7 +547,18 @@ pub(crate) fn choice<V: 'static>(
                             })
                             .map(|el| {
                                 // The picked one's icon springs up from 40%, turning upright.
-                                let glyph = div().child(icon(option.glyph).size(px(16.0)));
+                                let glyph = match &option.picture {
+                                    // 20 by 15, its corners rounded and edged so white flags still show.
+                                    Some(path) => div().child(
+                                        img(path.clone())
+                                            .w(px(20.0))
+                                            .h(px(15.0))
+                                            .rounded(px(2.0))
+                                            .border_1()
+                                            .border_color(gpui_kit::black().opacity(0.15)),
+                                    ),
+                                    None => div().child(icon(option.glyph).size(px(16.0))),
+                                };
                                 if active {
                                     el.child(motion::pop(
                                         glyph,

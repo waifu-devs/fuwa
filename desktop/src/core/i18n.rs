@@ -12,7 +12,8 @@ use std::sync::LazyLock;
 use parking_lot::RwLock;
 use serde::Deserialize;
 
-// (language, namespace, the file's text) for every catalog under locales/.
+// (language, namespace, the file's text) for every catalog under locales/,
+// and (language, its flag.svg) for every flag.
 include!(concat!(env!("OUT_DIR"), "/locales.rs"));
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -79,6 +80,11 @@ pub static LANGUAGES: LazyLock<Vec<Language>> = LazyLock::new(|| {
     out.sort_by(|a, b| (a.code != "en").cmp(&(b.code != "en")).then_with(|| a.meta.english.cmp(&b.meta.english)));
     out
 });
+
+/// A shipped language's flag (an SVG), as the pickers show it.
+pub fn flag(code: &str) -> Option<&'static [u8]> {
+    FLAGS.iter().find(|(c, _)| *c == code).map(|(_, svg)| *svg)
+}
 
 /// One language's catalogs, flattened to "namespace.key". A file that doesn't parse is left out (the tests catch it).
 pub fn catalog(code: &str) -> Catalog {
@@ -568,6 +574,14 @@ mod tests {
         assert_eq!(format_number(1234567, &hindi), "12,34,567");
         assert_eq!(format_number(123456, &hindi), "1,23,456");
         assert_eq!(format_number(1234, &hindi), "1,234");
+    }
+
+    #[test]
+    fn every_language_has_a_flag() {
+        for l in LANGUAGES.iter() {
+            let svg = flag(&l.code).unwrap_or_else(|| panic!("locales/{}/flag.svg is missing", l.code));
+            assert!(svg.starts_with(b"<svg"), "locales/{}/flag.svg isn't an SVG", l.code);
+        }
     }
 
     #[test]
