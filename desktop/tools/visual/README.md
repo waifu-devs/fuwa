@@ -48,6 +48,13 @@ python3 diff.py general         # out/general-side.png (both side by side), out/
   someone else.
 - `probe.py IMAGE row Y [x0 x1] | col X [y0 y1] | px X Y` prints exact colors
   and where they change, for measuring edges, paddings and colors.
+- `client-load.mjs [--rate 50] [--secs 20] [--as alice] [--flood bob]`: what
+  the web app costs when a channel is busy. It opens the app in Chromium as
+  one person, floods the channel from another (through the SDK) at `--rate`
+  messages a second, and prints main-thread CPU, frames, long tasks and the
+  DOM. `--app URL` points at a dev server when the instance doesn't serve the
+  app (its address must be in `FUWA_ALLOWED_ORIGINS`). docs/capacity.md has
+  what it found.
 - `dcargo` is cargo for the desktop crate. `FUWA_DESK_TARGET` lets several
   checkouts (git worktrees) share one target dir; its `build` copies the
   checkout's binary aside so each one starts its own.

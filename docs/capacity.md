@@ -58,6 +58,7 @@ after numbers are from the box above.
 | A gateway's followers on one connection per shard | Broke at 200 online: shards take 200 streams per connection, and calls queued behind them | 3,200 online with no errors | Streams use connections of their own, 100 each |
 | A sign-in flood (2,000 wrong passwords at once) | 2.9 GB, and everyone else's messages at 14 s p99 | 214 MB, 0.34 s p99; the flood gets "busy" | Half the cores check passwords and 256 wait |
 | Everything at once on one server (burst, joins, uploads, a call) | Sends at 25 s, 2.3 GB, 2,479 files open, neighbours' p50 at 623 ms, errors | Sends at 170 ms p50, 228 MB, 427 files open, neighbours' p50 at 3.8 ms, no errors | All of the above |
+| The search indexer's writes | `write_quiet` opened a database connection, its temp database and every statement afresh per write: the indexer took 46% of a quiet server's CPU | 107 messages a second went from 0.49 to 0.33 of a core (p50 2.0 to 1.7 ms) | `write_quiet` uses the pooled connection (`db::conn`), so the file, its temp database and its statements are kept |
 
 ## Settings
 
@@ -124,3 +125,83 @@ taskset -c 2,3 target/release/examples/load --scenario flood --steps 2000 --serv
 JSON summary (`--out`). A step breaks when sending or delivery passes 1 s or
 2 s at p99, when a process passes `--memory-mb`, or when calls fail. Each
 process's file descriptors, memory and CPU are printed with every step.
+
+`--live` makes everyone connect with `LiveService.Open` (focus on the home
+channel), as today's apps do; without it each person holds the older
+`Subscribe`, which sends every message whole. `--shared` puts every stream on
+one account (no per-person rows), for measuring what only the connections
+hold, and `--source-ips N` spreads client connections over N loopback
+addresses, about 20,000 ports each:
+
+```sh
+# 100,000 connections, one process, then a split instance.
+taskset -c 6,7 target/release/examples/load --mode single --server-cpus 0-5 \
+  --shared --source-ips 8 --steps 100000 --step-secs 20
+```
+
+## Hundreds of thousands
+
+Measured on an 8 vCPU ARM (Neoverse N1, 2.5 GHz) box with 32 GB, release
+build, data on tmpfs so the disk isn't in the numbers. The instance was
+pinned to 6 CPUs and the load generator to 2. Everyone is in one of 20
+servers and idle; the same 100,000 connections each time.
+
+| Part | 100,000 online | Per person | CPU | Open files |
+| --- | --- | --- | --- | --- |
+| One process | 12.1 GB | 0.12 MB | 0.35 core | 100,309 |
+| Split: gateway | 8.3 GB | 0.083 MB | 0.45 core | 101,164 |
+| Split: each shard | 1.6 GB | 0.016 MB | 0.30 core | ~560 |
+| Split: directory | 83 MB | | 0.31 core | 24 |
+
+Everyone was ready in 110 seconds (single) and 116 (split), with no errors.
+Per person, a stream costs 0.12 MB on one process and 0.083 MB on a gateway:
+the gateway pays for the connection, a shard only for the membership behind
+it. Memory is what stops one process: a 32 GB box holds about 250,000 idle.
+Splitting spreads that: four 16 GB gateways of 100,000 each and enough shards
+to hold the servers are 400,000.
+
+Sending many streams from one machine runs out of ephemeral ports before
+memory: `--source-ips` binds the load generator's connections to extra
+loopback addresses (about 20,000 each).
+
+What is not free is interaction, and it costs CPU by how many people have a
+channel on screen, not by how many are online:
+
+| Shape | What happened |
+| --- | --- |
+| One server's file | takes about 800 messages a second (p50 72 ms at it); more waits, then is told "busy" |
+| One message to 1,000 followers | about 100,000 deliveries a second took 2.7 cores of a shard and 3.0 of the gateway in front of it, p99 1.1 s: one channel's burst is one shard's, not the instance's |
+| The heavy ramp (a quarter chatting every 10 s, a 100/s channel, one big shared server) | broke at 10,000 online on 6 CPUs: 167,000 deliveries a second, p99 2.4 s. Deliveries, not people, are the ceiling: about 30,000 a second per core here |
+| `LiveService` with focus (today's apps) | out-of-focus messages move heads (a few bytes every 2 s), so a busy server costs what the people there have on screen; the same ramp at 10,000 broke on what was in focus |
+
+So 100,000 interacting at once is a question of how many people read each
+message. At 500 viewers and 100 messages a second a server spends about 1.5
+cores; ten such channels on ten shards fit ten 4-core machines. One channel
+that 100,000 people all have open at 1,000 messages a second is 100 million
+deliveries a second and would need that many cores spread over hundreds of
+shards; no app should show a channel like that, and fuwa's apps don't: a
+channel is whole only while it's on screen ([live](live.md)).
+
+## Clients
+
+The load generator is a client too, and it computes: about 50,000 events a
+second per core. When it had two cores of a six-core instance, deliveries
+stopped rising and p99 climbed; with more cores they improved. Provision it
+apart from the instance, or the numbers are the load generator's, not the
+server's.
+
+The web app, one tab on one channel (headless Chromium, 1280x800, the same
+instance; `desktop/tools/visual/client-load.mjs` runs it):
+
+| Messages a second in the open channel | Main-thread CPU | Frames | Long tasks |
+| --- | --- | --- | --- |
+| 10 | 30% of a core | 71/s | 5, 0.6 s in all |
+| 50 | 98% of a core | 46/s | 60, 6.2 s in all |
+| 100 | 1714 messages drawn, 48k DOM nodes | 0.2/s | one task of 140 s |
+| 200 | the tab died | | |
+
+One channel past about 10 messages a second starts dropping frames, and past
+50 it owns the tab; 100 is unusable and 200 kills it. The desktop app should
+be measured the same way. The fix lives on the client: apply a stream's
+events once a frame rather than one at a time, and cap what's drawn, as the
+desktop does with its cached message rows.
