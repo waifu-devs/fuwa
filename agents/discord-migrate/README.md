@@ -93,6 +93,31 @@ stops the run, to be picked up later.
 | `CHANNELS_AT_ONCE` | how many channels' histories are copied at once, `4` by default |
 | `MAX_FILE_MB` | files bigger than this are named in the message instead of copied, `25` by default |
 
+## Deploying on Railway
+
+fuwa.chat's Railway project runs the bot as the `discord-migrate` service
+([`.railway/railway.ts`](../../.railway/railway.ts), `DISCORD_MIGRATE`). Railway
+builds it from this folder's Dockerfile whenever master changes it, with a 1 GB
+volume at `/data` for `DATA_DIR`. Only two things are set by hand, as shared
+variables of the project's production environment (Project settings > Shared
+Variables), before the change that adds it is merged:
+
+| Shared variable | What it is |
+| --- | --- |
+| `DISCORD_MIGRATE_DISCORD_TOKEN` | The Discord bot's token: [Developer Portal](https://discord.com/developers/applications) > your application > Bot > Reset Token |
+| `DISCORD_MIGRATE_FUWA_TOKEN` | The fuwa agent's token: on fuwa.chat, Settings > Agents > Create agent (any username, such as `migrate`); the token is shown once |
+
+On the Discord application's Bot page, also turn on the **Message Content**
+intent (under Privileged Gateway Intents), or no history comes over, and you
+can turn off Public Bot to keep others from adding it. Nothing else needs
+setting: `FUWA_URL` is fuwa.chat, and the other settings below keep their
+defaults (add one to the service's `env` in railway.ts to change it).
+
+Merging a change to `.railway/` applies it (the pull request gets a plan
+comment first). Once the service is up, its log has the link that adds the bot
+to a Discord server: Railway > `discord-migrate` > Deployments > View logs,
+the line `Add it to a server with https://discord.com/oauth2/...`.
+
 ## Running it
 
 ```sh

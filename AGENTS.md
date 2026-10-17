@@ -57,6 +57,10 @@
   on npm has them, and turns sounds into Ogg Opus (ffmpeg); on an instance
   without the service, sounds are skipped. Its own pnpm package, from the SDK
   on npm; `test/instance.test.ts` runs the fuwa side against `FUWA_BIN`.
+  fuwa.chat runs it as the `discord-migrate` service in `.railway/railway.ts`
+  (`DISCORD_MIGRATE`), with a volume for `DATA_DIR` and its two tokens as
+  shared variables (`DISCORD_MIGRATE_DISCORD_TOKEN`,
+  `DISCORD_MIGRATE_FUWA_TOKEN`), set by hand.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
