@@ -4,7 +4,6 @@
   "language.matchSystem": "Как на компьютере",
   "language.matchBrowserNote": "Сейчас это {language}",
   "language.coverage": "Переведено: {percent}",
-  "language.draft": "Машинный черновик, носитель языка ещё не проверял",
   "language.failed": "Не удалось загрузить этот язык. Проверьте подключение и попробуйте ещё раз.",
   "screen.title": "Настройки",
   "screen.allSettings": "Все настройки",

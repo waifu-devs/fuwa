@@ -4,7 +4,6 @@
   "language.matchSystem": "ตามคอมพิวเตอร์",
   "language.matchBrowserNote": "ขณะนี้คือ {language}",
   "language.coverage": "แปลแล้ว {percent}",
-  "language.draft": "ฉบับร่างจากเครื่อง ยังไม่ได้ตรวจโดยเจ้าของภาษา",
   "language.failed": "โหลดภาษานั้นไม่ได้ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
   "screen.title": "การตั้งค่า",
   "screen.allSettings": "การตั้งค่าทั้งหมด",

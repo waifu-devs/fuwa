@@ -4,7 +4,6 @@
   "language.matchSystem": "與電腦相同",
   "language.matchBrowserNote": "目前為 {language}",
   "language.coverage": "已翻譯 {percent}",
-  "language.draft": "機器翻譯草稿，尚未經母語人士校對",
   "language.failed": "無法載入該語言。請檢查網路連線後再試一次。",
   "screen.title": "設定",
   "screen.allSettings": "所有設定",

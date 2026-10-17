@@ -4,7 +4,6 @@
   "language.matchSystem": "コンピューターに合わせる",
   "language.matchBrowserNote": "現在は{language}です",
   "language.coverage": "{percent}翻訳済み",
-  "language.draft": "機械翻訳の下書きです（ネイティブスピーカーによる確認前）",
   "language.failed": "その言語を読み込めませんでした。接続を確認して、もう一度お試しください。",
   "screen.title": "設定",
   "screen.allSettings": "すべての設定",

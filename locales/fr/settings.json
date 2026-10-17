@@ -4,7 +4,6 @@
   "language.matchSystem": "Comme mon ordinateur",
   "language.matchBrowserNote": "Actuellement : {language}",
   "language.coverage": "{percent} traduit",
-  "language.draft": "Brouillon automatique, pas encore relu par un locuteur",
   "language.failed": "Impossible de charger cette langue. Vérifie ta connexion et réessaie.",
   "screen.title": "Paramètres",
   "screen.allSettings": "Tous les paramètres",

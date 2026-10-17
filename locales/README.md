@@ -11,8 +11,8 @@ Adding a language is adding a folder:
 - `meta.json`: `name` (the language's own name for itself), `english` (its name in
   English), `dir` (`ltr` or `rtl`), `plural` (the rule family, as in `en/meta.json`;
   the web app asks the browser for plural rules, the desktop app uses this), and
-  `reviewed` (false while it's a draft nobody who speaks it has checked; the
-  picker then says so).
+  `reviewed` (false while it's a draft nobody who speaks it has checked).
+- `flag.svg`: the flag the language pickers show next to it, drawn 4:3 (640×480).
 - Any of the namespace files English has (`common.json`, ...), with any subset of
   its keys.
 

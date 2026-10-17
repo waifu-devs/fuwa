@@ -25,6 +25,9 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
   import: "default",
 });
 
+// Each language's flag, a small SVG next to its catalogs.
+const flags = import.meta.glob<string>("../../../locales/*/flag.svg", { eager: true, query: "?url", import: "default" });
+
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
 export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chat: englishChat, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, system: englishSystem, tiles: englishTiles, workspace: englishWorkspace } as const;
@@ -44,6 +47,9 @@ export const CODES: readonly string[] = LANGUAGES.map((language) => language.cod
 export const shipped = (code: string | null | undefined): string => (code && CODES.includes(code) ? code : "en");
 
 export const languageOf = (code: string): Language => LANGUAGES.find((language) => language.code === code) ?? LANGUAGES[0];
+
+/** The URL of a shipped language's flag. */
+export const flagOf = (code: string): string | undefined => flags[`../../../locales/${shipped(code)}/flag.svg`];
 
 const loaded = new Map<string, Promise<Catalog>>([["en", Promise.resolve(english)]]);
 

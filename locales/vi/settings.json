@@ -4,7 +4,6 @@
   "language.matchSystem": "Theo máy tính",
   "language.matchBrowserNote": "Hiện tại là {language}",
   "language.coverage": "Đã dịch {percent}",
-  "language.draft": "Bản dịch máy, chưa được người bản ngữ kiểm tra",
   "language.failed": "Không thể tải ngôn ngữ đó. Hãy kiểm tra kết nối và thử lại.",
   "screen.title": "Cài đặt",
   "screen.allSettings": "Tất cả cài đặt",

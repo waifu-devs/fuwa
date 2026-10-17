@@ -4,7 +4,6 @@
   "language.matchSystem": "Ikuti komputer saya",
   "language.matchBrowserNote": "Saat ini: {language}",
   "language.coverage": "{percent} diterjemahkan",
-  "language.draft": "Draf mesin, belum diperiksa penutur asli",
   "language.failed": "Tidak dapat memuat bahasa tersebut. Periksa koneksi Anda dan coba lagi.",
   "screen.title": "Pengaturan",
   "screen.allSettings": "Semua pengaturan",

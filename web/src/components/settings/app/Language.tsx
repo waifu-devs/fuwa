@@ -1,9 +1,9 @@
-import { LanguagesIcon, MonitorIcon } from "lucide-react";
+import { MonitorIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SPRING } from "@/lib/motion";
 import { Choice } from "@/components/settings/controls";
-import { coverage, LANGUAGES, languageOf, loadCatalog } from "@/i18n/catalogs";
+import { coverage, flagOf, LANGUAGES, languageOf, loadCatalog } from "@/i18n/catalogs";
 import { browserLanguage, switchLanguage } from "@/i18n/i18n";
 import { useI18n } from "@/i18n/react";
 import { setPrefs, usePrefs } from "@/lib/prefs";
@@ -25,6 +25,9 @@ function useCoverage() {
   return shares;
 }
 
+/** A language's flag, small enough for a choice card's icon. */
+const Flag = ({ code }: { code: string }) => <img src={flagOf(code)} alt="" className="h-[15px] w-5 rounded-[2px] object-cover shadow-[0_0_0_1px_rgb(0_0_0/0.15)]" />;
+
 export function Language() {
   const { t, number } = useI18n();
   const language = usePrefs((p) => p.language);
@@ -39,7 +42,7 @@ export function Language() {
   const note = (code: string) => {
     const l = languageOf(code);
     const share = shares[code];
-    return [l.english !== l.name ? l.english : null, share !== undefined && share < 1 ? t("settings.language.coverage", { percent: number(share, { style: "percent" }) }) : null, l.reviewed ? null : t("settings.language.draft")]
+    return [l.english !== l.name ? l.english : null, share !== undefined && share < 1 ? t("settings.language.coverage", { percent: number(share, { style: "percent" }) }) : null]
       .filter(Boolean)
       .join(" · ");
   };
@@ -56,7 +59,7 @@ export function Language() {
               hint: t("settings.language.matchBrowserNote", { language: languageOf(browserLanguage()).name }),
               icon: <MonitorIcon className="size-4" />,
             },
-            ...LANGUAGES.map((l) => ({ value: l.code, label: l.name, hint: note(l.code), icon: <LanguagesIcon className="size-4" /> })),
+            ...LANGUAGES.map((l) => ({ value: l.code, label: l.name, hint: note(l.code), icon: <Flag code={l.code} /> })),
           ]}
         />
         <AnimatePresence initial={false}>

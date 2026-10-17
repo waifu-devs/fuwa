@@ -48,6 +48,12 @@ impl AssetSource for Assets {
             );
             return Ok(Some(Cow::Owned(svg.into_bytes())));
         }
+        // Each language's flag, from locales/ as the web app's.
+        if let Some(svg) =
+            path.strip_prefix("flags/").and_then(|n| n.strip_suffix(".svg")).and_then(crate::core::i18n::flag)
+        {
+            return Ok(Some(Cow::Borrowed(svg)));
+        }
         // Profile effects' shapes, drawn from their paths.
         if let Some(shape) = path
             .strip_prefix("fx/")

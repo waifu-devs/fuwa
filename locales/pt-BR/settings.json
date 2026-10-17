@@ -4,7 +4,6 @@
   "language.matchSystem": "Igual ao meu computador",
   "language.matchBrowserNote": "No momento, é {language}",
   "language.coverage": "{percent} traduzido",
-  "language.draft": "Rascunho automático, ainda não revisado por um falante",
   "language.failed": "Não foi possível carregar esse idioma. Verifique sua conexão e tente de novo.",
   "screen.title": "Configurações",
   "screen.allSettings": "Todas as configurações",

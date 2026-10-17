@@ -1,6 +1,6 @@
 //! The Language page, as the web's `settings/app/Language.tsx`: "Like my
 //! computer", then every language this build ships (`core::i18n`, the same
-//! catalogs as the web app), as option cards with how much of each is there.
+//! catalogs as the web app), as option cards with each one's flag and how much of it is there.
 
 use gpui_kit::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Window, div};
 
@@ -43,10 +43,7 @@ impl SettingsView {
                 let percent = (share * 100.0).floor() as i64;
                 notes.push(t_with("settings.language.coverage", &[("percent", Arg::Str(&format!("{percent}%")))]));
             }
-            if !l.meta.reviewed {
-                notes.push(t("settings.language.draft"));
-            }
-            options.push(Opt::new(l.meta.name.clone(), notes.join(" · "), "languages"));
+            options.push(Opt::new(l.meta.name.clone(), notes.join(" · "), "languages").flag(&l.code));
             codes.push(Some(l.code.clone()));
         }
         let at = codes.iter().position(|c| *c == chosen);

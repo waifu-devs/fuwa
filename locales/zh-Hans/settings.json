@@ -4,7 +4,6 @@
   "language.matchSystem": "跟随系统",
   "language.matchBrowserNote": "当前为 {language}",
   "language.coverage": "已翻译 {percent}",
-  "language.draft": "机器翻译草稿，尚未经母语者审校",
   "language.failed": "无法加载该语言。请检查网络连接后重试。",
   "screen.title": "设置",
   "screen.allSettings": "所有设置",

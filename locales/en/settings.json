@@ -4,7 +4,6 @@
   "language.matchSystem": "Like my computer",
   "language.matchBrowserNote": "Right now that's {language}",
   "language.coverage": "{percent} translated",
-  "language.draft": "Machine draft, not yet checked by a speaker",
   "language.failed": "Couldn't load that language. Check your connection and try again.",
   "screen.title": "Settings",
   "screen.allSettings": "All settings",
