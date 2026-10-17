@@ -3,6 +3,7 @@
 import {
   ChannelType,
   type Guild,
+  type AnyThreadChannel,
   type GuildBasedChannel,
   type Message,
   OverwriteType,
@@ -18,6 +19,8 @@ import {
   type SourceChannelKind,
   type SourceGuild,
   type SourceMessage,
+  type SourceSound,
+  type SourceThread,
 } from "./model.ts";
 
 const PAGE = 100;
@@ -31,11 +34,12 @@ export class DiscordSource implements Source {
 
   async guild(): Promise<SourceGuild> {
     const g = this.#guild;
-    const [roles, channels, emojis, stickers] = await Promise.all([
+    const [roles, channels, emojis, stickers, sounds] = await Promise.all([
       g.roles.fetch(),
       g.channels.fetch(),
       g.emojis.fetch(),
       g.stickers.fetch(),
+      this.#sounds(),
     ]);
     return {
       id: g.id,
@@ -74,19 +78,60 @@ export class DiscordSource implements Source {
                 ? "apng"
                 : "png",
       })),
+      sounds,
     };
   }
 
-  async *messages(channelId: string, limit: number, after?: string): AsyncIterable<SourceMessage> {
-    const channel = await this.#guild.channels.fetch(channelId);
-    if (!channel?.isTextBased()) return;
+  async #sounds(): Promise<SourceSound[]> {
+    const sounds = await this.#guild.soundboardSounds.fetch();
+    return [...sounds.values()].map((s) => ({
+      id: String(s.soundId),
+      name: s.name,
+      url: s.url,
+      volume: s.volume,
+      emojiId: s.emoji?.id ?? undefined,
+      emojiName: s.emoji?.name ?? undefined,
+    }));
+  }
+
+  /** A channel or thread of this guild the bot can read, or Refused. */
+  async #readable(channelId: string): Promise<GuildBasedChannel | undefined> {
+    const channel = await this.#guild.client.channels.fetch(channelId);
+    if (!channel || !("guildId" in channel) || channel.guildId !== this.#guild.id) return undefined;
     const me = this.#guild.members.me;
     if (
       !me ||
-      !channel.permissionsFor(me).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])
+      !channel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])
     ) {
       throw new Refused("the bot can't read it on Discord");
     }
+    return channel;
+  }
+
+  async forumPosts(channelId: string, limit: number): Promise<SourceThread[]> {
+    const channel = await this.#readable(channelId);
+    if (!channel || (channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildMedia)) return [];
+    const posts = new Map<string, AnyThreadChannel>();
+    for (const [id, t] of (await channel.threads.fetchActive(false)).threads) {
+      if (t.parentId === channel.id) posts.set(id, t);
+    }
+    for (let before: AnyThreadChannel | undefined; ; ) {
+      const page = await channel.threads.fetchArchived({ type: "public", before, limit: PAGE }, false);
+      for (const [id, t] of page.threads) posts.set(id, t);
+      const last = [...page.threads.values()].at(-1);
+      if (!page.hasMore || !last) break;
+      before = last;
+    }
+    return [...posts.values()]
+      .filter((t) => t.type === ChannelType.PublicThread)
+      .sort((a, b) => compareIds(a.id, b.id))
+      .slice(-limit)
+      .map((t) => ({ id: t.id, name: t.name }));
+  }
+
+  async *messages(channelId: string, limit: number, after?: string): AsyncIterable<SourceMessage> {
+    const channel = await this.#readable(channelId);
+    if (!channel?.isTextBased()) return;
     // Walk back to where the window starts, counting only, then read forward
     // a page at a time, so files' links (which Discord signs for a day) are
     // fresh when they're downloaded.
@@ -222,5 +267,13 @@ async function messageOf(message: Message): Promise<SourceMessage> {
       })),
     stickers: [...message.stickers.values()].map((s) => s.name),
     mentionedUsers,
+    // A thread started from a message has the message's id.
+    threadId: message.hasThread ? (message.thread?.id ?? message.id) : undefined,
+    reactions: [...message.reactions.cache.values()].map((r) => ({
+      emoji: r.emoji.id
+        ? `<${r.emoji.animated ? "a" : ""}:${r.emoji.name ?? "emoji"}:${r.emoji.id}>`
+        : (r.emoji.name ?? "?"),
+      count: r.count,
+    })),
   };
 }

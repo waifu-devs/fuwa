@@ -47,13 +47,16 @@
   Administrator there. `src/migrate.ts` runs the steps over the two sides in
   `src/model.ts` (`src/discord.ts` reads through discord.js, `src/fuwa.ts`
   writes through the SDK, history through a webhook per channel so messages
-  keep their authors' names and pictures), writing each step down per pair of
+  keep their authors' names and pictures; thread replies from the agent, since
+  webhooks can't post in threads), writing each step down per pair of
   servers (`src/state.ts`, `DATA_DIR`) so a stopped run picks up where it left
   off. `Refused` marks one thing that can't be copied, for good: it's skipped
   and listed in the summary; anything else stops the run. `src/convert.ts`
-  (pure) maps permissions, channel order, names and message text. Its own
-  pnpm package, from the SDK on npm; `test/instance.test.ts` runs the fuwa
-  side against `FUWA_BIN`.
+  (pure) maps permissions, channel order, names and message text.
+  `src/soundboard.ts` describes SoundboardService's calls itself until the SDK
+  on npm has them, and turns sounds into Ogg Opus (ffmpeg); on an instance
+  without the service, sounds are skipped. Its own pnpm package, from the SDK
+  on npm; `test/instance.test.ts` runs the fuwa side against `FUWA_BIN`.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.

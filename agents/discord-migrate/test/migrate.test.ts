@@ -32,6 +32,7 @@ function message(id: string, extra: Partial<SourceMessage> = {}): SourceMessage 
     embeds: [],
     stickers: [],
     mentionedUsers: {},
+    reactions: [],
     ...extra,
   };
 }
@@ -130,12 +131,16 @@ const guild: SourceGuild = {
     { id: "s-cat", name: "cat", url: "https://cdn/cat.png", format: "png" },
     { id: "s-lottie", name: "dance", url: "https://cdn/dance.json", format: "lottie" },
   ],
+  sounds: [
+    { id: "snd-1", name: "airhorn", url: "https://cdn/airhorn.mp3", volume: 0.5, emojiId: "400", emojiName: "wave" },
+    { id: "snd-2", name: "Airhorn", url: "https://cdn/airhorn2.mp3", volume: 1, emojiName: "📯" },
+  ],
 };
 
 class FakeSource implements Source {
   history: Record<string, SourceMessage[]> = {
     "c-general": [
-      message("10", { content: "hi <:wave:400> <#302>" }),
+      message("10", { content: "hi <:wave:400> <#302>", threadId: "10" }),
       message("11", { system: true, content: "" }),
       message("12", {
         authorName: "bob",
@@ -150,6 +155,26 @@ class FakeSource implements Source {
       message("13", { at: T0 + DAY, content: "x".repeat(4500) }),
     ],
     "302": [message("20", { content: "secret plans" })],
+    // The thread started from message 10: Discord's starter message, then a reply.
+    "10": [
+      message("10", { system: true, content: "" }),
+      message("15", {
+        authorName: "bob",
+        content: "in a thread",
+        attachments: [{ name: "dog.png", url: "https://cdn/files/dog.png", size: 3, spoiler: false }],
+      }),
+    ],
+    // A forum post: its first message has the post's id.
+    "50": [
+      message("50", { authorName: "carol", content: "I can't find the invite" }),
+      message("51", {
+        content: "use the link",
+        reactions: [
+          { emoji: "<:wave:400>", count: 2 },
+          { emoji: "👍", count: 1 },
+        ],
+      }),
+    ],
   };
   reads: string[] = [];
 
@@ -165,6 +190,10 @@ class FakeSource implements Source {
       this.reads.push(m.id);
       yield m;
     }
+  }
+
+  async forumPosts(channelId: string) {
+    return channelId === "c-forum" ? [{ id: "50", name: "How do I join?" }] : [];
   }
 
   async download(url: string): Promise<Download> {
@@ -191,8 +220,10 @@ class FakeTarget implements Target {
   }[] = [];
   channelOrder: { id: string; parentId?: string }[] = [];
   emojis: { id: string; name: string }[] = [];
-  posts: { hook: string; post: TargetPost }[] = [];
+  posts: { hook: string; post: TargetPost; id: string }[] = [];
   files: { channelId: string; content: string; files: TargetFile[] }[] = [];
+  replies: { channelId: string; threadId: string; content: string; files: string[] }[] = [];
+  sounds: { name: string; emoji: string; volume: number }[] = [];
   pins: string[] = [];
   hooks = new Set<string>();
   lack: string[] = [];
@@ -247,12 +278,24 @@ class FakeTarget implements Target {
   }
   async post(hook: Hook, post: TargetPost) {
     if (this.posts.length >= this.failAfterPosts) throw new Error("the instance went away");
-    this.posts.push({ hook: hook.channelId, post });
-    return this.#id("msg");
+    const id = this.#id("msg");
+    this.posts.push({ hook: hook.channelId, post, id });
+    return id;
   }
   async sendFiles(channelId: string, content: string, files: TargetFile[]) {
     this.files.push({ channelId, content, files });
     return this.#id("msg");
+  }
+  async reply(channelId: string, threadId: string, content: string, files: TargetFile[]) {
+    this.replies.push({ channelId, threadId, content, files: files.map((f) => f.name) });
+    return this.#id("msg");
+  }
+  hasSounds = true;
+  async soundboard() {
+    return this.hasSounds;
+  }
+  async createSound(sound: { name: string; emoji: string; volume: number }) {
+    this.sounds.push({ name: sound.name, emoji: sound.emoji, volume: sound.volume });
   }
   async pin(_channelId: string, messageId: string) {
     this.pins.push(messageId);
@@ -312,6 +355,12 @@ test("a whole server comes over", async () => {
     ["wave", "cat"],
   );
 
+  // Sounds, with their emoji, names that don't clash.
+  assert.deepEqual(target.sounds, [
+    { name: "airhorn", emoji: `<:wave:${target.emojis[0]!.id}>`, volume: 0.5 },
+    { name: "Airhorn 2", emoji: "📯", volume: 1 },
+  ]);
+
   // History: a divider per day, authors' names and pictures, links rewritten.
   const general = target.posts.filter((p) => p.hook === chan("general").id).map((p) => p.post);
   const wave = target.emojis.find((e) => e.name === "wave")!;
@@ -335,27 +384,58 @@ test("a whole server comes over", async () => {
   assert.equal(target.pins.length, 1);
   assert.equal(target.hooks.size, 0, "the webhooks are deleted afterwards");
 
+  // The thread under alice's message, its reply from the agent with bob's name and file.
+  const anchor = target.posts.find((p) => p.post.content.startsWith("hi "))!.id;
+  assert.deepEqual(
+    target.replies.filter((r) => r.channelId === chan("general").id),
+    [
+      {
+        channelId: chan("general").id,
+        threadId: anchor,
+        content: `**bob** · <t:${T0 / 1000}:f>\nin a thread`,
+        files: ["dog.png"],
+      },
+    ],
+  );
+
+  // The forum post: its first message through the webhook with the title, the rest in its thread.
+  const help = target.posts.filter((p) => p.hook === chan("help").id).map((p) => p.post);
+  assert.deepEqual(
+    help.map((p) => [p.username, p.content]),
+    [["carol", "**How do I join?**\nI can't find the invite"]],
+  );
+  assert.equal(target.replies[0]!.threadId, target.posts.find((p) => p.hook === chan("help").id)!.id);
+  assert.equal(
+    target.replies[0]!.content,
+    `**alice** · <t:${T0 / 1000}:f>\nuse the link\n*Reactions: <:wave:${wave.id}> 2 · 👍 1*`,
+  );
+
   assert.equal(report.phase, "done");
-  assert.equal(report.messages, 4);
-  assert.equal(report.files, 1);
+  assert.equal(report.messages, 7);
+  assert.equal(report.threads, 2);
+  assert.equal(report.files, 2);
   assert.equal(report.pins, 1);
-  assert.equal(report.historyDone, 2);
+  assert.equal(report.historyDone, 3);
+  assert.equal(report.sounds, 2);
   assert.equal(report.invite, "https://fuwa.example/invite/abc");
   assert.ok(report.skipped.some((s) => s.includes("dance")));
-  assert.ok(report.skipped.some((s) => s.includes("#help's posts")));
   assert.ok(report.skipped.some((s) => s.includes("#directory")));
 
   const summary = summaryText(report);
-  assert.match(summary, /2 roles, 5 channels, 1 emoji, 1 sticker, 4 messages, 1 file and 1 pin/);
+  assert.match(
+    summary,
+    /2 roles, 5 channels, 1 emoji, 1 sticker, 2 sounds, 7 messages \(with 2 threads\), 2 files and 1 pin/,
+  );
   assert.match(summary, /https:\/\/fuwa\.example\/invite\/abc/);
-  assert.match(progressText(report, true), /✅ History: 2 of 2 channels, 4 messages, 1 file/);
+  assert.match(progressText(report, true), /✅ 2 sounds/);
+  assert.match(progressText(report, true), /✅ History: 3 of 3 channels, 7 messages, 2 threads, 2 files/);
 });
 
 test("a stopped run picks up where it left off, copying nothing twice", async () => {
   const source = new FakeSource();
   const store = new MemoryStore();
   const first = new FakeTarget();
-  first.failAfterPosts = 3;
+  first.failAfterPosts = 4;
   await assert.rejects(migrate(source, first, store, options), /went away/);
   assert.equal(first.hooks.size, 0);
 
@@ -369,15 +449,41 @@ test("a stopped run picks up where it left off, copying nothing twice", async ()
   const posted = [...first.posts, ...second.posts].filter((p) => p.post.username !== IMPORTER_NAME);
   assert.deepEqual(
     posted.map((p) => p.post.content.slice(0, 12)),
-    ["hi <:wave:em", "*(a file not", "xxxxxxxxxxxx", "xxxxxxxxxxxx", "secret plans"],
+    ["**How do I j", "hi <:wave:em", "*(a file not", "xxxxxxxxxxxx", "xxxxxxxxxxxx", "secret plans"],
   );
+  // The thread under message 10 still comes over, under the copy made before the stop.
+  assert.deepEqual(
+    [...first.replies, ...second.replies].map((r) => r.content.split("\n")[1]),
+    ["use the link", "in a thread"],
+  );
+  assert.equal(second.replies[0]!.threadId, first.posts.find((p) => p.post.content.startsWith("hi "))!.id);
   // The second day's divider went out before the stop, so it isn't posted again.
   const general = second.channels.length ? [] : second.posts.filter((p) => p.hook === first.channels[2]!.id);
   assert.deepEqual(
     general.filter((p) => p.post.username === IMPORTER_NAME),
     [],
   );
-  assert.equal(report.messages, 4);
+  assert.equal(report.messages, 7);
+});
+
+test("on a fuwa without a soundboard, the rest still comes over", async () => {
+  const target = new FakeTarget();
+  target.hasSounds = false;
+  const withExpressions = {
+    ...guild,
+    roles: guild.roles.map((r) =>
+      r.id === "r-mod" ? { ...r, permissions: r.permissions | (1n << 30n) | (1n << 42n) } : r,
+    ),
+  };
+  const source = new FakeSource();
+  source.guild = async () => withExpressions;
+  const report = await migrate(source, target, new MemoryStore(), { ...options, messagesPerChannel: 0 });
+  assert.deepEqual(target.sounds, []);
+  assert.deepEqual(target.roles.find((r) => r.name === "Mod")!.permissions, [
+    Permission.MANAGE_MESSAGES,
+    Permission.MANAGE_EMOJI,
+  ]);
+  assert.ok(report.skipped.includes("2 sounds (this fuwa has no soundboard yet)"));
 });
 
 test("history can be left out, and nothing starts without the permissions", async () => {

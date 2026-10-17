@@ -4,6 +4,7 @@
 // member sees it. Skipped without FUWA_BIN; run with `pnpm test:instance`.
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ import { Agent, ChannelType, type Fuwa, Permission, createFuwa, messages } from 
 import { FuwaTarget } from "../src/fuwa.ts";
 import { IMPORTER_NAME, migrate } from "../src/migrate.ts";
 import type { Download, Source, SourceGuild, SourceMessage } from "../src/model.ts";
+import { hasSoundboard, soundboard } from "../src/soundboard.ts";
 import { MemoryStore } from "../src/state.ts";
 
 const bin = process.env.FUWA_BIN;
@@ -23,6 +25,19 @@ const PIXEL = Uint8Array.from(
   atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="),
   (c) => c.charCodeAt(0),
 );
+
+// Two seconds of a tone as MP3, as Discord keeps sounds, when ffmpeg is here to make it.
+let mp3: Uint8Array | undefined;
+try {
+  mp3 = new Uint8Array(
+    execFileSync("ffmpeg", [
+      ...["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2"],
+      ...["-c:a", "libmp3lame", "-f", "mp3", "pipe:1"],
+    ]),
+  );
+} catch {
+  // no ffmpeg: no sounds
+}
 
 let child: ChildProcess | undefined;
 let data = "";
@@ -138,6 +153,7 @@ const guild: SourceGuild = {
         { id: "200", kind: "role", allow: 1n << 10n, deny: 0n },
       ],
     },
+    { id: "304", name: "help", kind: "forum", position: 2, topic: "", slowmodeSeconds: 0, overwrites: [] },
     {
       id: "303",
       name: "Lounge",
@@ -151,6 +167,18 @@ const guild: SourceGuild = {
   ],
   emojis: [{ id: "400", name: "blob-wave", url: "https://cdn.example/emoji.png", animated: false }],
   stickers: [],
+  sounds: mp3
+    ? [
+        {
+          id: "500",
+          name: "beep",
+          url: "https://cdn.example/beep.mp3",
+          volume: 0.5,
+          emojiId: "400",
+          emojiName: "blob-wave",
+        },
+      ]
+    : [],
 };
 
 const at = Date.UTC(2023, 4, 1, 9);
@@ -167,6 +195,8 @@ const history: Record<string, SourceMessage[]> = {
       embeds: [],
       stickers: [],
       mentionedUsers: {},
+      reactions: [{ emoji: "👍", count: 2 }],
+      threadId: "1000",
     },
     {
       id: "1001",
@@ -189,6 +219,51 @@ const history: Record<string, SourceMessage[]> = {
       embeds: [{ title: "A card", description: "from a bot", fields: [] }],
       stickers: [],
       mentionedUsers: {},
+      reactions: [],
+    },
+  ],
+  // The thread on alice's message, and a forum post.
+  "1000": [
+    {
+      id: "1002",
+      authorName: "carol",
+      at: at + 120_000,
+      content: "in the thread",
+      system: false,
+      pinned: false,
+      attachments: [],
+      embeds: [],
+      stickers: [],
+      mentionedUsers: {},
+      reactions: [],
+    },
+  ],
+  "2000": [
+    {
+      id: "2000",
+      authorName: "dave",
+      at,
+      content: "how do I join?",
+      system: false,
+      pinned: false,
+      attachments: [],
+      embeds: [],
+      stickers: [],
+      mentionedUsers: {},
+      reactions: [],
+    },
+    {
+      id: "2001",
+      authorName: "alice",
+      at: at + 60_000,
+      content: "with the invite",
+      system: false,
+      pinned: false,
+      attachments: [],
+      embeds: [],
+      stickers: [],
+      mentionedUsers: {},
+      reactions: [],
     },
   ],
 };
@@ -198,7 +273,9 @@ const source: Source = {
   async *messages(channelId, limit, after) {
     for (const m of (history[channelId] ?? []).slice(-limit)) if (!after || BigInt(m.id) > BigInt(after)) yield m;
   },
-  download: async (): Promise<Download> => ({ bytes: PIXEL, contentType: "image/png" }),
+  forumPosts: async (channelId) => (channelId === "304" ? [{ id: "2000", name: "Joining" }] : []),
+  download: async (url): Promise<Download> =>
+    url.endsWith(".mp3") ? { bytes: mp3!, contentType: "audio/mpeg" } : { bytes: PIXEL, contentType: "image/png" },
 };
 
 test("without Administrator, the agent says what it needs", { skip }, async () => {
@@ -216,7 +293,9 @@ test("a Discord server comes over, as members see it", { skip }, async () => {
     channelsAtOnce: 2,
     maxFileBytes: 1 << 20,
   });
-  assert.deepEqual(report.skipped, []);
+  const sounds = soundboard(person.transport);
+  const withSounds = await hasSoundboard(sounds, serverId);
+  assert.deepEqual(report.skipped, withSounds || !mp3 ? [] : ["The sound (this fuwa has no soundboard yet)"]);
 
   const { server } = await person.servers.getServer({ serverId });
   assert.equal(server!.name, "Cozy Corner");
@@ -245,8 +324,8 @@ test("a Discord server comes over, as members see it", { skip }, async () => {
   assert.equal(named("Lounge").type, ChannelType.VOICE);
   // Discord's order comes first; the server's own channels follow.
   assert.deepEqual(
-    channels.slice(0, 4).map((c) => c.name),
-    ["Text Channels", "general", "mod-chat", "Lounge"],
+    channels.slice(0, 5).map((c) => c.name),
+    ["help", "Text Channels", "general", "mod-chat", "Lounge"],
   );
   const modChat = named("mod-chat");
   const hidden = modChat.permissionOverwrites.find((o) => o.targetId === serverId)!;
@@ -268,7 +347,7 @@ test("a Discord server comes over, as members see it", { skip }, async () => {
     [IMPORTER_NAME, "alice", "bob", "agent: Files from **bob**"],
   );
   assert.equal(general[0]!.content, `── <t:${at / 1000}:D> ──`);
-  assert.equal(general[1]!.content, `hello <:blob_wave:${emojis[0]!.id}> see <#${modChat.id}>`);
+  assert.equal(general[1]!.content, `hello <:blob_wave:${emojis[0]!.id}> see <#${modChat.id}>\n*Reactions: 👍 2*`);
   assert.equal(general[2]!.content, "> ↪ **alice**: hello\na picture");
   assert.equal(general[2]!.embeds[0]!.title, "A card");
   assert.equal(general[3]!.attachments[0]!.filename, "pixel.png");
@@ -277,6 +356,40 @@ test("a Discord server comes over, as members see it", { skip }, async () => {
     pins.map((m) => m.id),
     [general[1]!.id],
   );
+
+  // The thread under alice's message, from the agent with carol's name.
+  const thread = await person.messages.listMessages({
+    serverId,
+    channelId: named("general").id,
+    threadId: general[1]!.id,
+  });
+  assert.deepEqual(
+    thread.messages.map((m) => m.content),
+    [`**carol** · <t:${(at + 120_000) / 1000}:f>\nin the thread`],
+  );
+
+  // The forum post: its first message with the title, and its reply in the thread.
+  const help = [];
+  for await (const { message } of messages(person, { serverId, channelId: named("help").id })) help.unshift(message);
+  assert.deepEqual(
+    help.map((m) => [m.webhook?.name, m.content]),
+    [["dave", "**Joining**\nhow do I join?"]],
+  );
+  const post = await person.messages.listMessages({ serverId, channelId: named("help").id, threadId: help[0]!.id });
+  assert.deepEqual(
+    post.messages.map((m) => m.content),
+    [`**alice** · <t:${(at + 60_000) / 1000}:f>\nwith the invite`],
+  );
+
+  // The sound, as Ogg Opus with its emoji, where the instance has a soundboard.
+  if (withSounds && mp3) {
+    const { sounds: list } = await sounds.listSounds({ serverId });
+    assert.deepEqual(
+      list.map((x) => [x.name, x.emoji, x.volume]),
+      [["beep", `<:blob_wave:${emojis[0]!.id}>`, 0.5]],
+    );
+    assert.ok(list[0]!.durationMs > 1900 && list[0]!.durationMs <= 2100, `${list[0]!.durationMs} ms`);
+  }
 
   // The webhooks are gone, and the invite lets people in.
   assert.deepEqual((await person.webhooks.listWebhooks({ serverId })).webhooks, []);

@@ -37,15 +37,24 @@ done.
 | @everyone's permissions | @everyone's |
 | Categories, text, announcement and voice channels (stage channels as voice), in order, with topics and slow mode | The same kinds |
 | Channel permission overwrites for roles | Overwrites, for what fuwa lets channels change |
-| Forum and media channels | Text channels, without their posts |
+| Forum and media channels | Text channels: each post opens with its first message, titled, and the rest is its thread |
 | Custom emoji, and PNG, APNG and GIF stickers | Custom emoji (names made to fit fuwa's rules) |
+| Soundboard sounds, with their emoji and volume | Soundboard sounds, turned into Ogg Opus with ffmpeg ([docs/soundboard.md](../../docs/soundboard.md)) |
 | Members | One invite that never runs out |
-| Each text channel's latest messages | Posted through a webhook per channel under each author's name and picture, with replies quoted, mentions of roles, channels and emoji pointing at the copies, bots' embeds, a divider at each new day (a timestamp everyone reads in their own time zone), files sent right after by the agent, and pins pinned again |
+| Each text channel's latest messages | Posted through a webhook per channel under each author's name and picture, with replies quoted, mentions of roles, channels and emoji pointing at the copies, bots' embeds, reactions listed under each message, a divider at each new day (a timestamp everyone reads in their own time zone), files sent right after by the agent, and pins pinned again |
+| Threads started from those messages | Threads under the copies. fuwa's webhooks can't post in threads, so the agent posts each reply, starting with its author's name and when they said it |
 
-Never copied: members' roles (people join with the invite), threads and forum
-posts, reactions, Lottie stickers, and member overwrites. Old messages are
-posted now, so they carry the time they were copied; the day dividers keep
-when they were said. A webhook posts at most 30 messages a minute, so
+Never copied: members' roles (people join with the invite), private threads,
+Lottie stickers, and member overwrites. Reactions are listed as text, since
+the agent can't react as the people who did. Old messages are posted now, so
+they carry the time they were copied (fuwa has no way to post into the past);
+the day dividers, and the line each thread reply starts with, keep when they
+were said. Each thread, and each forum's posts, take up to `messages` too.
+
+Sounds need an instance with a soundboard: on one without, they're listed as
+not copied and roles leave out the soundboard's permissions. Discord keeps
+sounds as MP3 or Ogg, and fuwa takes Ogg Opus, so the bot needs `ffmpeg` (the
+image has it) for any that aren't. A webhook posts at most 30 messages a minute, so
 history takes about two seconds a message per channel, with `CHANNELS_AT_ONCE`
 channels at a time: 1,000 messages in each of 8 channels takes a bit over an
 hour.

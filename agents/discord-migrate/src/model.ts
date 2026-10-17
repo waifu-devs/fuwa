@@ -14,6 +14,7 @@ export interface SourceGuild {
   channels: SourceChannel[];
   emojis: SourceEmoji[];
   stickers: SourceSticker[];
+  sounds: SourceSound[];
 }
 
 export interface SourceRole {
@@ -69,6 +70,24 @@ export interface SourceSticker {
   format: "png" | "apng" | "gif" | "lottie";
 }
 
+/** A soundboard sound. */
+export interface SourceSound {
+  id: string;
+  name: string;
+  url: string;
+  /** From 0 to 1. */
+  volume: number;
+  /** One of the guild's emoji by id, or a Unicode emoji. */
+  emojiId?: string;
+  emojiName?: string;
+}
+
+/** A thread, or a forum's post (whose first message has the thread's id). */
+export interface SourceThread {
+  id: string;
+  name: string;
+}
+
 /** One message from a channel's history. */
 export interface SourceMessage {
   id: string;
@@ -88,6 +107,10 @@ export interface SourceMessage {
   stickers: string[];
   /** The names of the people it mentions, by id, for `<@id>`. */
   mentionedUsers: Record<string, string>;
+  /** The thread started from it, if any. */
+  threadId?: string;
+  /** Its reactions: a Unicode emoji or a custom one written <:name:id>, and how many. */
+  reactions: { emoji: string; count: number }[];
 }
 
 export interface SourceAttachment {
@@ -125,6 +148,8 @@ export interface Source {
    * off).
    */
   messages(channelId: string, limit: number, after?: string): AsyncIterable<SourceMessage>;
+  /** A forum's latest `limit` posts that anyone can see, oldest first. */
+  forumPosts(channelId: string, limit: number): Promise<SourceThread[]>;
   /** A file from Discord's CDN, or undefined when it's bigger than `maxBytes`. */
   download(url: string, maxBytes: number): Promise<Download | undefined>;
 }
@@ -201,6 +226,12 @@ export interface Target {
   post(hook: Hook, post: TargetPost): Promise<string>;
   /** Sends files as the agent and returns the message's id. */
   sendFiles(channelId: string, content: string, files: TargetFile[]): Promise<string>;
+  /** Replies as the agent in the thread under a message, starting it if there's none yet. */
+  reply(channelId: string, threadId: string, content: string, files: TargetFile[]): Promise<string>;
+  /** Whether the instance has a soundboard (docs/soundboard.md); older ones don't. */
+  soundboard(): Promise<boolean>;
+  /** Adds a soundboard sound from a file in any format (turned into Ogg Opus here). */
+  createSound(sound: { name: string; emoji: string; volume: number; file: Download }): Promise<void>;
   pin(channelId: string, messageId: string): Promise<void>;
   /** An invite to the server that never runs out, as a link. */
   createInvite(): Promise<string>;

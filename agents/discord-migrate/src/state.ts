@@ -11,6 +11,8 @@ export interface ChannelHistory {
   lastDay?: string;
   messages: number;
   done?: boolean;
+  /** Its threads (or a forum's posts) by Discord id, and the fuwa message each one is under. */
+  threads?: Record<string, string>;
 }
 
 export interface JobState {
@@ -25,13 +27,16 @@ export interface JobState {
   emojis: Record<string, { id: string; name: string }>;
   stickers: Record<string, { id: string; name: string }>;
   emojisDone?: boolean;
-  /** By Discord channel id. */
+  /** Discord sound id to fuwa sound name. */
+  sounds: Record<string, string>;
+  soundsDone?: boolean;
+  /** By Discord channel id, threads' too. */
   history: Record<string, ChannelHistory>;
   invite?: string;
 }
 
 export function emptyState(guildId: string, serverId: string): JobState {
-  return { guildId, serverId, roles: {}, channels: {}, emojis: {}, stickers: {}, history: {} };
+  return { guildId, serverId, roles: {}, channels: {}, emojis: {}, stickers: {}, sounds: {}, history: {} };
 }
 
 export interface StateStore {

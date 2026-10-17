@@ -3,6 +3,13 @@
 import { Permission } from "@waifu-devs/fuwa";
 import type { SourceChannel, SourceEmbed, SourceMessage, SourceOverwrite, TargetOverwrite } from "./model.ts";
 
+/**
+ * The soundboard's permissions (docs/soundboard.md), which the SDK on npm
+ * doesn't name yet.
+ */
+export const MANAGE_SOUNDBOARD = 33 as Permission;
+export const USE_SOUNDBOARD = 34 as Permission;
+
 /** Discord's permission bits and the fuwa permissions each one becomes. */
 const PERMISSIONS: [bigint, Permission[]][] = [
   [1n << 0n, [Permission.CREATE_INVITE]],
@@ -29,9 +36,11 @@ const PERMISSIONS: [bigint, Permission[]][] = [
   [1n << 27n, [Permission.MANAGE_NICKNAMES]],
   [1n << 28n, [Permission.MANAGE_ROLES]],
   [1n << 29n, [Permission.MANAGE_WEBHOOKS]],
-  [1n << 30n, [Permission.MANAGE_EMOJI]],
+  // Manage Expressions: emoji, stickers and sounds.
+  [1n << 30n, [Permission.MANAGE_EMOJI, MANAGE_SOUNDBOARD]],
   [1n << 35n, [Permission.CREATE_THREADS]],
   [1n << 40n, [Permission.TIME_OUT_MEMBERS]],
+  [1n << 42n, [USE_SOUNDBOARD]],
   [1n << 49n, [Permission.CREATE_POLLS]],
 ];
 
@@ -55,14 +64,21 @@ const PER_CHANNEL = new Set<Permission>([
   Permission.CREATE_POLLS,
   Permission.ADD_REACTIONS,
   Permission.MANAGE_CARDS,
+  USE_SOUNDBOARD,
 ]);
 
-/** fuwa's permissions for Discord's bits, in a steady order. */
-export function permissionsOf(bits: bigint, channel = false): Permission[] {
+/**
+ * fuwa's permissions for Discord's bits, in a steady order; without the
+ * soundboard's on an instance that doesn't have one.
+ */
+export function permissionsOf(bits: bigint, channel = false, soundboard = true): Permission[] {
   const out = new Set<Permission>();
   for (const [bit, perms] of PERMISSIONS) {
     if ((bits & bit) === 0n) continue;
-    for (const p of perms) if (!channel || PER_CHANNEL.has(p)) out.add(p);
+    for (const p of perms) {
+      if (!soundboard && (p === MANAGE_SOUNDBOARD || p === USE_SOUNDBOARD)) continue;
+      if (!channel || PER_CHANNEL.has(p)) out.add(p);
+    }
   }
   return [...out].sort((a, b) => a - b);
 }
@@ -77,14 +93,15 @@ export function overwritesOf(
   guildId: string,
   serverId: string,
   roles: Record<string, string>,
+  soundboard = true,
 ): TargetOverwrite[] {
   const out: TargetOverwrite[] = [];
   for (const o of overwrites) {
     if (o.kind !== "role") continue;
     const targetId = o.id === guildId ? serverId : roles[o.id];
     if (!targetId) continue;
-    const allow = permissionsOf(o.allow, true);
-    const deny = permissionsOf(o.deny, true);
+    const allow = permissionsOf(o.allow, true, soundboard);
+    const deny = permissionsOf(o.deny, true, soundboard);
     if (allow.length || deny.length) out.push({ targetId, kind: "role", allow, deny });
   }
   return out;
@@ -212,7 +229,30 @@ export function messageText(message: SourceMessage, map: Mapping): string {
   const body = rewrite(message.content, message.mentionedUsers, map);
   if (body.trim()) parts.push(body);
   if (message.stickers.length) parts.push(message.stickers.map((s) => `*[sticker: ${s}]*`).join(" "));
+  if (message.reactions.length) {
+    const each = message.reactions.map((r) => `${rewrite(r.emoji, {}, map)} ${r.count}`);
+    parts.push(`*Reactions: ${each.join(" · ")}*`);
+  }
   return parts.join("\n");
+}
+
+/** A thread reply as the agent posts it: who said it and when, then what they said. */
+export function replyText(message: SourceMessage, map: Mapping): string {
+  const body = messageText(message, map);
+  const head = `**${message.authorName}** · <t:${Math.floor(message.at / 1000)}:f>`;
+  return body ? `${head}\n${body}` : head;
+}
+
+/** A soundboard sound's name as fuwa takes it: 1 to 32 characters, not already taken whatever their case. */
+export function soundName(name: string, taken: Set<string>): string {
+  const base = [...(name.trim() || "sound")].slice(0, 32).join("");
+  let candidate = base;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n++) {
+    const suffix = ` ${n}`;
+    candidate = [...base].slice(0, 32 - suffix.length).join("") + suffix;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
 }
 
 /** Embeds fuwa takes: http(s) links only, ten at most. */

@@ -306,6 +306,8 @@ jobs:
           cache-dependency-path: agents/discord-migrate/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
+      # ffmpeg turns Discord's sounds into Ogg Opus; its test runs only with it.
+      - run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
       - run: pnpm test
       - name: Its image
         run: docker build -t discord-migrate .

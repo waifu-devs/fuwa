@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { Permission } from "@waifu-devs/fuwa";
 import {
   type Mapping,
+  MANAGE_SOUNDBOARD,
+  USE_SOUNDBOARD,
   chunks,
   dayDivider,
   displayOrder,
@@ -11,7 +13,9 @@ import {
   messageText,
   overwritesOf,
   permissionsOf,
+  replyText,
   rewrite,
+  soundName,
 } from "../src/convert.ts";
 import type { SourceChannel, SourceMessage } from "../src/model.ts";
 
@@ -116,6 +120,7 @@ test("a message's text carries its reply and stickers", () => {
     embeds: [],
     stickers: ["Thumbs"],
     mentionedUsers: { "1": "alice" },
+    reactions: [],
   };
   assert.equal(messageText(message, map), "> ↪ **alice**: quoted\nagreed @alice\n*[sticker: Thumbs]*");
 });
@@ -136,4 +141,35 @@ test("embeds keep only web links", () => {
 
 test("day dividers are timestamps everyone reads in their own zone", () => {
   assert.equal(dayDivider(1_700_000_000_500), "── <t:1700000000:D> ──");
+});
+
+test("thread replies say who and when; sounds get names that don't clash", () => {
+  const message: SourceMessage = {
+    id: "1",
+    authorName: "bob",
+    at: 1_700_000_000_000,
+    content: "hi",
+    system: false,
+    pinned: false,
+    attachments: [],
+    embeds: [],
+    stickers: [],
+    mentionedUsers: {},
+    reactions: [{ emoji: "<:wave:400>", count: 3 }],
+  };
+  assert.equal(replyText(message, map), "**bob** · <t:1700000000:f>\nhi\n*Reactions: <:wave:emo-wave> 3*");
+  const taken = new Set<string>();
+  assert.deepEqual(
+    ["Airhorn", "airhorn", " ", "x".repeat(40)].map((n) => soundName(n, taken)),
+    ["Airhorn", "airhorn 2", "sound", "x".repeat(32)],
+  );
+});
+
+test("Manage Expressions and Use Soundboard come over", () => {
+  assert.deepEqual(permissionsOf((1n << 30n) | (1n << 42n)), [
+    Permission.MANAGE_EMOJI,
+    MANAGE_SOUNDBOARD,
+    USE_SOUNDBOARD,
+  ]);
+  assert.deepEqual(permissionsOf((1n << 30n) | (1n << 42n), true), [USE_SOUNDBOARD]);
 });

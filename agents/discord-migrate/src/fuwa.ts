@@ -23,6 +23,10 @@ import {
   type TargetOverwrite,
   type TargetPost,
 } from "./model.ts";
+import { type SoundboardClient, hasSoundboard, soundboard, toOggOpus } from "./soundboard.ts";
+
+/** An upload for a soundboard sound (MEDIA_PURPOSE_SOUND), which the SDK on npm doesn't name yet. */
+const SOUND = 11 as MediaPurpose;
 
 /** A webhook may post 30 messages a minute: one every two seconds keeps under it. */
 const POST_EVERY_MS = 2_000;
@@ -66,11 +70,13 @@ export class FuwaTarget implements Target {
   readonly #tokens = new Map<string, string>();
   readonly #lastPost = new Map<string, number>();
   readonly #sleep: (ms: number) => Promise<void>;
+  readonly #sounds: SoundboardClient;
 
   constructor(agent: Agent, serverId: string, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) {
     this.#agent = agent;
     this.serverId = serverId;
     this.#sleep = sleep;
+    this.#sounds = soundboard(agent.api.transport);
   }
 
   get #api() {
@@ -263,25 +269,63 @@ export class FuwaTarget implements Target {
 
   sendFiles(channelId: string, content: string, files: TargetFile[]): Promise<string> {
     return refusing(async () => {
-      const serverId = this.serverId;
-      const attachments = [];
-      for (const file of files) {
-        const media = await this.#agent.upload({
-          purpose: MediaPurpose.ATTACHMENT,
-          data: file.bytes,
-          contentType: file.contentType || "application/octet-stream",
-          serverId,
-        });
-        attachments.push({
-          url: media.url,
-          filename: [...file.name].slice(0, 255).join("") || "file",
-          width: file.width ?? 0,
-          height: file.height ?? 0,
-          spoiler: file.spoiler,
-        });
-      }
-      const message = await this.#agent.send(serverId, channelId, { content, attachments });
+      const attachments = await this.#attach(files);
+      const message = await this.#agent.send(this.serverId, channelId, { content, attachments });
       return message.id;
+    });
+  }
+
+  /** Uploads files to attach to a message. */
+  async #attach(files: TargetFile[]) {
+    const attachments = [];
+    for (const file of files) {
+      const media = await this.#agent.upload({
+        purpose: MediaPurpose.ATTACHMENT,
+        data: file.bytes,
+        contentType: file.contentType || "application/octet-stream",
+        serverId: this.serverId,
+      });
+      attachments.push({
+        url: media.url,
+        filename: [...file.name].slice(0, 255).join("") || "file",
+        width: file.width ?? 0,
+        height: file.height ?? 0,
+        spoiler: file.spoiler,
+      });
+    }
+    return attachments;
+  }
+
+  reply(channelId: string, threadId: string, content: string, files: TargetFile[]): Promise<string> {
+    return refusing(async () => {
+      const attachments = await this.#attach(files);
+      const message = await this.#agent.send(this.serverId, channelId, { content, attachments, threadId });
+      return message.id;
+    });
+  }
+
+  soundboard(): Promise<boolean> {
+    return hasSoundboard(this.#sounds, this.serverId);
+  }
+
+  async createSound(sound: { name: string; emoji: string; volume: number; file: Download }): Promise<void> {
+    let ogg;
+    try {
+      ogg = await toOggOpus(sound.file.bytes);
+    } catch (err) {
+      throw new Refused((err as Error).message);
+    }
+    await refusing(async () => {
+      const serverId = this.serverId;
+      const media = await this.#agent.upload({ purpose: SOUND, data: ogg.bytes, contentType: "audio/ogg", serverId });
+      await this.#sounds.createSound({
+        serverId,
+        name: sound.name,
+        url: media.url,
+        emoji: sound.emoji,
+        volume: Math.min(1, Math.max(0, sound.volume)),
+        durationMs: ogg.durationMs,
+      });
     });
   }
 
