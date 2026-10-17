@@ -657,6 +657,11 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             core.shared.typing_started(typing::Place::channel(key, &t.channel_id, &t.thread_id), &t.user_id);
             return;
         }
+        // A sound played in a voice channel: sequence 0 too, played here if you're in that call.
+        Some(Payload::SoundPlayed(played)) => {
+            core.sound_played(key, &sid, played);
+            return;
+        }
         // A message from someone typing ends their line there.
         Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) => {
             core.shared.typing_stopped(&typing::Place::channel(key, &m.channel_id, &m.thread_id), &m.author_id);

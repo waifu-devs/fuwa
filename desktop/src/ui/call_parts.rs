@@ -198,6 +198,8 @@ pub(crate) enum CallPop {
     Connection,
     /// Recording on this computer or on the server; `from` names the button.
     Record { from: String },
+    /// The soundboard's grid; `from` names the button.
+    Soundboard { from: String },
 }
 
 /// The two sizes call buttons come in: the call panel's and the stage's.
@@ -423,7 +425,7 @@ pub(crate) fn toggle_icon(
 
 /// A call button's frame: `size-8 rounded-lg` or `size-12 rounded-2xl`,
 /// pressing in (`active:scale-90`); a `group` named by its id, for its icon.
-fn call_button_frame(
+pub(crate) fn call_button_frame(
     id: SharedString,
     size: Size,
     bg: Option<gpui_kit::Hsla>,

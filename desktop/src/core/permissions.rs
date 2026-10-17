@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 32] = [
+pub const KNOWN: [P; 34] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -46,6 +46,8 @@ pub const KNOWN: [P; 32] = [
     P::ManageEconomy,
     P::GrantCurrency,
     P::ManageCards,
+    P::ManageSoundboard,
+    P::UseSoundboard,
 ];
 
 pub const ALL: Bits = {
@@ -71,7 +73,8 @@ pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::ChangeNickname)
     | bit(P::Connect)
     | bit(P::Speak)
-    | bit(P::Video);
+    | bit(P::Video)
+    | bit(P::UseSoundboard);
 
 pub fn from_list(list: &[i32]) -> Bits {
     list.iter().filter_map(|p| P::try_from(*p).ok()).filter(|p| KNOWN.contains(p)).fold(0, |bits, p| bits | bit(p))
@@ -91,6 +94,7 @@ pub const GROUPS: [(&str, &[P]); 5] = [
             P::ManageChannels,
             P::ManageRoles,
             P::ManageEmoji,
+            P::ManageSoundboard,
             P::ManageWebhooks,
             P::ManageServer,
             P::ViewAuditLog,
@@ -124,7 +128,7 @@ pub const GROUPS: [(&str, &[P]); 5] = [
             P::ManageMessages,
         ],
     ),
-    ("Voice channels", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
+    ("Voice channels", &[P::Connect, P::Speak, P::Video, P::UseSoundboard, P::Record, P::MuteMembers, P::MoveMembers]),
     ("Advanced", &[P::Administrator]),
 ];
 
@@ -200,6 +204,10 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         P::ManageCards => {
             ("Manage cards", "Add, move, edit and archive cards on boards. Commenting on a card needs Send messages.")
         }
+        P::ManageSoundboard => ("Manage soundboard", "Add, rename and delete the server's soundboard sounds."),
+        P::UseSoundboard => {
+            ("Use soundboard", "Play the server's sounds for everyone in a voice channel's call. Also takes Speak.")
+        }
     }
 }
 
@@ -220,7 +228,7 @@ pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
             P::ManageMessages,
         ],
     ),
-    ("Voice", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
+    ("Voice", &[P::Connect, P::Speak, P::Video, P::UseSoundboard, P::Record, P::MuteMembers, P::MoveMembers]),
 ];
 
 /// What a permission lets people do in one channel, where that reads differently from server-wide.
@@ -239,6 +247,7 @@ pub fn channel_about(p: P) -> &'static str {
         P::Record => {
             "Record this voice channel on their device or on the server, and download and delete its recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software."
         }
+        P::UseSoundboard => "Play the server's sounds for everyone in this voice channel's call. Also takes Speak.",
         P::MuteMembers => "Mute or deafen people ranked below them in this voice channel.",
         P::MoveMembers => "Disconnect people ranked below them from this voice channel.",
         other => info(other).1,

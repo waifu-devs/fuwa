@@ -247,6 +247,37 @@ impl SettingsView {
             cx,
             |pr, v| pr.output_volume = v.round() as u16,
         );
+        let soundboard_value = (prefs.soundboard_volume * 100.0).round();
+        let soundboard = div()
+            .child(
+                div()
+                    .mb(px(-20.0))
+                    .flex()
+                    .items_baseline()
+                    .justify_between()
+                    .text_sm()
+                    .child(div().font_weight(FontWeight::BOLD).child(t("appsettings.voice.soundboard")))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(p.muted_foreground)
+                            .child(format!("{}%", soundboard_value as i64)),
+                    ),
+            )
+            .child(self.slider(
+                "soundboard-volume",
+                (0.0, 100.0, 5.0),
+                soundboard_value,
+                vec![],
+                |v| format!("{}%", v.round() as i64),
+                false,
+                p,
+                window,
+                cx,
+                |pr, v| pr.soundboard_volume = (v / 100.0).clamp(0.0, 1.0),
+            ))
+            .into_any_element();
         let devices = div()
             .flex()
             .gap(px(16.0))
@@ -670,6 +701,15 @@ impl SettingsView {
                     pr.output_volume = d.output_volume;
                 }),
                 devices.into_any_element(),
+            ),
+            (
+                "soundboard",
+                t("appsettings.voice.soundboard"),
+                Some(t("appsettings.voice.soundboardHint")),
+                Badge::pref(prefs.soundboard_volume != d.soundboard_volume, |pr| {
+                    pr.soundboard_volume = Prefs::default().soundboard_volume;
+                }),
+                soundboard,
             ),
             (
                 "mic-test",

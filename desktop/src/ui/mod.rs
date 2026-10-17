@@ -105,6 +105,7 @@ mod settings_voice;
 mod shared_marks;
 mod shop;
 mod sidebar;
+mod soundboard;
 mod spoilers;
 mod system;
 pub mod text;

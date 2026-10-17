@@ -75,6 +75,7 @@ pub mod server_admin;
 pub mod server_pages;
 pub mod settings_sync;
 pub mod shared;
+pub mod soundboard;
 pub mod sounds;
 pub mod spoilers;
 pub mod sso;

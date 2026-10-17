@@ -221,6 +221,8 @@
   "server.emoji.unreadable": "That picture couldn't be read.",
   "server.emoji.tooBig": "{width}×{height} is too big; {max} a side at most.",
   "server.emoji.tooManyFrames": "That moving picture has too many frames for its size.",
+  "server.soundboard.dropHint": "MP3, WAV, Ogg, FLAC, M4A and more. You keep up to 10 seconds of it.",
+  "server.soundboard.notAudio": "That file isn't a sound this app can read.",
   "server.emoji.bytes": "{size} B",
   "server.emoji.kilobytes": "{size} KB",
   "server.emoji.choosePictures": "Choose pictures",
