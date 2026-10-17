@@ -294,6 +294,12 @@ it's named per person, so streaming apps (OBS's Window Capture, for one)
 find the same window again and take it as a clean feed of that person.
 Hanging up closes them.
 
+## The soundboard
+
+Servers keep short sounds anyone in a voice channel can play for everyone
+there. They never go through the media part: each app plays the file when
+it hears `SoundPlayed`. See [soundboard.md](soundboard.md).
+
 ## Ping
 
 The voice bar shows your ping to the media part, and clicking it opens the

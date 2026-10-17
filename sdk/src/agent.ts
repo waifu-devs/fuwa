@@ -4,7 +4,7 @@ import { EventFollower, type EventKind, type EventPayload } from "./events.js";
 import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
-import type { Balance, LiveTile, LiveTileContentSchema, ModReportReason } from "./gen/fuwa/v1/types_pb.js";
+import type { Balance, LiveTile, LiveTileContentSchema, ModReportReason, Sound } from "./gen/fuwa/v1/types_pb.js";
 import type { GrantResponse, PullResponse } from "./gen/fuwa/v1/economy_pb.js";
 import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
@@ -518,6 +518,12 @@ export class Agent {
    */
   async pull(serverId: string, bannerId: string, count = 1): Promise<PullResponse> {
     return this.api.economy.pull({ serverId, bannerId, count, expectedPrice: 0n });
+  }
+
+  /** A server's soundboard sounds, oldest first; play one with VoiceConnection.playSound. */
+  async sounds(serverId: string): Promise<Sound[]> {
+    const { sounds } = await this.api.soundboard.listSounds({ serverId });
+    return sounds;
   }
 
   /** Who reacted to a message with an emoji, the earliest first (up to 100). */

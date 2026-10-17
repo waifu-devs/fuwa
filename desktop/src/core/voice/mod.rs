@@ -303,6 +303,8 @@ pub struct Voice {
     pattern: AtomicBool,
     /// The camera checked in settings, outside a call.
     camera_test: Mutex<Option<Sending>>,
+    /// Soundboard sounds playing into the call's sound (`soundboard.rs`).
+    pub(crate) board: Arc<crate::core::soundboard::Board>,
     /// Why the camera check stopped by itself, if it did.
     camera_test_failed: Mutex<Option<Failure>>,
 }
@@ -407,6 +409,7 @@ impl Core {
             ..Default::default()
         });
         self.leave_voice();
+        self.voice.board.clear();
         // Mute and deafen carry over; recording starts afresh with every call.
         let selves = selves.unwrap_or_else(|| *self.voice.idle.lock());
         let selves = Selves { mute: selves.mute, deaf: selves.deaf, ..Default::default() };
@@ -420,11 +423,13 @@ impl Core {
         // A few frames of each size; more waits for the next keyframe.
         let (filmed, filmed_rx) = mpsc::channel(32);
         let sound = match pipes {
-            Some((microphone, speakers)) => Sound { microphone, speakers, devices: None },
+            Some((microphone, speakers)) => {
+                Sound { microphone, speakers, devices: None, board: self.voice.board.clone() }
+            }
             None => {
                 let (microphone, speakers) = (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
                 let devices = Devices::open(microphone.clone(), speakers.clone(), !selves.mute && !selves.deaf);
-                Sound { microphone, speakers, devices: Some(devices) }
+                Sound { microphone, speakers, devices: Some(devices), board: self.voice.board.clone() }
             }
         };
         let microphone = match &sound.devices {
@@ -510,6 +515,7 @@ impl Core {
 
     /// Leaves the call you're in.
     pub fn leave_voice(&self) {
+        self.voice.board.clear();
         let active = self.voice.active.lock().take();
         if let Some(active) = active {
             // Closed now, not once the call has wound down.
@@ -723,6 +729,8 @@ struct Sound {
     microphone: Arc<Pipe>,
     speakers: Arc<Pipe>,
     devices: Option<Devices>,
+    /// Soundboard sounds, mixed in after everyone else.
+    board: Arc<crate::core::soundboard::Board>,
 }
 
 /// The place in the call was lost for good (taken over, disconnected,
@@ -998,6 +1006,7 @@ async fn run(
         }
         drop(link);
         sound.speakers.clear();
+        sound.board.clear();
         view(&|v| {
             v.status = if ever_connected { Status::Reconnecting } else { Status::Connecting };
             v.speaking.clear();
@@ -1415,6 +1424,7 @@ impl Running<'_> {
         if now.deaf {
             mixer.clear();
             self.sound.speakers.clear();
+            self.sound.board.clear();
             out.fill(0.0);
         } else {
             for who in mixer.mix(out) {
@@ -1433,6 +1443,8 @@ impl Running<'_> {
                     *s = (*s * volumes.output).clamp(-1.0, 1.0);
                 }
             }
+            // Soundboard sounds at their own volume, overlapping one another.
+            self.sound.board.mix_into(out);
             self.sound.speakers.push(out);
         }
         processing.heard(out);

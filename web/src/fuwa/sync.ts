@@ -16,6 +16,7 @@ import { getPrefs } from "@/lib/prefs";
 import { clearToasts } from "@/lib/ui";
 import { forgetEconomy, forgetEconomyServer, loadEconomy, onEconomyEvent } from "./economy";
 import { forgetBoards, onBoardEvent } from "./board";
+import { forgetSounds, onSoundboardEvent, refreshSounds } from "./soundboard";
 import { forgetModeration, onModEvent } from "./moderation";
 import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { onTypingEvent } from "./typing";
@@ -564,6 +565,8 @@ const followEvents = (
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
         held.delete(serverId);
+        // Sounds listed before may have changed while the stream was away.
+        refreshSounds(key, serverId);
         // The server's currencies and your wallet (docs/economy.md), on instances that have them.
         if (instanceHas(store.get().instances[key]?.node?.versions, "economy")) void loadEconomy(key, serverId);
         // Secure channels this device is in may have had news while it was away.
@@ -748,6 +751,7 @@ const followEvents = (
           onModEvent(key, event);
           onEconomyEvent(key, event);
           onBoardEvent(key, event);
+          onSoundboardEvent(key, event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));
@@ -760,6 +764,7 @@ const followEvents = (
           cursors.delete(sid);
           held.delete(sid);
           forgetEconomyServer(key, sid);
+          forgetSounds(key, sid);
           yield* unfollow(key, sid);
         }
       });

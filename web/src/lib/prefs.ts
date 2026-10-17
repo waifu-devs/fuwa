@@ -108,6 +108,8 @@ export type Prefs = {
   autoGainControl: boolean;
   /** How loud each person is for you, in percent, by "instance/user id". Missing means 100. */
   userVolumes: Record<string, number>;
+  /** How loud the soundboard's sounds are for you, from 0 to 1, times each sound's own volume. */
+  soundboardVolume: number;
   /** The camera, this browser's device id; "" is the system default. */
   videoDevice: string;
   /** The tallest your camera goes out, in pixels, and its most frames a second; 0 is the best it can (lib/camera-quality.ts). */
@@ -187,6 +189,7 @@ export const DEFAULT_PREFS: Prefs = {
   noiseSuppression: true,
   autoGainControl: true,
   userVolumes: {},
+  soundboardVolume: 1,
   videoDevice: "",
   cameraHeight: 0,
   cameraFps: 0,
@@ -277,6 +280,7 @@ function sanitize(p: Prefs): Prefs {
     inputMode: oneOf(p.inputMode, ["voice", "ptt"], d.inputMode),
     sensitivity: clamp(p.sensitivity, -100, 0, d.sensitivity),
     pttRelease: clamp(p.pttRelease, 0, 2000, d.pttRelease),
+    soundboardVolume: clamp(p.soundboardVolume, 0, 1, d.soundboardVolume),
     userVolumes:
       p.userVolumes && typeof p.userVolumes === "object"
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))

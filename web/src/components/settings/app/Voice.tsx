@@ -266,6 +266,17 @@ export function Voice() {
           </div>
         </div>
       </PrefSetting>
+      <PrefSetting id="soundboard" title={t("appsettings.voice.soundboard")} hint={t("appsettings.voice.soundboardHint")} keys={["soundboardVolume"]} delay={0.02}>
+        <Slider
+          label={t("appsettings.voice.soundboard")}
+          value={Math.round(p.soundboardVolume * 100)}
+          min={0}
+          max={100}
+          step={5}
+          format={(n) => number(n / 100, { style: "percent" })}
+          onChange={(n) => setPrefs({ soundboardVolume: n / 100 })}
+        />
+      </PrefSetting>
       <PrefSetting id="mic-test" title={t("appsettings.voice.micTest")} hint={t("appsettings.voice.micTestHint")} keys={[]} delay={0.04}>
         <MicTest />
       </PrefSetting>

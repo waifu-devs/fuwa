@@ -195,6 +195,7 @@ clients! {
     events => "EventService" pb::event_service_client::EventServiceClient<Transport>,
     roles => "RoleService" pb::role_service_client::RoleServiceClient<Transport>,
     emojis => "EmojiService" pb::emoji_service_client::EmojiServiceClient<Transport>,
+    soundboard => "SoundboardService" pb::soundboard_service_client::SoundboardServiceClient<Transport>,
     webhooks => "WebhookService" pb::webhook_service_client::WebhookServiceClient<Transport>,
     agents => "AgentService" pb::agent_service_client::AgentServiceClient<Transport>,
     automod => "AutoModService" pb::auto_mod_service_client::AutoModServiceClient<Transport>,

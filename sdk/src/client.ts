@@ -12,6 +12,7 @@ import { CommandService } from "./gen/fuwa/v1/command_pb.js";
 import { LiveTileService } from "./gen/fuwa/v1/live_tile_pb.js";
 import { DirectMessageService } from "./gen/fuwa/v1/dm_pb.js";
 import { EmojiService } from "./gen/fuwa/v1/emoji_pb.js";
+import { SoundboardService } from "./gen/fuwa/v1/soundboard_pb.js";
 import { EventService } from "./gen/fuwa/v1/event_pb.js";
 import { FriendService } from "./gen/fuwa/v1/friend_pb.js";
 import { GifService } from "./gen/fuwa/v1/gif_pb.js";
@@ -87,6 +88,7 @@ export interface Fuwa {
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
+  soundboard: Client<typeof SoundboardService>;
   calls: Client<typeof CallService>;
   webhooks: Client<typeof WebhookService>;
   agents: Client<typeof AgentService>;
@@ -223,6 +225,7 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     secure: client(SecureChannelService),
     automod: client(AutoModService),
     emojis: client(EmojiService),
+    soundboard: client(SoundboardService),
     calls: client(CallService),
     webhooks: client(WebhookService),
     agents: client(AgentService),

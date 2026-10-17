@@ -494,6 +494,17 @@ pub fn event(e: &pb::Event) -> Value {
                 })).collect::<Vec<_>>()),
             }),
         ),
+        // Soundboard: list_sounds has the sounds.
+        Some(Payload::SoundsUpdated(_)) => ("sounds_updated", json!({})),
+        Some(Payload::SoundPlayed(p)) => (
+            "sound_played",
+            json!({
+                "channel_id": p.channel_id,
+                "user_id": p.user_id,
+                "sound_id": p.sound.as_ref().map(|s| s.id.as_str()),
+                "name": p.sound.as_ref().map(|s| s.name.as_str()),
+            }),
+        ),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

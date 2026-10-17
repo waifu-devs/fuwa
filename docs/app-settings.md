@@ -81,6 +81,7 @@ own fields to these.
 | `inputMode` | `"voice"` or `"ptt"` |
 | `pttRelease` | milliseconds |
 | `userVolumes` | `"instance/user id"` to percent, up to 200 |
+| `soundboardVolume` | 0 to 1: how loud others' soundboard sounds play (docs/soundboard.md) |
 | `mirrorVideo`, `shareSound` | boolean |
 | `cameraHeight`, `cameraFps`, `shareHeight`, `shareFps` | `lib/camera-quality.ts`, `lib/screen-share.ts` |
 | `popoutName`, `popoutGlow` | boolean |

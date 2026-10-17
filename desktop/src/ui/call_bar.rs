@@ -38,7 +38,8 @@ impl FuwaApp {
         let Some(call) = self.core.call() else {
             self.calls.ticking = None;
             self.calls.mic_missing = false;
-            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. })) {
+            if matches!(self.calls.pop, Some(CallPop::Connection | CallPop::Record { .. } | CallPop::Soundboard { .. }))
+            {
                 self.calls.pop = None;
             }
             return None;
@@ -168,7 +169,8 @@ impl FuwaApp {
             .gap(px(6.0))
             .child(self.camera_button("panel", Size::Sm, true, cx))
             .child(self.screen_button("panel", Size::Sm, true, window, cx))
-            .when_some(self.record_button("panel", Size::Sm, true, window, cx), |el, b| el.child(b));
+            .when_some(self.record_button("panel", Size::Sm, true, window, cx), |el, b| el.child(b))
+            .when_some(self.soundboard_button("panel", Size::Sm, true, window, cx), |el, b| el.child(b));
         let body = div()
             .flex()
             .flex_col()
@@ -344,6 +346,7 @@ impl FuwaApp {
                         .child(name),
                 )
                 .when(agent, |el| el.child(app_badge(SharedString::from(format!("agent|{tag}")), "APP", &p)))
+                .children(self.sound_played_badge(key, server, channel_id, &state.user_id, false, &p))
                 .child(voice_flags(&state, &tag, &p, window, cx));
             let row = if state.user_id == me {
                 row

@@ -331,6 +331,7 @@ impl App {
                         | pb::MediaPurpose::Attachment
                         | pb::MediaPurpose::Decoration
                         | pb::MediaPurpose::ShopArt
+                        | pb::MediaPurpose::Sound
                 ) && row.server_id.as_deref() == Some(server_id)
             }
         };

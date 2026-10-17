@@ -42,6 +42,7 @@
     { "id": "typing", "date": "2026-10-14", "title": "Typing indicators" },
     { "id": "gacha", "date": "2026-10-14", "title": "Gacha banners in the shop" },
     { "id": "read-marks", "date": "2026-10-15", "title": "Unread marks cleared on every device" },
-    { "id": "gacha-share", "date": "2026-10-16", "title": "Gacha pulls shared in chat" }
+    { "id": "gacha-share", "date": "2026-10-16", "title": "Gacha pulls shared in chat" },
+    { "id": "soundboard", "date": "2026-10-17", "title": "Soundboard in voice channels" }
   ]
 }

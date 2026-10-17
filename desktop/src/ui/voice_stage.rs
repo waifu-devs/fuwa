@@ -313,6 +313,7 @@ impl FuwaApp {
                 .child(self.camera_button("stage", Size::Lg, false, cx))
                 .child(self.screen_button("stage", Size::Lg, false, window, cx))
                 .when_some(self.record_button("stage", Size::Lg, false, window, cx), |el, b| el.child(b))
+                .when_some(self.soundboard_button("stage", Size::Lg, false, window, cx), |el, b| el.child(b))
                 .child(hang_up_button("stage-leave", Size::Lg, t("dms-calls.calls.controls.disconnect"), &p).on_click(
                     cx.listener(|this, _, _, cx| {
                         this.core.leave_voice();
@@ -640,6 +641,7 @@ impl FuwaApp {
                 cx,
             )))
             .children(camera)
+            .children(self.sound_played_badge(key, server, channel, &state.user_id, true, p))
             .child(chip);
         let group = format!("tile-group|{}", state.user_id);
         let mut holder = div().relative().group(SharedString::from(group.clone())).child(tile);

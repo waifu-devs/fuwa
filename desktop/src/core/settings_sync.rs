@@ -77,6 +77,7 @@ pub const SYNCED: &[&str] = &[
     "inputMode",
     "pttRelease",
     "userVolumes",
+    "soundboardVolume",
     "mirrorVideo",
     "shareSound",
     "cameraHeight",
@@ -239,6 +240,8 @@ pub fn value(p: &Prefs, name: &str) -> Option<Value> {
         "inputMode" => serde_json::to_value(p.input_mode).ok()?,
         "pttRelease" => json!(p.ptt_release),
         "userVolumes" => serde_json::to_value(&p.user_volumes).ok()?,
+        // In hundredths, so 0.7 stays 0.7 for the web rather than its f32 neighbour.
+        "soundboardVolume" => json!((f64::from(p.soundboard_volume) * 100.0).round() / 100.0),
         "mirrorVideo" => json!(p.mirror_video),
         "shareSound" => json!(p.share_sound),
         "cameraHeight" => json!(p.camera_height),
@@ -443,6 +446,9 @@ pub fn apply(p: &mut Prefs, name: &str, v: &Value) -> bool {
                 .collect();
             true
         }
+        "soundboardVolume" => {
+            set!(p.soundboard_volume, v.as_f64().filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0) as f32))
+        }
         "mirrorVideo" => set!(p.mirror_video, flag),
         "shareSound" => set!(p.share_sound, flag),
         "cameraHeight" => set!(
@@ -597,6 +603,7 @@ mod tests {
             input_mode: InputMode::Ptt,
             ptt_release: 500,
             user_volumes: [("fuwa.chat/01ABC".to_owned(), 150)].into(),
+            soundboard_volume: 0.5,
             mirror_video: false,
             share_sound: false,
             camera_height: 720,

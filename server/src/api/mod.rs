@@ -36,6 +36,7 @@ mod search;
 mod secure;
 mod servers;
 mod shared;
+mod soundboard;
 mod sso;
 mod threads;
 mod webhooks;

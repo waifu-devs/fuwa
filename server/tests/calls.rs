@@ -68,6 +68,8 @@ struct Clients {
     calls: pb::call_service_client::CallServiceClient<Channel>,
     roles: pb::role_service_client::RoleServiceClient<Channel>,
     dms: pb::direct_message_service_client::DirectMessageServiceClient<Channel>,
+    media: pb::media_service_client::MediaServiceClient<Channel>,
+    soundboard: pb::soundboard_service_client::SoundboardServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -79,7 +81,9 @@ async fn clients(instance: &Instance) -> Clients {
         events: pb::event_service_client::EventServiceClient::new(channel.clone()),
         calls: pb::call_service_client::CallServiceClient::new(channel.clone()),
         roles: pb::role_service_client::RoleServiceClient::new(channel.clone()),
-        dms: pb::direct_message_service_client::DirectMessageServiceClient::new(channel),
+        dms: pb::direct_message_service_client::DirectMessageServiceClient::new(channel.clone()),
+        media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
+        soundboard: pb::soundboard_service_client::SoundboardServiceClient::new(channel),
     }
 }
 
@@ -1620,6 +1624,200 @@ async fn cameras_have_the_ceilings_the_instance_and_server_set() {
     let entries = c.servers.list_audit_log(authed(&juan, request)).await.unwrap().into_inner().entries;
     assert!(entries.iter().any(|e| e.changes.iter().any(|ch| ch.field == "camera_max_fps")));
 
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+/// An Ogg Opus file of `ms` milliseconds of silence, as apps make sounds:
+/// OpusHead, OpusTags, then a page of 20 ms frames a second (CRCs left out,
+/// which the instance doesn't read).
+fn ogg_opus(ms: u64) -> Vec<u8> {
+    fn page(out: &mut Vec<u8>, packets: &[&[u8]], granule: i64, sequence: u32, flags: u8) {
+        out.extend_from_slice(b"OggS\0");
+        out.push(flags);
+        out.extend_from_slice(&granule.to_le_bytes());
+        out.extend_from_slice(&7u32.to_le_bytes());
+        out.extend_from_slice(&sequence.to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        let mut lacing = Vec::new();
+        for packet in packets {
+            lacing.extend(std::iter::repeat_n(255u8, packet.len() / 255));
+            lacing.push((packet.len() % 255) as u8);
+        }
+        out.push(lacing.len() as u8);
+        out.extend_from_slice(&lacing);
+        for packet in packets {
+            out.extend_from_slice(packet);
+        }
+    }
+    let mut head = b"OpusHead".to_vec();
+    head.extend_from_slice(&[1, 1]);
+    head.extend_from_slice(&312u16.to_le_bytes());
+    head.extend_from_slice(&48_000u32.to_le_bytes());
+    head.extend_from_slice(&[0, 0, 0]);
+    let mut out = Vec::new();
+    page(&mut out, &[&head], 0, 0, 2);
+    page(&mut out, &[b"OpusTags\0\0\0\0\0\0\0\0"], 0, 1, 0);
+    let frames = ms / 20;
+    let silence: &[u8] = &[0xf8, 0xff, 0xfe];
+    let mut sent = 0;
+    let mut sequence = 2;
+    while sent < frames {
+        let take = (frames - sent).min(50);
+        sent += take;
+        let packets = vec![silence; take as usize];
+        let last = if sent == frames { 4 } else { 0 };
+        page(&mut out, &packets, (sent * 960 + 312) as i64, sequence, last);
+        sequence += 1;
+    }
+    out
+}
+
+async fn upload_sound(
+    c: &mut Clients,
+    instance: &Instance,
+    token: &str,
+    sid: &str,
+    bytes: Vec<u8>,
+) -> Result<String, u16> {
+    let reserved = c
+        .media
+        .create_upload(authed(
+            token,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::Sound as i32,
+                content_type: "audio/ogg".into(),
+                size: bytes.len() as i64,
+                server_id: sid.into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let url = reqwest::Url::parse(&reserved.upload_url).unwrap();
+    let put = format!("http://{}{}", instance.addr, url.path());
+    let status = reqwest::Client::new().put(put).body(bytes).send().await.unwrap().status();
+    if status != reqwest::StatusCode::NO_CONTENT {
+        return Err(status.as_u16());
+    }
+    Ok(reserved.media.unwrap().url)
+}
+
+async fn next_sound_event(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> Payload {
+    loop {
+        let response = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap().unwrap().unwrap();
+        if let Some(payload) = response.event.and_then(|e| e.payload)
+            && matches!(payload, Payload::SoundsUpdated(_) | Payload::SoundPlayed(_))
+        {
+            return payload;
+        }
+    }
+}
+
+#[tokio::test]
+async fn soundboard_sounds_play_for_everyone_in_the_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (bot, bot_id) = sign_up(&mut c, "helper").await;
+    let request = pb::CreateServerRequest { name: "Sounds".into(), discoverable: true, ..Default::default() };
+    let sid = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap().id;
+    c.servers
+        .join_server(authed(&bot, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Lounge".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+    let request = pb::SubscribeRequest {
+        servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+        ..Default::default()
+    };
+    let mut juan_events = c.events.subscribe(authed(&juan, request)).await.unwrap().into_inner();
+
+    // Only Ogg Opus of at most 10 seconds goes up as a sound.
+    assert_eq!(upload_sound(&mut c, &instance, &juan, &sid, ogg_opus(10_500)).await, Err(422));
+    assert_eq!(upload_sound(&mut c, &instance, &juan, &sid, b"RIFF....WAVEfmt ".to_vec()).await, Err(415));
+    let url = upload_sound(&mut c, &instance, &juan, &sid, ogg_opus(1_000)).await.unwrap();
+    let served =
+        reqwest::get(format!("http://{}{}", instance.addr, reqwest::Url::parse(&url).unwrap().path())).await.unwrap();
+    assert_eq!(served.headers()["content-type"], "audio/ogg; codecs=opus");
+
+    // Adding one takes Manage Soundboard, which members don't have.
+    let create = |name: &str, url: &str| pb::CreateSoundRequest {
+        server_id: sid.clone(),
+        name: name.into(),
+        url: url.into(),
+        emoji: "📯".into(),
+        volume: Some(0.5),
+        duration_ms: 1_000,
+    };
+    let refused = c.soundboard.create_sound(authed(&bot, create("Horn", &url))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let horn = c.soundboard.create_sound(authed(&juan, create("Horn", &url))).await.unwrap().into_inner();
+    let horn = horn.sound.unwrap();
+    assert_eq!((horn.name.as_str(), horn.emoji.as_str(), horn.volume, horn.duration_ms), ("Horn", "📯", 0.5, 1_000));
+    let Payload::SoundsUpdated(updated) = next_sound_event(&mut juan_events).await else { panic!("not the list") };
+    assert_eq!(updated.sounds.len(), 1);
+    let again = upload_sound(&mut c, &instance, &juan, &sid, ogg_opus(500)).await.unwrap();
+    let taken = c.soundboard.create_sound(authed(&juan, create("HORN", &again))).await.unwrap_err();
+    assert_eq!(taken.code(), Code::AlreadyExists);
+    let request = pb::ListSoundsRequest { server_id: sid.clone() };
+    let listed = c.soundboard.list_sounds(authed(&bot, request)).await.unwrap().into_inner().sounds;
+    assert_eq!(listed, vec![horn.clone()]);
+
+    // Playing one takes being in the channel's call.
+    let play = |token: &str| {
+        authed(
+            token,
+            pb::PlaySoundRequest { server_id: sid.clone(), channel_id: voice.id.clone(), sound_id: horn.id.clone() },
+        )
+    };
+    assert_eq!(c.soundboard.play_sound(play(&bot)).await.unwrap_err().code(), Code::FailedPrecondition);
+    let request = pb::ListenVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), ..Default::default() };
+    let mut listening = c.calls.listen_voice(authed(&bot, request)).await.unwrap().into_inner();
+    let first = listening.next().await.unwrap().unwrap().event.unwrap();
+    assert!(matches!(first, pb::listen_voice_response::Event::Joined(_)));
+
+    // Everyone who can see the channel hears it was played, with the sound.
+    c.soundboard.play_sound(play(&bot)).await.unwrap();
+    let Payload::SoundPlayed(played) = next_sound_event(&mut juan_events).await else { panic!("not a play") };
+    assert_eq!((played.channel_id.as_str(), played.user_id.as_str()), (voice.id.as_str(), bot_id.as_str()));
+    assert_eq!(played.sound, Some(horn.clone()));
+
+    // Without Use Soundboard there, it's refused.
+    let request = pb::UpdateRoleRequest {
+        server_id: sid.clone(),
+        role_id: sid.clone(),
+        revoke: vec![pb::Permission::UseSoundboard as i32],
+        ..Default::default()
+    };
+    c.roles.update_role(authed(&juan, request)).await.unwrap();
+    assert_eq!(c.soundboard.play_sound(play(&bot)).await.unwrap_err().code(), Code::PermissionDenied);
+
+    // Changing and deleting it go out to members too.
+    let request = pb::UpdateSoundRequest {
+        server_id: sid.clone(),
+        sound_id: horn.id.clone(),
+        volume: Some(0.25),
+        emoji: Some(String::new()),
+        ..Default::default()
+    };
+    let changed = c.soundboard.update_sound(authed(&juan, request)).await.unwrap().into_inner().sound.unwrap();
+    assert_eq!((changed.volume, changed.emoji.as_str(), changed.name.as_str()), (0.25, "", "Horn"));
+    let Payload::SoundsUpdated(updated) = next_sound_event(&mut juan_events).await else { panic!("not the list") };
+    assert_eq!(updated.sounds, vec![changed]);
+    let request = pb::DeleteSoundRequest { server_id: sid.clone(), sound_id: horn.id.clone() };
+    c.soundboard.delete_sound(authed(&juan, request)).await.unwrap();
+    let Payload::SoundsUpdated(updated) = next_sound_event(&mut juan_events).await else { panic!("not the list") };
+    assert!(updated.sounds.is_empty());
+
+    drop(listening);
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
 }

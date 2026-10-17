@@ -29,18 +29,25 @@ impl MediaService for Api {
                         | pb::MediaPurpose::Attachment
                         | pb::MediaPurpose::Gif
                         | pb::MediaPurpose::Decoration
-                        | pb::MediaPurpose::ShopArt),
+                        | pb::MediaPurpose::ShopArt
+                        | pb::MediaPurpose::Sound),
                     ) => purpose,
                     _ => {
                         return Err(Error::invalid(
-                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF, a decoration, shop art or an attachment",
+                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF, a decoration, shop art, a sound or an attachment",
                         ));
                     }
                 };
                 let attachment = purpose == pb::MediaPurpose::Attachment;
+                let sound = purpose == pb::MediaPurpose::Sound;
                 // An attachment may be anything: what it's kept as comes from its bytes.
                 let content_type = if attachment {
                     media::OCTET_STREAM.to_string()
+                } else if sound {
+                    if !req.content_type.starts_with("audio/ogg") {
+                        return Err(Error::invalid("a sound is an Ogg Opus file (audio/ogg)"));
+                    }
+                    media::OGG_OPUS.to_string()
                 } else if media::PICTURE_TYPES.contains(&req.content_type.as_str()) {
                     req.content_type
                 } else {
@@ -58,6 +65,15 @@ impl MediaService for Api {
                 if purpose == pb::MediaPurpose::ShopArt && req.server_id.trim().is_empty() {
                     return Err(Error::invalid("shop art is uploaded for the server whose shop it's in"));
                 }
+                if sound && req.server_id.trim().is_empty() {
+                    return Err(Error::invalid("sounds are uploaded for the server whose soundboard they're on"));
+                }
+                if sound && req.size > media::MAX_SOUND_BYTES {
+                    return Err(Error::invalid(format!(
+                        "a sound plays for at most {} seconds, which is never that big",
+                        media::MAX_SOUND_MS / 1000
+                    )));
+                }
                 let server_id = match req.server_id.trim() {
                     "" => None,
                     id => {
@@ -70,9 +86,10 @@ impl MediaService for Api {
                                 | pb::MediaPurpose::Attachment
                                 | pb::MediaPurpose::Decoration
                                 | pb::MediaPurpose::ShopArt
+                                | pb::MediaPurpose::Sound
                         ) {
                             return Err(Error::invalid(
-                                "only icons, banners, emoji, decorations, webhook pictures, shop art and attachments are uploaded for a server",
+                                "only icons, banners, emoji, decorations, webhook pictures, shop art, sounds and attachments are uploaded for a server",
                             ));
                         }
                         let id = crate::id::parse_id("server_id", id)?;
@@ -84,7 +101,7 @@ impl MediaService for Api {
                 };
                 let settings = self.app.settings();
                 let limits = &settings.limits;
-                let (cap, per_day, what) = match attachment {
+                let (cap, per_day, what) = match attachment || sound {
                     true => (limits.attachment_upload_bytes, limits.attachment_upload_bytes_per_day, "files"),
                     false => (limits.picture_upload_bytes, limits.picture_upload_bytes_per_day, "pictures"),
                 };

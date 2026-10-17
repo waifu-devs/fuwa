@@ -97,6 +97,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "voice_message_bytes", get: (s) => s.voiceMessageBytes },
   { path: "voice_message_bytes_per_day", get: (s) => s.voiceMessageBytesPerDay },
   { path: "poll_votes_per_minute", get: (s) => s.pollVotesPerMinute },
+  { path: "sound_plays_per_minute", get: (s) => s.soundPlaysPerMinute },
   { path: "commands_per_minute", get: (s) => s.commandsPerMinute },
   { path: "pins_per_channel", get: (s) => s.pinsPerChannel },
   { path: "pins_per_conversation", get: (s) => s.pinsPerConversation },
@@ -1003,6 +1004,16 @@ function LimitSettings({ draft, defaults, patch, resetter }: TabProps) {
         <Cap label={t("instancesettings.shared.upTo")} placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
       </Setting>
       <Setting
+        id="sound-plays-per-minute"
+        title={t("instancesettings.limits.soundPlays")}
+        hint={t("instancesettings.limits.soundPlaysHint")}
+        defaultLabel={perMinute(t, defaults.soundPlaysPerMinute)}
+        delay={0.2}
+        {...resetter("sound_plays_per_minute")}
+      >
+        <Cap label={t("instancesettings.shared.upTo")} placeholder="10" value={draft.soundPlaysPerMinute} onChange={(v) => patch((d) => (d.soundPlaysPerMinute = v))} />
+      </Setting>
+      <Setting
         id="commands-per-minute"
         title={t("instancesettings.limits.commands")}
         hint={t("instancesettings.limits.commandsHint")}
@@ -1292,6 +1303,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "poll_votes_per_minute":
         into.pollVotesPerMinute = from.pollVotesPerMinute;
+        break;
+      case "sound_plays_per_minute":
+        into.soundPlaysPerMinute = from.soundPlaysPerMinute;
         break;
       case "commands_per_minute":
         into.commandsPerMinute = from.commandsPerMinute;

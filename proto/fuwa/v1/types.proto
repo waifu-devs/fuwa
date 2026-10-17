@@ -493,6 +493,18 @@ enum Permission {
   // on one takes only SEND_MESSAGES. Deleting someone else's card takes
   // MANAGE_MESSAGES.
   PERMISSION_MANAGE_CARDS = 32;
+
+  // Server-wide only.
+
+  // Add, change and delete the server's soundboard sounds
+  // (SoundboardService, docs/soundboard.md).
+  PERMISSION_MANAGE_SOUNDBOARD = 33;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Play the server's sounds for everyone in a voice channel
+  // (SoundboardService.PlaySound). Also takes SPEAK there.
+  PERMISSION_USE_SOUNDBOARD = 34;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -761,6 +773,28 @@ message Emoji {
   // The picture's size, counted in the server's attachment usage.
   int64 size = 7;
   google.protobuf.Timestamp created_at = 8;
+}
+
+// A sound on a server's soundboard (docs/soundboard.md).
+message Sound {
+  string id = 1;
+  string server_id = 2;
+  // 1 to 32 characters, unique in the server whatever their case.
+  string name = 3;
+  // A Unicode emoji, or one of the server's own written <:name:id>, shown
+  // beside the name. Empty for none.
+  string emoji = 4;
+  // An upload on this instance (MEDIA_PURPOSE_SOUND): Ogg Opus.
+  string url = 5;
+  // How loud it plays, from 0 to 1 (as it was made).
+  float volume = 6;
+  // How long it plays, in milliseconds: at most 10 seconds.
+  int32 duration_ms = 7;
+  // Who added it.
+  string creator_id = 8;
+  // The file's size, counted in the server's attachment usage.
+  int64 size = 9;
+  google.protobuf.Timestamp created_at = 10;
 }
 
 // ============================================================================
@@ -1499,6 +1533,12 @@ message Event {
     // MANAGE_ECONOMY get it, so agents can hand out what a custom prize
     // promises.
     GachaPulled gacha_pulled = 55;
+    // The server's soundboard changed: all its sounds, as they are now.
+    SoundsUpdated sounds_updated = 56;
+    // Not stored either: someone played a sound in a voice channel
+    // (SoundboardService.PlaySound). Apps in that call play it; it's never
+    // replayed.
+    SoundPlayed sound_played = 57;
   }
 }
 
@@ -1770,6 +1810,21 @@ message ApplicationUpdated {
 // every emoji the server has now.
 message EmojisUpdated {
   repeated Emoji emojis = 1;
+}
+
+message SoundsUpdated {
+  repeated Sound sounds = 1;
+}
+
+// Someone played one of the server's sounds for everyone in a voice
+// channel. Apps in that call play it, at the sound's volume times their
+// own soundboard volume, unless they're deafened.
+message SoundPlayed {
+  string channel_id = 1;
+  // Who played it, the same as the event's `actor_id`.
+  string user_id = 2;
+  // The sound as it is now, so apps can play it without listing them.
+  Sound sound = 3;
 }
 
 // The server's profile items changed: all of them, as they are now.

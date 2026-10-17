@@ -185,6 +185,8 @@
   "limits.voicePerDayHint": "What one account may send in a day (UTC), counted apart from pictures and files.",
   "limits.pollVotes": "Poll votes per minute",
   "limits.pollVotesHint": "How many times one account may vote, change or take back a vote in polls in a minute. Every vote is a live update to everyone in the channel.",
+  "limits.soundPlays": "Sounds played per minute",
+  "limits.soundPlaysHint": "How many soundboard sounds one account may play in a minute. Every sound plays for everyone in the voice channel.",
   "limits.commands": "Agent commands per minute",
   "limits.commandsHint": "How many times one account may run agents' slash commands or press their buttons in a minute. Each one wakes an agent up.",
   "limits.pinsPerChannel": "Pins per channel",

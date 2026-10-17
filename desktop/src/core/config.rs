@@ -528,6 +528,8 @@ pub struct Prefs {
     pub auto_gain_control: bool,
     /// How loud each person is for you, in percent, by "instance/user id". Missing means 100.
     pub user_volumes: std::collections::BTreeMap<String, u16>,
+    /// How loud the soundboard's sounds are for you, from 0 to 1, times each sound's own volume.
+    pub soundboard_volume: f32,
     /// The camera by name, "" for the system's default.
     pub video_device: String,
     /// Your own camera shows mirrored to you.
@@ -646,6 +648,7 @@ impl Default for Prefs {
             noise_suppression: true,
             auto_gain_control: true,
             user_volumes: Default::default(),
+            soundboard_volume: 1.0,
             video_device: String::new(),
             mirror_video: true,
             camera_height: 0,
@@ -754,6 +757,8 @@ impl Prefs {
         self.ptt_release = self.ptt_release.min(2000);
         self.overlay_opacity = self.overlay_opacity.clamp(30, 100);
         self.user_volumes.retain(|_, v| *v <= 200);
+        self.soundboard_volume =
+            if self.soundboard_volume.is_finite() { self.soundboard_volume.clamp(0.0, 1.0) } else { 1.0 };
         self.sync_stamps.retain(|_, at| *at > 0);
         if self.skin_tone > 5 {
             self.skin_tone = 0;

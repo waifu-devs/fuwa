@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  AudioLinesIcon,
   AtSignIcon,
   BellIcon,
   ChartColumnIcon,
@@ -52,6 +53,7 @@ import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
+import { Soundboard } from "@/components/settings/server/Soundboard";
 import { ProfileItems } from "@/components/settings/ProfileItems";
 import { Economy } from "@/components/settings/server/Economy";
 import { Finances } from "@/components/settings/server/Finances";
@@ -265,6 +267,13 @@ function useSettingsGroups(instanceKey: string, server: Server, can: (id: string
       keywords: "emoji emote custom sticker upload",
     },
     {
+      id: "soundboard",
+      label: t("serversettings.nav.soundboard"),
+      icon: AudioLinesIcon,
+      description: t("serversettings.nav.soundboardAbout"),
+      keywords: "soundboard sound sounds effects air horn meme clip audio voice",
+    },
+    {
       id: "profile-items",
       label: t("serversettings.nav.profileItems"),
       icon: SparklesIcon,
@@ -380,6 +389,7 @@ const PAGES: Record<string, (p: PageProps) => ReactNode> = {
   "join-form": (p) => <JoinFormEditor instanceKey={p.instanceKey} server={p.server} onOpenAccess={() => p.setTab("access")} />,
   welcome: (p) => <WelcomeAndOnboarding instanceKey={p.instanceKey} server={p.server} />,
   emoji: (p) => <Emoji instanceKey={p.instanceKey} serverId={p.server.id} />,
+  soundboard: (p) => <Soundboard instanceKey={p.instanceKey} serverId={p.server.id} />,
   "profile-items": (p) => <ProfileItems instanceKey={p.instanceKey} serverId={p.server.id} />,
   economy: (p) => <Economy instanceKey={p.instanceKey} serverId={p.server.id} />,
   finances: (p) => <Finances instanceKey={p.instanceKey} serverId={p.server.id} />,

@@ -144,7 +144,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 61] = [
+pub const PATHS: [&str; 62] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -177,6 +177,7 @@ pub const PATHS: [&str; 61] = [
     "voice_message_bytes",
     "voice_message_bytes_per_day",
     "poll_votes_per_minute",
+    "sound_plays_per_minute",
     "commands_per_minute",
     "pins_per_channel",
     "pins_per_conversation",
@@ -238,6 +239,7 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "voice_message_bytes" => s.voice_message_bytes,
         "voice_message_bytes_per_day" => s.voice_message_bytes_per_day,
         "poll_votes_per_minute" => s.poll_votes_per_minute,
+        "sound_plays_per_minute" => s.sound_plays_per_minute,
         "commands_per_minute" => s.commands_per_minute,
         "shared_remote_sends_per_minute" => s.shared_remote_sends_per_minute,
         "shared_remote_people" => s.shared_remote_people,
@@ -273,6 +275,7 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "voice_message_bytes" => &mut s.voice_message_bytes,
         "voice_message_bytes_per_day" => &mut s.voice_message_bytes_per_day,
         "poll_votes_per_minute" => &mut s.poll_votes_per_minute,
+        "sound_plays_per_minute" => &mut s.sound_plays_per_minute,
         "commands_per_minute" => &mut s.commands_per_minute,
         "shared_remote_sends_per_minute" => &mut s.shared_remote_sends_per_minute,
         "shared_remote_people" => &mut s.shared_remote_people,

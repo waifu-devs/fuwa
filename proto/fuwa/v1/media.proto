@@ -5,7 +5,8 @@ package fuwa.v1;
 import "google/protobuf/timestamp.proto";
 
 // Files people upload to this instance: profile pictures, profile banners,
-// server icons, custom emoji, app backgrounds, and files attached to messages.
+// server icons, custom emoji, soundboard sounds, app backgrounds, and files
+// attached to messages.
 //
 // An upload takes two steps. CreateUpload checks the file and reserves a
 // place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -61,6 +62,10 @@ enum MediaPurpose {
   // A picture for a server's shop: a gacha banner's art (GachaBanner
   // .art_url). Uploaded for the server (server_id is required).
   MEDIA_PURPOSE_SHOP_ART = 10;
+  // A sound for a server's soundboard (SoundboardService.CreateSound): Ogg
+  // Opus (audio/ogg), at most 10 seconds long. Uploaded for the server
+  // (server_id is required); the attachment caps apply.
+  MEDIA_PURPOSE_SOUND = 11;
 }
 
 // A stored file.
@@ -76,15 +81,16 @@ message CreateUploadRequest {
   MediaPurpose purpose = 1;
   // image/png, image/jpeg, image/gif, image/webp or image/avif. The bytes are
   // checked when they arrive. For an attachment, whatever the file says it
-  // is (or empty): what it's kept as comes from its bytes.
+  // is (or empty): what it's kept as comes from its bytes. For a sound,
+  // audio/ogg.
   string content_type = 2;
   // The file's exact size in bytes, at most the instance's
-  // `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
-  // when that's set.
+  // `picture_upload_bytes` (or for an attachment or a sound
+  // `attachment_upload_bytes`) when that's set.
   int64 size = 3;
   // For a server's icon or banner, an emoji, a decoration, a webhook's
-  // picture, shop art or an attachment (required for an attachment, shop
-  // art and a server's banner): the
+  // picture, shop art, a sound or an attachment (required for an
+  // attachment, shop art, a sound and a server's banner): the
   // server it's for (you must be in it). The file can then only be used
   // there, and on an instance split across regions its bytes go straight to
   // the server's region rather than the home one.

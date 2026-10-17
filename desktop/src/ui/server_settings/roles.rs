@@ -59,6 +59,8 @@ pub(super) fn permission_name(p: P) -> String {
         P::ManageEconomy => t("desktop.economy.permission.manage"),
         P::GrantCurrency => t("desktop.economy.permission.grant"),
         P::ManageCards => t("serversettings.permission.manageCards"),
+        P::ManageSoundboard => t("serversettings.permission.manageSoundboard"),
+        P::UseSoundboard => t("serversettings.permission.useSoundboard"),
     }
 }
 
@@ -98,6 +100,8 @@ pub(super) fn permission_about(p: P) -> String {
         P::ManageEconomy => t("desktop.economy.permission.manageAbout"),
         P::GrantCurrency => t("desktop.economy.permission.grantAbout"),
         P::ManageCards => t("serversettings.permission.manageCardsAbout"),
+        P::ManageSoundboard => t("serversettings.permission.manageSoundboardAbout"),
+        P::UseSoundboard => t("serversettings.permission.useSoundboardAbout"),
     }
 }
 
@@ -115,6 +119,7 @@ pub(super) fn permission_here(p: P) -> String {
         P::Speak => t("serversettings.permission.speakChannel"),
         P::Video => t("serversettings.permission.videoChannel"),
         P::Record => t("serversettings.permission.recordChannel"),
+        P::UseSoundboard => t("serversettings.permission.useSoundboardChannel"),
         P::MuteMembers => t("serversettings.permission.muteMembersChannel"),
         P::MoveMembers => t("serversettings.permission.moveMembersChannel"),
         other => permission_about(other),

@@ -142,6 +142,10 @@ pub struct InstanceState {
     pub economy: HashMap<String, crate::core::economy::Economy>,
     /// Per board channel, while it's been opened: its columns, labels, cards and their bodies (`board.rs`).
     pub boards: HashMap<String, crate::core::board::Board>,
+    /// Per server, once listed: its soundboard's sounds, oldest first (`soundboard.rs`).
+    pub sounds: HashMap<String, Vec<pb::Sound>>,
+    /// Sounds played in voice channels a moment ago, shown on whoever played them.
+    pub sounds_played: Vec<crate::core::soundboard::Played>,
 }
 
 impl InstanceState {
@@ -190,6 +194,8 @@ impl InstanceState {
             mod_view: HashMap::new(),
             economy: HashMap::new(),
             boards: HashMap::new(),
+            sounds: HashMap::new(),
+            sounds_played: Vec::new(),
         }
     }
 
@@ -456,6 +462,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.live_tiles.remove(server_id);
     i.emojis.remove(server_id);
     i.server_items.remove(server_id);
+    i.sounds.remove(server_id);
     i.shared.remove(server_id);
     i.mod_view.remove(server_id);
     i.economy.remove(server_id);
@@ -742,6 +749,7 @@ pub fn apply_event(
         Payload::EmojisUpdated(p) => {
             i.emojis.insert(sid.to_owned(), p.emojis.clone());
         }
+        Payload::SoundsUpdated(p) => crate::core::soundboard::updated(i, sid, &p.sounds),
         Payload::ProfileItemsUpdated(p) => {
             i.server_items.insert(sid.to_owned(), p.items.clone());
         }

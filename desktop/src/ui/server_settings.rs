@@ -55,6 +55,7 @@ mod pages;
 mod people;
 mod recordings;
 pub(crate) mod roles;
+mod soundboard;
 pub(crate) use roles::switch;
 mod shared;
 mod sso;
@@ -141,6 +142,7 @@ pub(crate) enum Page {
     Roles,
     Channels,
     Emoji,
+    Soundboard,
     ProfileItems,
     Economy,
     Finances,
@@ -159,7 +161,7 @@ pub(crate) enum Page {
 }
 
 /// Every page, in the web's menu order (`serverSettingsTabs.ts`).
-const ALL: [Page; 24] = [
+const ALL: [Page; 25] = [
     Page::Overview,
     Page::Access,
     Page::Sso,
@@ -169,6 +171,7 @@ const ALL: [Page; 24] = [
     Page::Roles,
     Page::Channels,
     Page::Emoji,
+    Page::Soundboard,
     Page::ProfileItems,
     Page::Economy,
     Page::Finances,
@@ -204,6 +207,7 @@ impl Page {
                 access.channels.keys().any(|c| access.has_in(c, P::ManageChannels) || access.has_in(c, P::ManageRoles))
             }
             Page::Emoji => access.has(P::ManageEmoji),
+            Page::Soundboard => access.has(P::ManageSoundboard),
             Page::ProfileItems => manage,
             Page::Economy | Page::Finances => access.has(P::ManageEconomy),
             Page::Integrations => access.has(P::ManageWebhooks) || manage,
@@ -238,6 +242,7 @@ impl Page {
             Page::Roles => "shield",
             Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
+            Page::Soundboard => "audio-lines",
             Page::ProfileItems => "sparkles",
             Page::Economy => "coins",
             Page::Finances => "landmark",
@@ -277,6 +282,7 @@ impl Page {
             Page::Roles => "roles",
             Page::Channels => "channels",
             Page::Emoji => "emoji",
+            Page::Soundboard => "soundboard",
             Page::ProfileItems => "profileItems",
             Page::Economy => "economy",
             Page::Finances => "finances",
@@ -323,6 +329,7 @@ impl Page {
             Page::Roles => "permissions admin moderator rank color hoist mention everyone",
             Page::Channels => "reorder drag category topic slowmode slow mode private permissions overwrites",
             Page::Emoji => "emoji emote custom sticker upload",
+            Page::Soundboard => "soundboard sound sounds audio clip air horn meme voice play",
             Page::ProfileItems => "profile items effects decorations avatar frame sparkle wear",
             Page::Economy => {
                 "economy currency currencies coins points gems earn daily reward streak shop store sell buy price"
@@ -478,6 +485,7 @@ pub struct ServerSettingsView {
     copied: Option<(String, Instant)>,
     roles: roles::Roles,
     emojis: emoji::Emojis,
+    sounds: soundboard::Sounds,
     hooks: webhooks::Hooks,
     agents: agents::Agents,
     automod: automod::AutoMod,
@@ -551,6 +559,7 @@ impl ServerSettingsView {
         .detach();
         let (roles, role_subscriptions) = roles::Roles::new(window, cx);
         let (emojis, emoji_subscriptions) = emoji::Emojis::new(window, cx);
+        let (sounds, sound_subscriptions) = soundboard::Sounds::new(window, cx);
         let (hooks, hook_subscriptions) = webhooks::Hooks::new(window, cx);
         let (agents, agent_subscriptions) = agents::Agents::new(window, cx);
         let (automod, automod_subscriptions) = automod::AutoMod::new(window, cx);
@@ -584,6 +593,7 @@ impl ServerSettingsView {
         subscriptions.extend(page_subscriptions);
         subscriptions.extend(role_subscriptions);
         subscriptions.extend(emoji_subscriptions);
+        subscriptions.extend(sound_subscriptions);
         subscriptions.extend(hook_subscriptions);
         subscriptions.extend(agent_subscriptions);
         subscriptions.extend(automod_subscriptions);
@@ -616,6 +626,7 @@ impl ServerSettingsView {
             copied: None,
             roles,
             emojis,
+            sounds,
             hooks,
             agents,
             automod,
@@ -778,6 +789,10 @@ impl Render for ServerSettingsView {
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("profile-items"))) {
             allowed.retain(|pg| *pg != Page::ProfileItems);
         }
+        // Nor a soundboard before one.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("soundboard"))) {
+            allowed.retain(|pg| *pg != Page::Soundboard);
+        }
         // Nor an economy before that.
         if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("economy"))) {
             allowed.retain(|pg| !matches!(pg, Page::Economy | Page::Finances));
@@ -844,6 +859,7 @@ impl Render for ServerSettingsView {
             Page::Roles => self.roles_page(&p, window, cx),
             Page::Channels => self.channels_page(&p, window, cx),
             Page::Emoji => self.emoji_page(&p, window, cx),
+            Page::Soundboard => self.soundboard_page(&p, window, cx),
             Page::ProfileItems => {
                 let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
                 self.profile_items
@@ -1845,6 +1861,22 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             "serversettings.audit.s.emojiDelete",
             &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&emoji_before))],
         ),
+        A::SoundCreate => {
+            t_with("serversettings.audit.s.soundCreate", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))])
+        }
+        A::SoundUpdate if only("name") => t_with(
+            "serversettings.audit.s.renamed",
+            &[("actor", Arg::Str(&actor)), ("before", Arg::Str(&before)), ("after", Arg::Str(&after))],
+        ),
+        A::SoundUpdate => {
+            let name = change("name")
+                .map(|_| after.clone())
+                .unwrap_or_else(|| format!("**{}**", t("serversettings.audit.aSound")));
+            t_with("serversettings.audit.s.soundUpdate", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&name))])
+        }
+        A::SoundDelete => {
+            t_with("serversettings.audit.s.soundDelete", &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&before))])
+        }
         A::ProfileItemCreate => t_with(
             "serversettings.audit.s.profileItemCreate",
             &[("actor", Arg::Str(&actor)), ("name", Arg::Str(&after))],

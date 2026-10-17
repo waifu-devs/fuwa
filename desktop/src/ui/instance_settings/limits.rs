@@ -177,6 +177,17 @@ impl InstanceSettingsView {
                 )
             },
             Row {
+                off: Some("10"),
+                ..row(
+                    "sound-plays-per-minute",
+                    "instancesettings.limits.soundPlays",
+                    "instancesettings.limits.soundPlaysHint",
+                    &["sound_plays_per_minute"],
+                    false,
+                    per_minute(defaults.sound_plays_per_minute),
+                )
+            },
+            Row {
                 off: Some("20"),
                 ..row(
                     "commands-per-minute",
@@ -273,6 +284,10 @@ impl InstanceSettingsView {
         if !self.instance_has("agent-commands") {
             rows.retain(|r| r.id != "commands-per-minute");
         }
+        // The soundboard, likewise.
+        if !self.instance_has("soundboard") {
+            rows.retain(|r| r.id != "sound-plays-per-minute");
+        }
         for (n, r) in rows.into_iter().enumerate() {
             let cap = self.cap_with(r.path[0], &r.label, r.bytes, r.off, p, window, cx);
             page = page.child(self.setting(r.id, &t(r.title), Some(&t(r.hint)), r.path, &r.default, 1 + n, cap, p, cx));
@@ -282,7 +297,7 @@ impl InstanceSettingsView {
 }
 
 /// Every cap a page shows: (path, a size), for the boxes they're typed in.
-pub(super) const CAPS: [(&str, bool); 32] = [
+pub(super) const CAPS: [(&str, bool); 33] = [
     ("servers_per_account", false),
     ("default_limits.members", false),
     ("default_limits.channels", false),
@@ -300,6 +315,7 @@ pub(super) const CAPS: [(&str, bool); 32] = [
     ("voice_message_bytes", true),
     ("voice_message_bytes_per_day", true),
     ("poll_votes_per_minute", false),
+    ("sound_plays_per_minute", false),
     ("commands_per_minute", false),
     ("pins_per_channel", false),
     ("pins_per_conversation", false),

@@ -58,6 +58,8 @@ const OUTER_SCROLLS: &[(&str, usize)] = &[
     ("shop.rs", 1),
     ("shop/gacha.rs", 1),
     ("sidebar.rs", 1),
+    // The soundboard's grid: its own list in a card that floats over the call and occludes.
+    ("soundboard.rs", 1),
     ("threads.rs", 2),
     ("voice_stage.rs", 1),
     ("widgets.rs", 1),

@@ -23,6 +23,7 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   emoji: (a) => has(a, Permission.MANAGE_EMOJI),
+  soundboard: (a) => has(a, Permission.MANAGE_SOUNDBOARD),
   "profile-items": (a) => has(a, Permission.MANAGE_SERVER),
   economy: (a) => has(a, Permission.MANAGE_ECONOMY),
   finances: (a) => has(a, Permission.MANAGE_ECONOMY),
@@ -51,12 +52,15 @@ export function useServerSettingsTabs(instanceKey: string, serverId: string): st
   const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
   // The economy (docs/economy.md) too.
   const economyHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "economy"));
+  // And the soundboard (docs/soundboard.md).
+  const soundsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "soundboard"));
   return useMemo(
     () =>
       settingsTabsFor(access, admin).filter(
-        (id) => (itemsHere || id !== "profile-items") && (economyHere || (id !== "economy" && id !== "finances")),
+        (id) =>
+          (itemsHere || id !== "profile-items") && (economyHere || (id !== "economy" && id !== "finances")) && (soundsHere || id !== "soundboard"),
       ),
-    [access, admin, itemsHere, economyHere],
+    [access, admin, itemsHere, economyHere, soundsHere],
   );
 }
 

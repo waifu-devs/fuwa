@@ -160,6 +160,21 @@ tools! {
         "Delete an emoji",
         "Deletes one of the server's custom emoji and its picture. Needs Manage Emoji.";
 
+    // Soundboard (docs/soundboard.md).
+    "list_sounds" => soundboard_service_client::SoundboardServiceClient.list_sounds(ListSoundsRequest), Reads,
+        "List sounds",
+        "The server's soundboard sounds: ids, names, emoji, volumes and their Ogg Opus files.";
+    "play_sound" => soundboard_service_client::SoundboardServiceClient.play_sound(PlaySoundRequest), Writes,
+        "Play a sound",
+        "Plays one of the server's sounds for everyone in the voice channel this agent is in (joined with \
+         ListenVoice). Needs Use Soundboard and Speak there, and not to be muted.";
+    "update_sound" => soundboard_service_client::SoundboardServiceClient.update_sound(UpdateSoundRequest), Writes,
+        "Change a sound",
+        "Renames one of the server's sounds, or changes its emoji or volume (0 to 1). Needs Manage Soundboard.";
+    "delete_sound" => soundboard_service_client::SoundboardServiceClient.delete_sound(DeleteSoundRequest), Destroys,
+        "Delete a sound",
+        "Deletes one of the server's sounds and its file. Needs Manage Soundboard.";
+
     // Webhooks.
     "list_webhooks" => webhook_service_client::WebhookServiceClient.list_webhooks(ListWebhooksRequest), Reads,
         "List webhooks",

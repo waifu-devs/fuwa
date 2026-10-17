@@ -58,6 +58,9 @@ pub(crate) fn kind(action: A, p: &Palette) -> (&'static str, Hsla, Hsla, &'stati
         A::EmojiCreate => ("face-slightly-smiling-plus", green, "emojiCreate"),
         A::EmojiUpdate => ("face-slightly-smiling", sky, "emojiUpdate"),
         A::EmojiDelete => ("face-slightly-frowning", red, "emojiDelete"),
+        A::SoundCreate => ("volume-2", green, "soundCreate"),
+        A::SoundUpdate => ("audio-lines", sky, "soundUpdate"),
+        A::SoundDelete => ("volume-x", red, "soundDelete"),
         A::ProfileItemCreate => ("sparkles", green, "profileItemCreate"),
         A::ProfileItemUpdate => ("sparkles", sky, "profileItemUpdate"),
         A::ProfileItemDelete => ("trash", red, "profileItemDelete"),
@@ -397,8 +400,12 @@ impl ServerSettingsView {
             .child(head);
         if open {
             let one_side = match action {
-                A::InviteCreate | A::AutoModRuleCreate | A::EmojiCreate | A::WebhookCreate => Some(true),
-                A::InviteDelete | A::AutoModRuleDelete | A::EmojiDelete | A::WebhookDelete => Some(false),
+                A::InviteCreate | A::AutoModRuleCreate | A::EmojiCreate | A::SoundCreate | A::WebhookCreate => {
+                    Some(true)
+                }
+                A::InviteDelete | A::AutoModRuleDelete | A::EmojiDelete | A::SoundDelete | A::WebhookDelete => {
+                    Some(false)
+                }
                 _ => None,
             };
             let mut more = div()

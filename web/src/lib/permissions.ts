@@ -54,6 +54,8 @@ export const KNOWN: P[] = [
   P.MANAGE_ECONOMY,
   P.GRANT_CURRENCY,
   P.MANAGE_CARDS,
+  P.MANAGE_SOUNDBOARD,
+  P.USE_SOUNDBOARD,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), NONE);
@@ -75,6 +77,7 @@ export const CHANNEL: Bits = [
   P.SPEAK,
   P.VIDEO,
   P.RECORD,
+  P.USE_SOUNDBOARD,
   P.CREATE_POLLS,
   P.ADD_REACTIONS,
   P.MUTE_MEMBERS,
@@ -96,6 +99,7 @@ export const TALK: Bits = [
   P.CONNECT,
   P.SPEAK,
   P.VIDEO,
+  P.USE_SOUNDBOARD,
 ].reduce((bits, p) => bits | bit(p), NONE);
 
 /**
@@ -109,6 +113,7 @@ export const POWERS: Bits = [
   P.MANAGE_ROLES,
   P.MANAGE_CHANNELS,
   P.MANAGE_EMOJI,
+  P.MANAGE_SOUNDBOARD,
   P.MANAGE_WEBHOOKS,
   P.MANAGE_MESSAGES,
   P.MENTION_EVERYONE,
@@ -185,10 +190,16 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     channel: "serversettings.permission.createInviteChannel",
   },
   [P.MANAGE_EMOJI]: { label: "serversettings.permission.manageEmoji", about: "serversettings.permission.manageEmojiAbout" },
+  [P.MANAGE_SOUNDBOARD]: { label: "serversettings.permission.manageSoundboard", about: "serversettings.permission.manageSoundboardAbout" },
   [P.CONNECT]: { label: "serversettings.permission.connect", about: "serversettings.permission.connectAbout", channel: "serversettings.permission.connectChannel" },
   [P.SPEAK]: { label: "serversettings.permission.speak", about: "serversettings.permission.speakAbout", channel: "serversettings.permission.speakChannel" },
   [P.VIDEO]: { label: "serversettings.permission.video", about: "serversettings.permission.videoAbout", channel: "serversettings.permission.videoChannel" },
   [P.RECORD]: { label: "serversettings.permission.record", about: "serversettings.permission.recordAbout", channel: "serversettings.permission.recordChannel" },
+  [P.USE_SOUNDBOARD]: {
+    label: "serversettings.permission.useSoundboard",
+    about: "serversettings.permission.useSoundboardAbout",
+    channel: "serversettings.permission.useSoundboardChannel",
+  },
   [P.MUTE_MEMBERS]: {
     label: "serversettings.permission.muteMembers",
     about: "serversettings.permission.muteMembersAbout",
@@ -222,7 +233,7 @@ export const permissionLabel = (t: (key: Key) => string, p: P) => {
 export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
   {
     title: "serversettings.permission.group.server",
-    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_WEBHOOKS, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
+    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_SOUNDBOARD, P.MANAGE_WEBHOOKS, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
   },
   {
     title: "serversettings.permission.group.membership",
@@ -232,7 +243,7 @@ export const PERMISSION_GROUPS: { title: Key; permissions: P[] }[] = [
     title: "serversettings.permission.group.textChannels",
     permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.MANAGE_CARDS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "serversettings.permission.group.voiceChannels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.USE_SOUNDBOARD, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "serversettings.permission.group.economy", permissions: [P.MANAGE_ECONOMY, P.GRANT_CURRENCY] },
   { title: "serversettings.permission.group.advanced", permissions: [P.ADMINISTRATOR] },
 ];
@@ -245,7 +256,7 @@ export const CHANNEL_GROUPS: { kind: "general" | "text" | "voice"; title: Key; p
     title: "serversettings.permission.group.text",
     permissions: [P.SEND_MESSAGES, P.ADD_REACTIONS, P.CREATE_THREADS, P.CREATE_POLLS, P.MANAGE_CARDS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { kind: "voice", title: "serversettings.permission.group.voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { kind: "voice", title: "serversettings.permission.group.voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.USE_SOUNDBOARD, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
 
 /** What one member can do in one server. */

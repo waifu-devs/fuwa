@@ -383,6 +383,11 @@ enum AuditAction {
   AUDIT_ACTION_GACHA_BANNER_CREATE = 71;
   AUDIT_ACTION_GACHA_BANNER_UPDATE = 72;
   AUDIT_ACTION_GACHA_BANNER_DELETE = 73;
+  // Soundboard sounds: the target is the sound, and the changes say what
+  // changed (name, emoji, volume).
+  AUDIT_ACTION_SOUND_CREATE = 74;
+  AUDIT_ACTION_SOUND_UPDATE = 75;
+  AUDIT_ACTION_SOUND_DELETE = 76;
 }
 
 // One thing someone did with a moderator's or manager's permission.

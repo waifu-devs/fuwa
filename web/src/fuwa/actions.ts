@@ -445,6 +445,13 @@ export const uploadAttachment = (key: string, serverId: string, file: Blob, prog
     return yield* upload(key, MediaPurpose.ATTACHMENT, file, progress, serverId);
   });
 
+/** Uploads a soundboard sound's file (Ogg Opus, made by voice/sound-file.ts) for `serverId`, and resolves to its link. */
+export const uploadSound = (key: string, serverId: string, file: Blob, progress?: (sent: number) => void) =>
+  Effect.gen(function* () {
+    reportUsage("upload.sound");
+    return yield* upload(key, MediaPurpose.SOUND, file, progress, serverId);
+  });
+
 const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
   Effect.gen(function* () {
     const { uploadUrl, media } = yield* call((signal) =>
