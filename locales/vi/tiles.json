@@ -1,0 +1,54 @@
+{
+  "strip.label": "Đang diễn ra",
+  "strip.options": "Tùy chọn ô",
+  "strip.hide": "Ẩn ô này",
+  "strip.quiet": "Máy chủ này không có ô trực tiếp nào",
+  "strip.off": "Tắt ô trực tiếp",
+  "strip.remove": "Gỡ cho mọi người",
+  "strip.removeFailed": "Không thể gỡ ô",
+  "menu.show": "Ô trực tiếp",
+  "menu.server": "Ô cho mọi người ở đây",
+  "menu.bigServer": {
+    "other": "Phòng thoại mặc định tắt ở máy chủ có từ {count} thành viên trở lên"
+  },
+  "menu.everyone": "Mọi người ở đây chỉ thấy các loại này",
+  "menu.reset": "Về mặc định",
+  "menu.failed": "Không thể thay đổi ô của máy chủ",
+  "kind.voice": "Phòng thoại",
+  "kind.poll": "Bình chọn",
+  "kind.thread": "Chủ đề đang theo dõi",
+  "kind.shared": "Kênh chia sẻ",
+  "kind.app": "Từ ứng dụng",
+  "voice.title": {
+    "other": "{count} người trong {channel}"
+  },
+  "voice.since": "Đang nói chuyện từ {time}",
+  "voice.video": "Đang bật camera",
+  "voice.screen": "Đang chia sẻ màn hình",
+  "voice.join": "Tham gia",
+  "poll.title": "Bình chọn trong #{channel}",
+  "poll.closesMinutes": {
+    "other": "Kết thúc sau {count} phút"
+  },
+  "poll.closesHours": {
+    "other": "Kết thúc sau {count} giờ"
+  },
+  "poll.noEnd": "Mở cho đến khi kết thúc",
+  "poll.voters": {
+    "other": "{count} người đã bình chọn"
+  },
+  "poll.vote": "Bình chọn",
+  "thread.title": "Một chủ đề bạn theo dõi",
+  "thread.unread": {
+    "other": "{count} trả lời mới"
+  },
+  "thread.open": "Mở",
+  "shared.title": "Sôi nổi trong #{channel}",
+  "shared.text": {
+    "other": "{count} tin nhắn mới từ {servers} máy chủ"
+  },
+  "shared.open": "Xem tin mới",
+  "app.by": "Từ {app}",
+  "app.live": "Trực tiếp",
+  "app.open": "Mở"
+}

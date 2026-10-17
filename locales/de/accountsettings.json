@@ -352,6 +352,8 @@
   "privacy.activityHint": "Spiele und Apps, die die Desktop-App sieht, angezeigt für Leute, die einen Server mit dir teilen. Nichts wird gespeichert: Es ist weg, wenn du aufhörst.",
   "privacy.activityOff": "{instance} zeigt nicht an, was Leute gerade machen. Dein Status wird trotzdem angezeigt.",
   "privacy.saveFailed": "Konnte nicht gespeichert werden: {error}",
+  "privacy.typing": "Anzeigen, wenn ich tippe",
+  "privacy.typingHint": "Andere sehen eine Tipp-Anzeige, während du eine Nachricht schreibst. Schalte es aus, dann sieht sie niemand; du siehst ihre weiterhin.",
   "privacy.shareHere": "Meine Aktivität hier teilen",
   "privacy.shareIn": "Meine Aktivität auf {server} teilen",
   "signIn.yours": "Wie du dich anmeldest",

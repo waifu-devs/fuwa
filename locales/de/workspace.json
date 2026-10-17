@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "Bild geöffnet, damit du es dort speichern kannst",
   "menu.message.openThread": "Thread öffnen",
   "menu.message.replyInThread": "Im Thread antworten",
+  "menu.message.reply": "Antworten",
   "menu.message.edit": "Nachricht bearbeiten",
   "menu.message.copyText": "Text kopieren",
   "menu.message.keepOut": "{name} aussperren",

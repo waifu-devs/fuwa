@@ -102,7 +102,8 @@ export function fill(text: string, values: Record<string, string> = {}): string 
 /**
  * Picks the shipped locale that best matches what someone asked for, in order:
  * an exact match, then the same language ("es-MX" gets "es", "pt" gets "pt-BR"),
- * else English.
+ * else English. Chinese goes by script: "zh-TW" and "zh-HK" get "zh-Hant", other
+ * Chinese "zh-Hans".
  */
 export function negotiate(requested: readonly string[], available: readonly string[], fallback = "en"): string {
   const lower = new Map(available.map((code) => [code.toLowerCase(), code]));
@@ -111,6 +112,8 @@ export function negotiate(requested: readonly string[], available: readonly stri
     if (!want || want === "*") continue;
     const exact = lower.get(want);
     if (exact) return exact;
+    const script = chineseScript(want);
+    if (script && lower.has(script)) return lower.get(script)!;
     const language = want.split("-")[0];
     const base = lower.get(language);
     if (base) return base;
@@ -119,6 +122,14 @@ export function negotiate(requested: readonly string[], available: readonly stri
     if (variant) return variant;
   }
   return fallback;
+}
+
+/** The script a Chinese tag is written in ("zh-hant" or "zh-hans"), for tags that name a region instead. */
+function chineseScript(want: string): string | undefined {
+  const [language, ...rest] = want.split("-");
+  if (language !== "zh") return undefined;
+  if (rest.includes("hant") || rest.some((part) => part === "tw" || part === "hk" || part === "mo")) return "zh-hant";
+  return "zh-hans";
 }
 
 /**

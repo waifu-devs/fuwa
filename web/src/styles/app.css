@@ -111,6 +111,14 @@
   --font-mono: var(--code-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
+/* M PLUS draws Han characters the Japanese way, so Chinese reads in the system's Chinese fonts. */
+body:lang(zh-Hans) {
+  font-family: var(--app-font, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif);
+}
+body:lang(zh-Hant) {
+  font-family: var(--app-font, "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", ui-sans-serif, system-ui, sans-serif);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

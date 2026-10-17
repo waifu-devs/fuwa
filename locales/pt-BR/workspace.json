@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "A imagem foi aberta para você salvar de lá",
   "menu.message.openThread": "Abrir tópico",
   "menu.message.replyInThread": "Responder no tópico",
+  "menu.message.reply": "Responder",
   "menu.message.edit": "Editar mensagem",
   "menu.message.copyText": "Copiar texto",
   "menu.message.keepOut": "Impedir {name} de ver o canal",

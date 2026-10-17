@@ -1,0 +1,61 @@
+{
+  "strip.label": "अभी चल रहा है",
+  "strip.options": "टाइल विकल्प",
+  "strip.hide": "इसे छिपाएं",
+  "strip.quiet": "इस सर्वर में कोई लाइव टाइल नहीं",
+  "strip.off": "लाइव टाइल बंद करें",
+  "strip.remove": "सबके लिए हटाएं",
+  "strip.removeFailed": "टाइल हटाई नहीं जा सकी",
+  "menu.show": "लाइव टाइल",
+  "menu.server": "यहां सबके लिए टाइल",
+  "menu.bigServer": {
+    "one": "{count} या उससे ज़्यादा सदस्यों वाले सर्वर में वॉइस रूम शुरू से बंद रहते हैं",
+    "other": "{count} या उससे ज़्यादा सदस्यों वाले सर्वर में वॉइस रूम शुरू से बंद रहते हैं"
+  },
+  "menu.everyone": "यहां सभी को सिर्फ़ ये प्रकार दिखते हैं",
+  "menu.reset": "डिफ़ॉल्ट पर वापस",
+  "menu.failed": "सर्वर की टाइल बदली नहीं जा सकीं",
+  "kind.voice": "वॉइस रूम",
+  "kind.poll": "पोल",
+  "kind.thread": "फ़ॉलो किए थ्रेड",
+  "kind.shared": "साझा चैनल",
+  "kind.app": "ऐप्स से",
+  "voice.title": {
+    "one": "{channel} में {count} व्यक्ति",
+    "other": "{channel} में {count} लोग"
+  },
+  "voice.since": "{time} से बातचीत जारी",
+  "voice.video": "कैमरे चालू",
+  "voice.screen": "स्क्रीन शेयर हो रही है",
+  "voice.join": "जुड़ें",
+  "poll.title": "#{channel} में पोल",
+  "poll.closesMinutes": {
+    "one": "{count} मिनट में बंद होगा",
+    "other": "{count} मिनट में बंद होगा"
+  },
+  "poll.closesHours": {
+    "one": "{count} घंटे में बंद होगा",
+    "other": "{count} घंटे में बंद होगा"
+  },
+  "poll.noEnd": "खत्म किए जाने तक खुला",
+  "poll.voters": {
+    "one": "{count} ने वोट दिया",
+    "other": "{count} ने वोट दिया"
+  },
+  "poll.vote": "वोट दें",
+  "thread.title": "आपका फ़ॉलो किया थ्रेड",
+  "thread.unread": {
+    "one": "{count} नया जवाब",
+    "other": "{count} नए जवाब"
+  },
+  "thread.open": "खोलें",
+  "shared.title": "#{channel} में हलचल",
+  "shared.text": {
+    "one": "{servers} सर्वर से {count} नया संदेश",
+    "other": "{servers} सर्वर से {count} नए संदेश"
+  },
+  "shared.open": "देखें",
+  "app.by": "{app} से",
+  "app.live": "लाइव",
+  "app.open": "खोलें"
+}

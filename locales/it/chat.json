@@ -302,5 +302,10 @@
   "secure.dialog.resetAbout": "Se la crittografia del canale smette di funzionare per tutti, falla ripartire da zero. I messaggi già letti restano sui dispositivi che li hanno letti.",
   "secure.resetAsk": "Ripartire da zero per tutti?",
   "secure.reset": "Fai ripartire la crittografia",
-  "threads.jumpTooFar": "Quel messaggio è troppo indietro per saltarci"
+  "threads.jumpTooFar": "Quel messaggio è troppo indietro per saltarci",
+  "typing.one": "{name} sta scrivendo",
+  "typing.two": "{first} e {second} stanno scrivendo",
+  "typing.three": "{first}, {second} e {third} stanno scrivendo",
+  "typing.several": "Più persone stanno scrivendo",
+  "typing.someone": "Qualcuno"
 }

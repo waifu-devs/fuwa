@@ -1,0 +1,23 @@
+{
+  "build.commit": "建置自 commit {commit}",
+  "update.updated": "fuwa 已更新",
+  "update.reload": "重新載入",
+  "update.later": "稍後",
+  "update.laterHint": "稍後：在重新載入前繼續使用此版本",
+  "update.hasFeature": "{instance} 支援 {feature}。請更新 fuwa 以使用",
+  "update.hasFeatures": {
+    "other": "{instance} 支援 {feature} 及另外 {count} 項功能。請更新 fuwa 以使用"
+  },
+  "update.tooOld": "{instance} 需要較新版的 fuwa 才能完整運作",
+  "update.anInstance": "某個執行個體",
+  "update.somethingNew": "新功能",
+  "announcement.until": "至 {time}",
+  "announcement.close": "關閉公告",
+  "hosted.label": "由 Waifu Devs 代管",
+  "hosted.who": "此執行個體由 fuwa 的開發團隊營運。",
+  "hosted.checked": "{host} · 你的瀏覽器已驗證其憑證",
+  "hosted.why": "只有位於我們官方網址的執行個體才會顯示此徽章。應用程式僅依網址判斷，因為任何伺服器都可以自稱任何身分。",
+  "hosted.about": "關於 fuwa",
+  "signInNotice.added": "{name} 已於 {date} 新增為你帳號的登入方式。不是你本人？",
+  "signInNotice.review": "檢查"
+}

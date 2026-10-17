@@ -54,6 +54,7 @@
   "menu.target.savedElsewhere": "Immagine aperta per salvarla da lì",
   "menu.message.openThread": "Apri thread",
   "menu.message.replyInThread": "Rispondi nel thread",
+  "menu.message.reply": "Rispondi",
   "menu.message.edit": "Modifica messaggio",
   "menu.message.copyText": "Copia testo",
   "menu.message.keepOut": "Escludi {name}",

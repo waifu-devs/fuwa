@@ -35,6 +35,8 @@ test("picks plural forms by the language's rules, falling back to other", () => 
   const pl = { one: "1 plik", few: "{count} pliki", many: "{count} plików", other: "{count} pliku" };
   assert.equal(pickPlural("pl", pl, 3), "{count} pliki");
   assert.equal(pickPlural("pl", pl, 5), "{count} plików");
+  // Hindi says "one" for 0 as well as 1.
+  assert.equal(pickPlural("hi", { one: "{count} फ़ाइल", other: "{count} फ़ाइलें" }, 0), "{count} फ़ाइल");
 });
 
 test("looks keys up in the language, then English, then shows the key", () => {
@@ -54,6 +56,15 @@ test("negotiates the closest shipped language", () => {
   assert.equal(negotiate(["es_ES"], shipped), "es");
   assert.equal(negotiate(["pt-PT", "en"], shipped), "pt-BR");
   assert.equal(negotiate(["pt"], shipped), "pt-BR");
+  // Chinese by script, whichever way the region or script is written.
+  const chinese = ["en", "zh-Hans", "zh-Hant"];
+  assert.equal(negotiate(["zh-CN"], chinese), "zh-Hans");
+  assert.equal(negotiate(["zh"], chinese), "zh-Hans");
+  assert.equal(negotiate(["zh-Hans-SG"], chinese), "zh-Hans");
+  assert.equal(negotiate(["zh-TW"], chinese), "zh-Hant");
+  assert.equal(negotiate(["zh_HK"], chinese), "zh-Hant");
+  assert.equal(negotiate(["zh-Hant-MO"], chinese), "zh-Hant");
+  assert.equal(negotiate(["zh-TW"], ["en", "zh-Hans"]), "zh-Hans");
 });
 
 test("reads Accept-Language by weight, bounded", () => {
@@ -72,7 +83,7 @@ test("only takes tags shaped like ours", () => {
 // The catalogs themselves
 
 const root = join(import.meta.dirname, "..", "..", "..", "locales");
-const RULES = new Set(["other", "one-other", "one-many-other-romance", "one-many-other-french", "one-few-many-other-slavic", "one-few-other-romanian", "zero-one-other-latvian", "one-two-few-many-other-arabic", "one-two-other", "one-few-many-other-polish"]);
+const RULES = new Set(["other", "one-other", "one-many-other-romance", "one-many-other-french", "one-few-many-other-slavic", "one-few-other-romanian", "zero-one-other-latvian", "one-two-few-many-other-arabic", "one-two-other", "one-few-many-other-polish", "one-other-hindi"]);
 const read = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 const codes = readdirSync(root, { withFileTypes: true })
   .filter((d) => d.isDirectory())

@@ -1,0 +1,10 @@
+{
+  "name": "हिन्दी",
+  "english": "Hindi",
+  "dir": "ltr",
+  "plural": "one-other-hindi",
+  "reviewed": false,
+  "group": ",",
+  "decimal": ".",
+  "secondaryGroup": 2
+}

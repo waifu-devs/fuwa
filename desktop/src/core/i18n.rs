@@ -44,6 +44,13 @@ pub struct Meta {
     /// The fewest digits before grouping starts: Spanish writes 1000 but 10.000.
     #[serde(default = "one", rename = "minGroup")]
     pub min_group: usize,
+    /// Digits per group after the first three: Hindi writes 12,34,567.
+    #[serde(default = "three", rename = "secondaryGroup")]
+    pub secondary_group: usize,
+}
+
+fn three() -> usize {
+    3
 }
 
 fn comma() -> String {
@@ -130,7 +137,8 @@ pub fn is_tag(value: &str) -> bool {
 }
 
 /// The shipped language closest to what's asked for: exact, then the same language ("es-MX" gets "es",
-/// "pt" gets "pt-BR"), else English.
+/// "pt" gets "pt-BR"), else English. Chinese goes by script: "zh-TW" and "zh-HK" get "zh-Hant", other
+/// Chinese "zh-Hans".
 pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
     for want in requested {
         let want = want.as_ref().trim().replace('_', "-").to_ascii_lowercase();
@@ -138,6 +146,11 @@ pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
             continue;
         }
         if let Some(code) = available.iter().find(|c| c.to_ascii_lowercase() == want) {
+            return code.to_string();
+        }
+        if let Some(script) = chinese_script(&want)
+            && let Some(code) = available.iter().find(|c| c.to_ascii_lowercase() == script)
+        {
             return code.to_string();
         }
         let base = want.split('-').next().unwrap_or_default();
@@ -150,6 +163,16 @@ pub fn negotiate<S: AsRef<str>>(requested: &[S], available: &[&str]) -> String {
         }
     }
     "en".into()
+}
+
+/// The script a Chinese tag is written in ("zh-hant" or "zh-hans"), for tags that name a region instead.
+fn chinese_script(want: &str) -> Option<&'static str> {
+    let mut parts = want.split('-');
+    if parts.next() != Some("zh") {
+        return None;
+    }
+    let traditional = parts.any(|p| matches!(p, "hant" | "tw" | "hk" | "mo"));
+    Some(if traditional { "zh-hant" } else { "zh-hans" })
 }
 
 /// The languages the system is set to, most wanted first. Read only to pick one; never stored or sent.
@@ -353,6 +376,14 @@ pub fn plural(rule: &str, n: u64) -> &'static str {
                 "other"
             }
         }
+        // Hindi: 0 is "one" too, and there's no "many".
+        "one-other-hindi" => {
+            if n <= 1 {
+                "one"
+            } else {
+                "other"
+            }
+        }
         // Russian, Ukrainian.
         "one-few-many-other-slavic" => {
             if n10 == 1 && n100 != 11 {
@@ -412,7 +443,8 @@ pub fn number(n: i64) -> String {
     format_number(n, &STATE.read().meta)
 }
 
-/// A whole number with the language's digit grouping: "1,234" in English, "1234" and "12.345" in Spanish.
+/// A whole number with the language's digit grouping: "1,234" in English, "1234" and "12.345" in Spanish,
+/// "12,34,567" in Hindi.
 pub fn format_number(n: i64, meta: &Meta) -> String {
     let digits = n.unsigned_abs().to_string();
     let sign = if n < 0 { "-" } else { "" };
@@ -421,7 +453,9 @@ pub fn format_number(n: i64, meta: &Meta) -> String {
     }
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+        let after = digits.len() - i;
+        let mark = if after <= 3 { after == 3 } else { (after - 3).is_multiple_of(meta.secondary_group.max(1)) };
+        if i > 0 && mark {
             out.push_str(&meta.group);
         }
         out.push(c);
@@ -443,6 +477,7 @@ mod tests {
             group: group.into(),
             decimal: ".".into(),
             min_group,
+            secondary_group: 3,
         }
     }
 
@@ -476,6 +511,10 @@ mod tests {
         assert_eq!(plural("one-few-many-other-polish", 22), "few");
         assert_eq!(plural("one-few-many-other-polish", 21), "many");
         assert_eq!(plural("one-two-few-many-other-arabic", 105), "few");
+        assert_eq!(plural("one-other-hindi", 0), "one");
+        assert_eq!(plural("one-other-hindi", 1), "one");
+        assert_eq!(plural("one-other-hindi", 2), "other");
+        assert_eq!(plural("one-other-hindi", 1_000_000), "other");
     }
 
     #[test]
@@ -502,6 +541,14 @@ mod tests {
         assert_eq!(negotiate(&["fr"], &shipped), "en");
         assert_eq!(negotiate(&["pt-PT", "en"], &shipped), "pt-BR");
         assert_eq!(negotiate(&["pt"], &shipped), "pt-BR");
+        let chinese = ["en", "zh-Hans", "zh-Hant"];
+        assert_eq!(negotiate(&["zh-CN"], &chinese), "zh-Hans");
+        assert_eq!(negotiate(&["zh"], &chinese), "zh-Hans");
+        assert_eq!(negotiate(&["zh-Hans-SG"], &chinese), "zh-Hans");
+        assert_eq!(negotiate(&["zh-TW"], &chinese), "zh-Hant");
+        assert_eq!(negotiate(&["zh_HK"], &chinese), "zh-Hant");
+        assert_eq!(negotiate(&["zh-Hant-MO"], &chinese), "zh-Hant");
+        assert_eq!(negotiate(&["zh-TW"], &["en", "zh-Hans"]), "zh-Hans");
         for ok in ["en", "es", "pt-BR", "zh-Hant", "fil"] {
             assert!(is_tag(ok), "{ok}");
         }
@@ -517,6 +564,10 @@ mod tests {
         assert_eq!(format_number(1234, &meta(".", 2)), "1234");
         assert_eq!(format_number(12345, &meta(".", 2)), "12.345");
         assert_eq!(format_number(999, &meta(",", 1)), "999");
+        let hindi = Meta { secondary_group: 2, ..meta(",", 1) };
+        assert_eq!(format_number(1234567, &hindi), "12,34,567");
+        assert_eq!(format_number(123456, &hindi), "1,23,456");
+        assert_eq!(format_number(1234, &hindi), "1,234");
     }
 
     #[test]

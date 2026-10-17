@@ -1,0 +1,54 @@
+{
+  "strip.label": "Sedang berlangsung",
+  "strip.options": "Opsi ubin",
+  "strip.hide": "Sembunyikan yang ini",
+  "strip.quiet": "Tidak ada ubin langsung di server ini",
+  "strip.off": "Matikan ubin langsung",
+  "strip.remove": "Hapus untuk semua orang",
+  "strip.removeFailed": "Tidak dapat menghapus ubin",
+  "menu.show": "Ubin langsung",
+  "menu.server": "Ubin untuk semua orang di sini",
+  "menu.bigServer": {
+    "other": "Ruang suara nonaktif secara bawaan di server dengan {count} anggota atau lebih"
+  },
+  "menu.everyone": "Semua orang di sini hanya melihat jenis ini",
+  "menu.reset": "Kembali ke bawaan",
+  "menu.failed": "Tidak dapat mengubah ubin server",
+  "kind.voice": "Ruang suara",
+  "kind.poll": "Polling",
+  "kind.thread": "Utas yang diikuti",
+  "kind.shared": "Saluran bersama",
+  "kind.app": "Dari aplikasi",
+  "voice.title": {
+    "other": "{count} orang di {channel}"
+  },
+  "voice.since": "Mengobrol sejak {time}",
+  "voice.video": "Kamera menyala",
+  "voice.screen": "Berbagi layar",
+  "voice.join": "Gabung",
+  "poll.title": "Polling di #{channel}",
+  "poll.closesMinutes": {
+    "other": "Ditutup dalam {count} menit"
+  },
+  "poll.closesHours": {
+    "other": "Ditutup dalam {count} jam"
+  },
+  "poll.noEnd": "Terbuka sampai diakhiri",
+  "poll.voters": {
+    "other": "{count} memilih"
+  },
+  "poll.vote": "Pilih",
+  "thread.title": "Utas yang Anda ikuti",
+  "thread.unread": {
+    "other": "{count} balasan baru"
+  },
+  "thread.open": "Buka",
+  "shared.title": "Ramai di #{channel}",
+  "shared.text": {
+    "other": "{count} pesan baru dari {servers} server"
+  },
+  "shared.open": "Lihat yang terlewat",
+  "app.by": "Dari {app}",
+  "app.live": "Langsung",
+  "app.open": "Buka"
+}

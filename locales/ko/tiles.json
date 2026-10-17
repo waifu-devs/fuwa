@@ -1,0 +1,54 @@
+{
+  "strip.label": "지금 진행 중",
+  "strip.options": "타일 옵션",
+  "strip.hide": "이 타일 숨기기",
+  "strip.quiet": "이 서버에 라이브 타일이 없어요",
+  "strip.off": "라이브 타일 끄기",
+  "strip.remove": "모두에게서 삭제",
+  "strip.removeFailed": "타일을 삭제하지 못했어요",
+  "menu.show": "라이브 타일",
+  "menu.server": "모두에게 표시할 타일",
+  "menu.bigServer": {
+    "other": "멤버가 {count}명 이상인 서버에서는 음성 채팅방이 기본적으로 꺼져 있어요"
+  },
+  "menu.everyone": "이 서버의 모두에게 이 종류만 표시돼요",
+  "menu.reset": "기본값으로 되돌리기",
+  "menu.failed": "서버 타일을 변경하지 못했어요",
+  "kind.voice": "음성 채팅방",
+  "kind.poll": "투표",
+  "kind.thread": "팔로우한 스레드",
+  "kind.shared": "공유 채널",
+  "kind.app": "앱",
+  "voice.title": {
+    "other": "{channel}에 {count}명"
+  },
+  "voice.since": "{time}부터 대화 중",
+  "voice.video": "카메라 켜짐",
+  "voice.screen": "화면 공유 중",
+  "voice.join": "참여",
+  "poll.title": "#{channel}의 투표",
+  "poll.closesMinutes": {
+    "other": "{count}분 후 마감"
+  },
+  "poll.closesHours": {
+    "other": "{count}시간 후 마감"
+  },
+  "poll.noEnd": "종료할 때까지 진행",
+  "poll.voters": {
+    "other": "{count}명 투표함"
+  },
+  "poll.vote": "투표",
+  "thread.title": "팔로우 중인 스레드",
+  "thread.unread": {
+    "other": "새 답장 {count}개"
+  },
+  "thread.open": "열기",
+  "shared.title": "#{channel}에서 활발한 대화",
+  "shared.text": {
+    "other": "서버 {servers}곳에서 새 메시지 {count}개"
+  },
+  "shared.open": "확인하기",
+  "app.by": "{app} 제공",
+  "app.live": "라이브",
+  "app.open": "열기"
+}
