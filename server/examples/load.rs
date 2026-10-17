@@ -23,6 +23,7 @@
 //! generator itself to the others the same way.
 
 use std::collections::{BTreeMap, HashMap};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -38,10 +39,16 @@ load: how many people a fuwa instance holds online (docs/capacity.md)
   --scenario ramp|neighbours|flood
                            ramp people up until a step breaks; one hot server next to
                            quiet ones; or wrong-password sign-ins at once (ramp)
-  --steps N,N,...          people online per step (100 to 8000), or sign-ins at once for flood
+  --steps N,N,...          people online per step (100 to 200000), or sign-ins at once for flood
   --users N                people online for neighbours and flood (1000)
   --servers N              home servers, 3 or more (20)
   --square on|off          everyone also in one big shared server (on)
+  --live                   connect with LiveService.Open (focused on the home channel),
+                           as today's apps do; off means one Subscribe per person
+  --shared                 every stream on one account, no per-person rows: what only the
+                           connections hold, for counting how many fit before anything else
+  --source-ips N           spread client connections over N loopback addresses, about
+                           20,000 ports each (>1 needed past ~28,000 online)
   --step-secs N            seconds each step or phase runs (30)
   --chat-every S           seconds between a chatter's messages (10)
   --chatters F             share of people chatting (0.25)
@@ -75,6 +82,9 @@ struct Options {
     users: usize,
     servers: usize,
     square: bool,
+    live: bool,
+    shared: bool,
+    source_ips: usize,
     step_secs: u64,
     chat_every: f64,
     chatters: f64,
@@ -100,6 +110,9 @@ impl Options {
             users: 1000,
             servers: 20,
             square: true,
+            live: false,
+            shared: false,
+            source_ips: 1,
             step_secs: 30,
             chat_every: 10.0,
             chatters: 0.25,
@@ -124,6 +137,9 @@ impl Options {
                 "--users" => o.users = value().parse().unwrap(),
                 "--servers" => o.servers = value().parse().unwrap(),
                 "--square" => o.square = value() == "on",
+                "--live" => o.live = true,
+                "--shared" => o.shared = true,
+                "--source-ips" => o.source_ips = value().parse().unwrap(),
                 "--step-secs" => o.step_secs = value().parse().unwrap(),
                 "--chat-every" => o.chat_every = value().parse().unwrap(),
                 "--chatters" => o.chatters = value().parse().unwrap(),
@@ -249,6 +265,8 @@ struct Shared {
     classes: RwLock<HashMap<String, Class>>,
     stop: AtomicBool,
     online: AtomicUsize,
+    /// Followers connect with `LiveService.Open` (`--live`).
+    live: bool,
 }
 
 impl Shared {
@@ -342,6 +360,10 @@ fn spawn(o: &Options, name: &str, dir: &Path, vars: &[(&str, String)]) -> Proc {
         .env("FUWA_CALL_RECORDINGS", "off")
         .stdout(Stdio::null())
         .stderr(log);
+    if o.shared {
+        // Every stream shares one account, which the 32-per-account limit would stop at once.
+        command.env("FUWA_STREAMS_PER_ACCOUNT", "unlimited");
+    }
     for (k, v) in vars {
         command.env(k, v);
     }
@@ -528,12 +550,32 @@ struct Conn {
 
 impl Conn {
     fn new(url: &str) -> Self {
-        let channel = Endpoint::from_shared(url.to_string())
-            .unwrap()
-            .connect_timeout(Duration::from_secs(10))
-            .tcp_nodelay(true)
-            .connect_lazy();
-        Conn { channel, token: String::new() }
+        Self::bound(url, None)
+    }
+
+    /// A connection from `ip` when given, so a client can open more ports
+    /// than one address has.
+    fn bound(url: &str, ip: Option<IpAddr>) -> Self {
+        let endpoint =
+            Endpoint::from_shared(url.to_string()).unwrap().connect_timeout(Duration::from_secs(10)).tcp_nodelay(true);
+        let endpoint = match ip {
+            Some(ip) => endpoint.local_address(Some(ip)),
+            None => endpoint,
+        };
+        Conn { channel: endpoint.connect_lazy(), token: String::new() }
+    }
+
+    /// A connection spread over `ips` loopback addresses, about 20,000
+    /// connections each: one address runs out of ephemeral ports first.
+    fn spread(url: &str, ips: usize) -> Self {
+        if ips <= 1 {
+            return Self::new(url);
+        }
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let slot = (NEXT.fetch_add(1, Ordering::Relaxed) / 20_000) % ips.min(250 * 250);
+        // 127.0.0.2 through 127.0.249.251.
+        let ip = Ipv4Addr::new(127, 0, (slot / 250) as u8, (slot % 250) as u8 + 2);
+        Self::bound(url, Some(IpAddr::V4(ip)))
     }
 
     fn auth(&self) -> pb::auth_service_client::AuthServiceClient<Channel> {
@@ -550,6 +592,9 @@ impl Conn {
     }
     fn events(&self) -> pb::event_service_client::EventServiceClient<Channel> {
         pb::event_service_client::EventServiceClient::new(self.channel.clone())
+    }
+    fn live(&self) -> pb::live_service_client::LiveServiceClient<Channel> {
+        pb::live_service_client::LiveServiceClient::new(self.channel.clone())
     }
     fn media(&self) -> pb::media_service_client::MediaServiceClient<Channel> {
         pb::media_service_client::MediaServiceClient::new(self.channel.clone())
@@ -627,10 +672,10 @@ async fn follow(conn: Conn, servers: Vec<String>, shared: Arc<Shared>, ready_tx:
                     break;
                 }
                 Ok(response) => {
-                    if let Some(ready) = response.ready {
+                    if let Some(ready) = &response.ready {
                         shared.window().ready.record(started.elapsed());
-                        for head in ready.servers {
-                            last.insert(head.server_id, Some(head.sequence));
+                        for head in &ready.servers {
+                            last.insert(head.server_id.clone(), Some(head.sequence));
                         }
                         if !online {
                             online = true;
@@ -641,20 +686,7 @@ async fn follow(conn: Conn, servers: Vec<String>, shared: Arc<Shared>, ready_tx:
                             let _ = ready_tx.send(()).await;
                         }
                     }
-                    if let Some(event) = response.event {
-                        if event.sequence > 0 {
-                            last.insert(event.server_id.clone(), Some(event.sequence));
-                        }
-                        if let Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = &event.payload
-                            && let Some(sent) = m.content.strip_prefix("lg:").and_then(|t| t.split(' ').next())
-                            && let Ok(sent) = sent.parse::<u64>()
-                        {
-                            let w = shared.window();
-                            w.delivered.fetch_add(1, Ordering::Relaxed);
-                            let lag = Duration::from_micros(now_us().saturating_sub(sent));
-                            w.lag[shared.class(&event.server_id) as usize].record(lag);
-                        }
-                    }
+                    touched(&response, &mut last, &shared);
                 }
             }
         }
@@ -664,6 +696,123 @@ async fn follow(conn: Conn, servers: Vec<String>, shared: Arc<Shared>, ready_tx:
         if !shared.stop.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
+    }
+}
+
+/// Like [`follow`], over `LiveService.Open` with the home channel in focus:
+/// today's apps. Messages elsewhere move only heads, so this is the lighter,
+/// current client path rather than the old Subscribe worst case.
+async fn follow_live(
+    conn: Conn,
+    servers: Vec<String>,
+    focus: Vec<String>,
+    shared: Arc<Shared>,
+    ready_tx: tokio::sync::mpsc::Sender<()>,
+) {
+    let mut last: HashMap<String, Option<i64>> = servers.iter().map(|s| (s.clone(), None)).collect();
+    let mut told_ready = false;
+    while !shared.stop.load(Ordering::Relaxed) {
+        let cursors = last
+            .iter()
+            .map(|(server_id, after)| pb::ServerCursor { server_id: server_id.clone(), after_sequence: *after })
+            .collect();
+        let request = pb::OpenRequest {
+            servers: cursors,
+            messages: pb::MessageIntent::Focused as i32,
+            focus: Some(pb::Focus { channel_ids: focus.clone(), ..Default::default() }),
+            ..Default::default()
+        };
+        let started = Instant::now();
+        let mut request = Request::new(request);
+        request.metadata_mut().insert("authorization", format!("Bearer {}", conn.token).parse().unwrap());
+        let stream = match conn.live().open(request).await {
+            Ok(s) => s.into_inner(),
+            Err(status) => {
+                shared.window().error("open", &status);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        tokio::pin!(stream);
+        let mut online = false;
+        loop {
+            let item = tokio::select! {
+                item = stream.next() => item,
+                _ = tokio::time::sleep(Duration::from_millis(500)), if shared.stop.load(Ordering::Relaxed) => None,
+            };
+            let Some(item) = item else { break };
+            match item {
+                Err(status) => {
+                    shared.window().error("stream", &status);
+                    break;
+                }
+                Ok(response) => match response.item {
+                    Some(pb::open_response::Item::ConnectionId(_)) => {
+                        if !online {
+                            online = true;
+                            shared.online.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    Some(pb::open_response::Item::Heads(heads)) => {
+                        for head in heads.servers {
+                            last.insert(head.server_id, Some(head.sequence));
+                        }
+                    }
+                    Some(pb::open_response::Item::Events(response)) => {
+                        if let Some(ready) = &response.ready {
+                            shared.window().ready.record(started.elapsed());
+                            for head in &ready.servers {
+                                last.insert(head.server_id.clone(), Some(head.sequence));
+                            }
+                            if !told_ready {
+                                told_ready = true;
+                                let _ = ready_tx.send(()).await;
+                            }
+                        }
+                        touched(&response, &mut last, &shared);
+                    }
+                    _ => {}
+                },
+            }
+        }
+        if online {
+            shared.online.fetch_sub(1, Ordering::Relaxed);
+        }
+        if !shared.stop.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+}
+
+/// An event from either stream: moves the cursor, and counts a load-test
+/// message's lag. Heads are not events, so held-back ones aren't counted.
+fn touched(response: &pb::SubscribeResponse, last: &mut HashMap<String, Option<i64>>, shared: &Shared) {
+    let Some(event) = &response.event else { return };
+    if event.sequence > 0 {
+        last.insert(event.server_id.clone(), Some(event.sequence));
+    }
+    if let Some(Payload::MessageCreated(pb::MessageCreated { message: Some(m) })) = &event.payload
+        && let Some(sent) = m.content.strip_prefix("lg:").and_then(|t| t.split(' ').next())
+        && let Ok(sent) = sent.parse::<u64>()
+    {
+        let w = shared.window();
+        w.delivered.fetch_add(1, Ordering::Relaxed);
+        let lag = Duration::from_micros(now_us().saturating_sub(sent));
+        w.lag[shared.class(&event.server_id) as usize].record(lag);
+    }
+}
+
+/// Follows one person, on whichever connection kind the run asked for.
+fn spawn_follow(
+    conn: Conn,
+    servers: Vec<String>,
+    focus: Vec<String>,
+    shared: Arc<Shared>,
+    ready_tx: tokio::sync::mpsc::Sender<()>,
+) -> tokio::task::JoinHandle<()> {
+    match shared.live {
+        true => tokio::spawn(follow_live(conn, servers, focus, shared, ready_tx)),
+        false => tokio::spawn(follow(conn, servers, shared, ready_tx)),
     }
 }
 
@@ -731,6 +880,11 @@ struct World {
     shared: Arc<Shared>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
     signup_secs: f64,
+    /// `--shared`: the one account every stream uses, signed up once.
+    shared_account: Option<Conn>,
+    /// `--shared` and `--source-ips`.
+    shared_mode: bool,
+    source_ips: usize,
 }
 
 impl World {
@@ -776,21 +930,66 @@ impl World {
             classes: RwLock::new(HashMap::new()),
             stop: AtomicBool::new(false),
             online: AtomicUsize::new(0),
+            live: o.live,
         });
-        World { url: url.into(), owner, servers, square, users: vec![], shared, tasks: vec![], signup_secs: 0.0 }
+        World {
+            url: url.into(),
+            owner,
+            servers,
+            square,
+            users: vec![],
+            shared,
+            tasks: vec![],
+            signup_secs: 0.0,
+            shared_account: None,
+            shared_mode: o.shared,
+            source_ips: o.source_ips,
+        }
     }
 
     /// Signs up people until there are `n`, each in their home server (and
     /// the square), following their servers live. Waits until every one is
-    /// ready.
+    /// ready. With `--shared` everyone is already in every server and is not
+    /// signed up at all: only the streams are new.
     async fn grow(&mut self, n: usize) -> Result<(), String> {
         let have = self.users.len();
         if n <= have {
             return Ok(());
         }
         let started = Instant::now();
-        let limit = Arc::new(Semaphore::new(32));
         let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel(n);
+        if self.shared_mode {
+            let account = match &self.shared_account {
+                Some(conn) => conn.clone(),
+                None => {
+                    let conn = Conn::sign_up(&self.url, "shared").await.map_err(|s| format!("sign up: {s}"))?;
+                    for srv in self.servers.iter().chain(self.square.iter()) {
+                        join_retry(&conn, &srv.id).await.map_err(|s| format!("join: {s}"))?;
+                    }
+                    self.shared_account = Some(conn.clone());
+                    conn
+                }
+            };
+            for i in have..n {
+                let mut conn = Conn::spread(&self.url, self.source_ips);
+                conn.token = account.token.clone();
+                let home = &self.servers[i % self.servers.len()];
+                let mut follow = vec![home.id.clone()];
+                if let Some(square) = &self.square {
+                    follow.push(square.id.clone());
+                }
+                let task =
+                    spawn_follow(conn.clone(), follow, vec![home.text.clone()], self.shared.clone(), ready_tx.clone());
+                self.tasks.push(task);
+                self.users.push(conn);
+                if self.users.len().is_multiple_of(1000) {
+                    eprintln!("  {} people ({:.0}s)", self.users.len(), started.elapsed().as_secs());
+                }
+            }
+            self.signup_secs += started.elapsed().as_secs_f64();
+            return wait_ready(have, n, started, &mut ready_rx).await;
+        }
+        let limit = Arc::new(Semaphore::new(32));
         let mut joins = vec![];
         for i in have..n {
             let (url, limit, servers, square) =
@@ -800,9 +999,9 @@ impl World {
                 let conn = Conn::sign_up(&url, &format!("user{i}")).await.map_err(|s| format!("sign up: {s}"))?;
                 let home = &servers[i % servers.len()];
                 let mut follow = vec![home.id.clone()];
-                conn.join(&home.id).await.map_err(|s| format!("join: {s}"))?;
+                join_retry(&conn, &home.id).await.map_err(|s| format!("join: {s}"))?;
                 if let Some(square) = &square {
-                    conn.join(&square.id).await.map_err(|s| format!("join square: {s}"))?;
+                    join_retry(&conn, &square.id).await.map_err(|s| format!("join square: {s}"))?;
                     follow.push(square.id.clone());
                 }
                 Ok::<_, String>((conn, follow))
@@ -810,24 +1009,55 @@ impl World {
         }
         for join in joins {
             let (conn, follow) = join.await.map_err(|e| e.to_string())??;
-            let task = tokio::spawn(self::follow(conn.clone(), follow, self.shared.clone(), ready_tx.clone()));
+            let home = self.servers[self.users.len() % self.servers.len()].text.clone();
+            let task = spawn_follow(conn.clone(), follow, vec![home], self.shared.clone(), ready_tx.clone());
             self.tasks.push(task);
             self.users.push(conn);
-        }
-        self.signup_secs += started.elapsed().as_secs_f64();
-        let deadline = Instant::now() + Duration::from_secs(120 + n as u64 / 50);
-        for _ in have..n {
-            match tokio::time::timeout_at(deadline.into(), ready_rx.recv()).await {
-                Ok(Some(())) => {}
-                _ => return Err("not every stream got ready".into()),
+            if self.users.len().is_multiple_of(1000) {
+                eprintln!("  {} people ({:.0}s)", self.users.len(), started.elapsed().as_secs());
             }
         }
-        Ok(())
+        self.signup_secs += started.elapsed().as_secs_f64();
+        wait_ready(have, n, started, &mut ready_rx).await
     }
 
     fn home_of(&self, i: usize) -> &Srv {
         &self.servers[i % self.servers.len()]
     }
+}
+
+/// Waits until every stream from `have` to `n` has come ready.
+async fn wait_ready(
+    have: usize,
+    n: usize,
+    started: Instant,
+    ready_rx: &mut tokio::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(120 + n as u64 / 50);
+    for got in have..n {
+        match tokio::time::timeout_at(deadline.into(), ready_rx.recv()).await {
+            Ok(Some(())) => {
+                if got + 1 > have && (got + 1).is_multiple_of(1000) {
+                    eprintln!("  ready {} ({:.0}s)", got + 1, started.elapsed().as_secs());
+                }
+            }
+            _ => return Err("not every stream got ready".into()),
+        }
+    }
+    Ok(())
+}
+
+/// A join that met "the server is busy" is tried again, as a client would.
+async fn join_retry(conn: &Conn, server_id: &str) -> Result<(), tonic::Status> {
+    for attempt in 0..20u32 {
+        match conn.join(server_id).await {
+            Err(s) if s.code() == tonic::Code::Unavailable && attempt < 19 => {
+                tokio::time::sleep(Duration::from_millis(u64::from(attempt + 1) * 100)).await;
+            }
+            other => return other,
+        }
+    }
+    unreachable!("the last attempt returns")
 }
 
 /// The traffic of one step, until `stop` is set.

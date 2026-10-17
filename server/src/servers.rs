@@ -376,12 +376,16 @@ impl ServerDb {
 
     /// Runs a change that sends no events, alongside other writes, in its own
     /// transaction: for what the server keeps about itself, like the search
-    /// index. Refused while the server is being moved, like any write.
+    /// index. Refused while the server is being moved, like any write. The
+    /// connection is a pooled one, not a fresh one each time: opening a
+    /// database file and its temp database per write was most of the search
+    /// indexer's cost (`docs/capacity.md`).
     pub async fn write_quiet<T>(&self, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
         self.writable()?;
         let _shared = self.db.shared().await;
         self.writable()?;
-        db::transaction(&db::connect(&self.db)?, f).await
+        let conn = self.db.conn()?;
+        db::transaction(&conn, f).await
     }
 
     /// Refuses changes while the server is being moved to another shard: the
