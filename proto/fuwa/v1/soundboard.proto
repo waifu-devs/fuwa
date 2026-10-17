@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// A server's soundboard (docs/soundboard.md): short sounds anyone in one of
+// its voice channels can play for everyone in the call. Each app plays a
+// sound itself when it hears SoundPlayed, so it never goes through the
+// call's media and recordings on the server don't keep it. Every change to
+// the sounds goes out to members as SoundsUpdated.
+service SoundboardService {
+  // The server's sounds, oldest first. Any member.
+  rpc ListSounds(ListSoundsRequest) returns (ListSoundsResponse);
+  // Adds a sound from a file the caller uploaded for it
+  // (MEDIA_PURPOSE_SOUND). MANAGE_SOUNDBOARD. Counts against the server's
+  // attachment cap.
+  rpc CreateSound(CreateSoundRequest) returns (CreateSoundResponse);
+  // Renames one, or changes its emoji or volume. MANAGE_SOUNDBOARD.
+  rpc UpdateSound(UpdateSoundRequest) returns (UpdateSoundResponse);
+  // Deletes one and its file. MANAGE_SOUNDBOARD.
+  rpc DeleteSound(DeleteSoundRequest) returns (DeleteSoundResponse);
+  // Plays a sound for everyone in the voice channel the caller is in
+  // (SoundPlayed, to the members who can see it). Takes being in that
+  // channel's call, not muted, deafened or server muted, and USE_SOUNDBOARD
+  // and SPEAK there. At most the instance's `sound_plays_per_minute` a
+  // minute per person (RESOURCE_EXHAUSTED past it), unlimited unless set.
+  rpc PlaySound(PlaySoundRequest) returns (PlaySoundResponse);
+}
+
+message ListSoundsRequest {
+  string server_id = 1;
+}
+
+message ListSoundsResponse {
+  repeated Sound sounds = 1;
+}
+
+message CreateSoundRequest {
+  string server_id = 1;
+  // 1 to 32 characters.
+  string name = 2;
+  // The upload's `media.url`.
+  string url = 3;
+  // A Unicode emoji, or one of the server's own written <:name:id>. Empty
+  // for none.
+  string emoji = 4;
+  // From 0 to 1; unset plays it as it was made.
+  optional float volume = 5;
+  // How long it plays, as the app that made the file measured it. The
+  // instance checked the file itself is at most 10 seconds when it arrived.
+  int32 duration_ms = 6;
+}
+
+message CreateSoundResponse {
+  Sound sound = 1;
+}
+
+// Changes what's set and leaves the rest.
+message UpdateSoundRequest {
+  string server_id = 1;
+  string sound_id = 2;
+  optional string name = 3;
+  optional string emoji = 4;
+  optional float volume = 5;
+}
+
+message UpdateSoundResponse {
+  Sound sound = 1;
+}
+
+message DeleteSoundRequest {
+  string server_id = 1;
+  string sound_id = 2;
+}
+
+message DeleteSoundResponse {}
+
+message PlaySoundRequest {
+  string server_id = 1;
+  // The voice channel the caller is in.
+  string channel_id = 2;
+  string sound_id = 3;
+}
+
+message PlaySoundResponse {}

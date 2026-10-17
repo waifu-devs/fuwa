@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 32] = [
+const KNOWN: [P; 34] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -54,6 +54,8 @@ const KNOWN: [P; 32] = [
     P::ManageEconomy,
     P::GrantCurrency,
     P::ManageCards,
+    P::ManageSoundboard,
+    P::UseSoundboard,
 ];
 
 /// Every permission there is.
@@ -83,6 +85,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::Speak)
     | bit(P::Video)
     | bit(P::Record)
+    | bit(P::UseSoundboard)
     | bit(P::CreatePolls)
     | bit(P::AddReactions)
     | bit(P::MuteMembers)
@@ -101,12 +104,14 @@ pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::CreateInvite)
     | bit(P::Connect)
     | bit(P::Speak)
-    | bit(P::Video);
+    | bit(P::Video)
+    | bit(P::UseSoundboard);
 
 /// The Admin role a new server starts with, and that the admins of servers
 /// from before roles were given: what admins could do then.
 pub const ADMIN: Bits = bit(P::ManageServer)
     | bit(P::ManageEmoji)
+    | bit(P::ManageSoundboard)
     | bit(P::ManageWebhooks)
     | bit(P::ManageChannels)
     | bit(P::ManageMessages)
@@ -132,6 +137,7 @@ pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::Connect)
     | bit(P::Speak)
     | bit(P::Video)
+    | bit(P::UseSoundboard)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -187,6 +193,8 @@ pub fn label(p: P) -> &'static str {
         P::ManageEconomy => "Manage economy",
         P::GrantCurrency => "Grant currency",
         P::ManageCards => "Manage cards",
+        P::ManageSoundboard => "Manage soundboard",
+        P::UseSoundboard => "Use soundboard",
     }
 }
 

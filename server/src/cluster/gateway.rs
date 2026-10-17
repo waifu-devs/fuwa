@@ -105,6 +105,7 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.JoinService"
         | "fuwa.v1.AutoModService"
         | "fuwa.v1.EmojiService"
+        | "fuwa.v1.SoundboardService"
         | "fuwa.v1.WebhookService"
         | "fuwa.v1.CallService"
         | "fuwa.v1.SsoService"

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/media.proto.
  */
 export const file_fuwa_v1_media: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJ0ChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAxIRCglzZXJ2ZXJfaWQYBCABKAkieQoUQ3JlYXRlVXBsb2FkUmVzcG9uc2USEgoKdXBsb2FkX3VybBgBIAEoCRIuCgpleHBpcmVzX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIdCgVtZWRpYRgDIAEoCzIOLmZ1d2EudjEuTWVkaWEiJAoVS2VlcEJhY2tncm91bmRSZXF1ZXN0EgsKA3VybBgBIAEoCSI3ChZLZWVwQmFja2dyb3VuZFJlc3BvbnNlEh0KBW1lZGlhGAEgASgLMg4uZnV3YS52MS5NZWRpYSIYChZMaXN0QmFja2dyb3VuZHNSZXF1ZXN0Ij4KF0xpc3RCYWNrZ3JvdW5kc1Jlc3BvbnNlEiMKC2JhY2tncm91bmRzGAEgAygLMg4uZnV3YS52MS5NZWRpYSImChdEZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBILCgN1cmwYASABKAkiGgoYRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlKsACCgxNZWRpYVB1cnBvc2USHQoZTUVESUFfUFVSUE9TRV9VTlNQRUNJRklFRBAAEhgKFE1FRElBX1BVUlBPU0VfQVZBVEFSEAESGAoUTUVESUFfUFVSUE9TRV9CQU5ORVIQAhIdChlNRURJQV9QVVJQT1NFX1NFUlZFUl9JQ09OEAMSFwoTTUVESUFfUFVSUE9TRV9FTU9KSRAEEhwKGE1FRElBX1BVUlBPU0VfQkFDS0dST1VORBAFEhgKFE1FRElBX1BVUlBPU0VfU0VBTEVEEAYSHAoYTUVESUFfUFVSUE9TRV9BVFRBQ0hNRU5UEAcSFQoRTUVESUFfUFVSUE9TRV9HSUYQCBIcChhNRURJQV9QVVJQT1NFX0RFQ09SQVRJT04QCRIaChZNRURJQV9QVVJQT1NFX1NIT1BfQVJUEAoy3QIKDE1lZGlhU2VydmljZRJLCgxDcmVhdGVVcGxvYWQSHC5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlc3BvbnNlElEKDktlZXBCYWNrZ3JvdW5kEh4uZnV3YS52MS5LZWVwQmFja2dyb3VuZFJlcXVlc3QaHy5mdXdhLnYxLktlZXBCYWNrZ3JvdW5kUmVzcG9uc2USVAoPTGlzdEJhY2tncm91bmRzEh8uZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXNwb25zZRJXChBEZWxldGVCYWNrZ3JvdW5kEiAuZnV3YS52MS5EZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBohLmZ1d2EudjEuRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJ0ChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAxIRCglzZXJ2ZXJfaWQYBCABKAkieQoUQ3JlYXRlVXBsb2FkUmVzcG9uc2USEgoKdXBsb2FkX3VybBgBIAEoCRIuCgpleHBpcmVzX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIdCgVtZWRpYRgDIAEoCzIOLmZ1d2EudjEuTWVkaWEiJAoVS2VlcEJhY2tncm91bmRSZXF1ZXN0EgsKA3VybBgBIAEoCSI3ChZLZWVwQmFja2dyb3VuZFJlc3BvbnNlEh0KBW1lZGlhGAEgASgLMg4uZnV3YS52MS5NZWRpYSIYChZMaXN0QmFja2dyb3VuZHNSZXF1ZXN0Ij4KF0xpc3RCYWNrZ3JvdW5kc1Jlc3BvbnNlEiMKC2JhY2tncm91bmRzGAEgAygLMg4uZnV3YS52MS5NZWRpYSImChdEZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBILCgN1cmwYASABKAkiGgoYRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlKtkCCgxNZWRpYVB1cnBvc2USHQoZTUVESUFfUFVSUE9TRV9VTlNQRUNJRklFRBAAEhgKFE1FRElBX1BVUlBPU0VfQVZBVEFSEAESGAoUTUVESUFfUFVSUE9TRV9CQU5ORVIQAhIdChlNRURJQV9QVVJQT1NFX1NFUlZFUl9JQ09OEAMSFwoTTUVESUFfUFVSUE9TRV9FTU9KSRAEEhwKGE1FRElBX1BVUlBPU0VfQkFDS0dST1VORBAFEhgKFE1FRElBX1BVUlBPU0VfU0VBTEVEEAYSHAoYTUVESUFfUFVSUE9TRV9BVFRBQ0hNRU5UEAcSFQoRTUVESUFfUFVSUE9TRV9HSUYQCBIcChhNRURJQV9QVVJQT1NFX0RFQ09SQVRJT04QCRIaChZNRURJQV9QVVJQT1NFX1NIT1BfQVJUEAoSFwoTTUVESUFfUFVSUE9TRV9TT1VORBALMt0CCgxNZWRpYVNlcnZpY2USSwoMQ3JlYXRlVXBsb2FkEhwuZnV3YS52MS5DcmVhdGVVcGxvYWRSZXF1ZXN0Gh0uZnV3YS52MS5DcmVhdGVVcGxvYWRSZXNwb25zZRJRCg5LZWVwQmFja2dyb3VuZBIeLmZ1d2EudjEuS2VlcEJhY2tncm91bmRSZXF1ZXN0Gh8uZnV3YS52MS5LZWVwQmFja2dyb3VuZFJlc3BvbnNlElQKD0xpc3RCYWNrZ3JvdW5kcxIfLmZ1d2EudjEuTGlzdEJhY2tncm91bmRzUmVxdWVzdBogLmZ1d2EudjEuTGlzdEJhY2tncm91bmRzUmVzcG9uc2USVwoQRGVsZXRlQmFja2dyb3VuZBIgLmZ1d2EudjEuRGVsZXRlQmFja2dyb3VuZFJlcXVlc3QaIS5mdXdhLnYxLkRlbGV0ZUJhY2tncm91bmRSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * A stored file.
@@ -62,7 +62,8 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
   /**
    * image/png, image/jpeg, image/gif, image/webp or image/avif. The bytes are
    * checked when they arrive. For an attachment, whatever the file says it
-   * is (or empty): what it's kept as comes from its bytes.
+   * is (or empty): what it's kept as comes from its bytes. For a sound,
+   * audio/ogg.
    *
    * @generated from field: string content_type = 2;
    */
@@ -70,8 +71,8 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
 
   /**
    * The file's exact size in bytes, at most the instance's
-   * `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
-   * when that's set.
+   * `picture_upload_bytes` (or for an attachment or a sound
+   * `attachment_upload_bytes`) when that's set.
    *
    * @generated from field: int64 size = 3;
    */
@@ -79,8 +80,8 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
 
   /**
    * For a server's icon or banner, an emoji, a decoration, a webhook's
-   * picture, shop art or an attachment (required for an attachment, shop
-   * art and a server's banner): the
+   * picture, shop art, a sound or an attachment (required for an
+   * attachment, shop art, a sound and a server's banner): the
    * server it's for (you must be in it). The file can then only be used
    * there, and on an instance split across regions its bytes go straight to
    * the server's region rather than the home one.
@@ -307,6 +308,15 @@ export enum MediaPurpose {
    * @generated from enum value: MEDIA_PURPOSE_SHOP_ART = 10;
    */
   SHOP_ART = 10,
+
+  /**
+   * A sound for a server's soundboard (SoundboardService.CreateSound): Ogg
+   * Opus (audio/ogg), at most 10 seconds long. Uploaded for the server
+   * (server_id is required); the attachment caps apply.
+   *
+   * @generated from enum value: MEDIA_PURPOSE_SOUND = 11;
+   */
+  SOUND = 11,
 }
 
 /**
@@ -317,7 +327,8 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
 
 /**
  * Files people upload to this instance: profile pictures, profile banners,
- * server icons, custom emoji, app backgrounds, and files attached to messages.
+ * server icons, custom emoji, soundboard sounds, app backgrounds, and files
+ * attached to messages.
  *
  * An upload takes two steps. CreateUpload checks the file and reserves a
  * place for it; then an HTTP PUT of the file's bytes to `upload_url` stores

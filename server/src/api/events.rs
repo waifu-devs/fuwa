@@ -86,6 +86,7 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::CardUpdated(pb::CardUpdated { card: Some(c) }) => Some(&c.channel_id),
         Payload::CardDeleted(d) => Some(&d.channel_id),
         Payload::TypingStarted(t) => Some(&t.channel_id),
+        Payload::SoundPlayed(p) => Some(&p.channel_id),
         _ => None,
     }
 }

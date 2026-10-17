@@ -470,7 +470,7 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
         // Only its first bytes are read to tell what it is, so a big file
         // (an attachment no message has yet) never sits in memory.
         let Ok(mut file) = tokio::fs::File::open(&path).await else { return plain(StatusCode::NOT_FOUND, "not found") };
-        let mut head = [0u8; 16];
+        let mut head = [0u8; crate::media::HEAD];
         let mut read = 0;
         while read < head.len() {
             match tokio::io::AsyncReadExt::read(&mut file, &mut head[read..]).await {
@@ -479,7 +479,9 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
                 Err(_) => return plain(StatusCode::NOT_FOUND, "not found"),
             }
         }
-        let Some(kind) = crate::media::sniff(&head[..read]) else {
+        // A soundboard sound is the one kind kept here that isn't a picture.
+        let sound = (crate::media::kind_of(&head[..read]) == crate::media::OGG_OPUS).then_some(crate::media::OGG_OPUS);
+        let Some(kind) = crate::media::sniff(&head[..read]).or(sound) else {
             return plain(StatusCode::NOT_FOUND, "not found");
         };
         if tokio::io::AsyncSeekExt::rewind(&mut file).await.is_err() {
@@ -508,7 +510,8 @@ fn unused(used: Result<bool>) -> bool {
 
 /// Whether the server links to the file: its icon or banner, an emoji, a
 /// profile item's picture or one of an effect's own pictures, a webhook's
-/// picture, a gacha banner's art or a message's attachment.
+/// picture, a gacha banner's art, a soundboard sound or a message's
+/// attachment.
 pub(crate) async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let sdb = app.servers.get(server_id).await?;
     let conn = sdb.read()?;
@@ -520,6 +523,7 @@ pub(crate) async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<b
         &conn,
         "SELECT 1 FROM server WHERE icon_url LIKE ?1 OR banner_url LIKE ?1
          UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
+         UNION ALL SELECT 1 FROM sounds WHERE url LIKE ?1
          UNION ALL SELECT 1 FROM profile_items WHERE picture_url LIKE ?1 OR pictures LIKE ?3
          UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1
          UNION ALL SELECT 1 FROM attachments WHERE media_id = ?2 LIMIT 1",
@@ -582,6 +586,7 @@ async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::m
             | pb::MediaPurpose::Attachment
             | pb::MediaPurpose::Decoration
             | pb::MediaPurpose::ShopArt
+            | pb::MediaPurpose::Sound
     );
     if !row.stored || !row.used || !purpose || row.server_id.as_deref() != Some(server_id) {
         return Err(Error::FailedPrecondition("that picture isn't the server's".into()));

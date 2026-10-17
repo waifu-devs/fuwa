@@ -12,6 +12,7 @@ import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { CommandService } from "@/gen/fuwa/v1/command_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
+import { SoundboardService } from "@/gen/fuwa/v1/soundboard_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
 import { FriendService } from "@/gen/fuwa/v1/friend_pb";
 import { GifService } from "@/gen/fuwa/v1/gif_pb";
@@ -55,6 +56,7 @@ export type Api = {
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
+  soundboard: Client<typeof SoundboardService>;
   calls: Client<typeof CallService>;
   webhooks: Client<typeof WebhookService>;
   agents: Client<typeof AgentService>;
@@ -102,6 +104,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     secure: createClient(SecureChannelService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
+    soundboard: createClient(SoundboardService, transport),
     calls: createClient(CallService, transport),
     webhooks: createClient(WebhookService, transport),
     agents: createClient(AgentService, transport),

@@ -1,5 +1,6 @@
 //! Files people upload: avatars, banners, server icons, emoji and
-//! backgrounds, which are pictures, and attachments, which may be anything.
+//! backgrounds, which are pictures, attachments, which may be anything, and
+//! soundboard sounds, which are Ogg Opus of at most [`MAX_SOUND_MS`].
 //!
 //! An upload is reserved with `MediaService.CreateUpload`, which makes a row
 //! in node.db's `media` table and a one-time token. The bytes arrive with an
@@ -69,6 +70,54 @@ pub const OCTET_STREAM: &str = "application/octet-stream";
 
 /// An Ogg file whose first stream is Opus: what voice messages are.
 pub const OGG_OPUS: &str = "audio/ogg; codecs=opus";
+
+/// The longest a soundboard sound (`MEDIA_PURPOSE_SOUND`) plays.
+pub const MAX_SOUND_MS: i64 = 10_000;
+
+/// The biggest a soundboard sound's file can be: 10 seconds of Opus at its
+/// highest bitrate (510 kbit/s) with room for its pages, so a file past
+/// this can't be a sound at all.
+pub const MAX_SOUND_BYTES: i64 = 1024 * 1024;
+
+/// How long an Ogg Opus file plays, in milliseconds, from its header and its
+/// last page's granule position (48 kHz samples, less the pre-skip). `None`
+/// for a file that isn't one stream of Opus, or whose pages don't hold up.
+pub fn ogg_opus_ms(bytes: &[u8]) -> Option<i64> {
+    let mut at = 0;
+    let mut serial = None;
+    let mut pre_skip = None;
+    let mut last = None;
+    while at < bytes.len() {
+        let page = bytes.get(at..)?;
+        if page.len() < 27 || &page[..4] != b"OggS" || page[4] != 0 {
+            return None;
+        }
+        let granule = i64::from_le_bytes(page[6..14].try_into().ok()?);
+        let this = u32::from_le_bytes(page[14..18].try_into().ok()?);
+        if *serial.get_or_insert(this) != this {
+            return None;
+        }
+        let segments = usize::from(page[26]);
+        let lacing = page.get(27..27 + segments)?;
+        let body = 27 + segments;
+        let length: usize = lacing.iter().map(|&b| usize::from(b)).sum();
+        let data = page.get(body..body + length)?;
+        if pre_skip.is_none() {
+            // The first page holds OpusHead alone: version, channels, then the pre-skip.
+            if data.len() < 19 || &data[..8] != b"OpusHead" {
+                return None;
+            }
+            pre_skip = Some(i64::from(u16::from_le_bytes([data[10], data[11]])));
+        }
+        // -1 marks a page where no packet ends.
+        if granule >= 0 {
+            last = Some(granule);
+        }
+        at += body + length;
+    }
+    let samples = last? - pre_skip?;
+    (samples >= 0).then_some(samples * 1000 / 48_000)
+}
 
 /// What an attachment can be kept as: [`kind_of`]'s answers.
 pub const ATTACHMENT_TYPES: &[&str] = &[
@@ -627,6 +676,24 @@ pub async fn receive_file(
     }
     let content_type = match purpose {
         pb::MediaPurpose::Attachment => kind_of(&head),
+        pb::MediaPurpose::Sound => {
+            file.sync_all().await.map_err(|_| broken())?;
+            let bytes = tokio::fs::read(temp).await.map_err(|_| broken())?;
+            let opus = || (StatusCode::UNSUPPORTED_MEDIA_TYPE, "a sound is an Ogg Opus file".to_string());
+            if kind_of(&head) != OGG_OPUS {
+                return Err(opus());
+            }
+            match ogg_opus_ms(&bytes) {
+                None => return Err(opus()),
+                Some(ms) if ms > MAX_SOUND_MS => {
+                    return Err((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!("a sound plays for at most {} seconds", MAX_SOUND_MS / 1000),
+                    ));
+                }
+                Some(_) => OGG_OPUS,
+            }
+        }
         _ => sniff(&head).ok_or_else(|| {
             (StatusCode::UNSUPPORTED_MEDIA_TYPE, "that isn't a PNG, JPEG, GIF, WebP or AVIF picture".to_string())
         })?,

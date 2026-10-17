@@ -45,7 +45,7 @@ pub(super) fn harmless(role: &pb::Role) -> bool {
 }
 
 /// A welcome or onboarding emoji: Unicode, or one of the server's own.
-fn checked_emoji(emojis: &[pb::Emoji], emoji: &str, what: &str) -> Result<String> {
+pub(super) fn checked_emoji(emojis: &[pb::Emoji], emoji: &str, what: &str) -> Result<String> {
     let emoji = emoji.trim().to_string();
     let custom = emoji.strip_prefix("<:").and_then(|rest| rest.strip_suffix('>')).and_then(|r| r.rsplit_once(':'));
     let fine = match custom {
