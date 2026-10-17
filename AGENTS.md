@@ -40,6 +40,20 @@
   `.railway/railway.ts` is built by Railway from this repository (its
   Dockerfile, on master, once checks pass); fuwa's image and redeploys don't
   include it.
+- `agents/discord-migrate/`: a Discord bot and fuwa agent in one process
+  that copy a Discord server into a fuwa server (its README). `/migrate start`
+  in Discord gives a one-use code (`src/link.ts`, in memory) that `/import`
+  redeems in the fuwa server, run by its owner or a manager, with the agent an
+  Administrator there. `src/migrate.ts` runs the steps over the two sides in
+  `src/model.ts` (`src/discord.ts` reads through discord.js, `src/fuwa.ts`
+  writes through the SDK, history through a webhook per channel so messages
+  keep their authors' names and pictures), writing each step down per pair of
+  servers (`src/state.ts`, `DATA_DIR`) so a stopped run picks up where it left
+  off. `Refused` marks one thing that can't be copied, for good: it's skipped
+  and listed in the summary; anything else stops the run. `src/convert.ts`
+  (pure) maps permissions, channel order, names and message text. Its own
+  pnpm package, from the SDK on npm; `test/instance.test.ts` runs the fuwa
+  side against `FUWA_BIN`.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
