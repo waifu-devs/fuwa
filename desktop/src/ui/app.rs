@@ -382,6 +382,8 @@ pub struct FuwaApp {
     pub time_style: crate::core::timestamps::Style,
     /// A redraw is coming for relative timestamps.
     pub time_ticking: bool,
+    /// When a redraw is coming for an ephemeral message's time left (unix ms).
+    pub ephemeral_ticking: Option<i64>,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
     /// Agents' commands: the "/" list, a picked command's options, buttons being pressed.
@@ -772,6 +774,7 @@ impl FuwaApp {
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
+            ephemeral_ticking: None,
             edit_box,
             picker: None,
             commands: Default::default(),

@@ -4,6 +4,7 @@ import {
   CheckIcon,
   CopyIcon,
   CrownIcon,
+  EyeIcon,
   FingerprintIcon,
   HandIcon,
   MessageSquareReplyIcon,
@@ -50,6 +51,9 @@ import {
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, hideLinkPreviews, loadMessages, run, sendMessage, trimToLatest } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { store, threadKey, useFuwa, type Landed, type PendingMessage } from "@/fuwa/store";
+import { dismissEphemeral, useEphemeralIn } from "@/fuwa/ephemeral";
+import { merged, minutesLeft, nextTick } from "@/lib/ephemeral";
+import { SwapText } from "@/components/motion";
 import { instanceHas } from "@/lib/compat";
 import type { FuwaError } from "@/fuwa/errors";
 import { pinMessage } from "@/fuwa/pins";
@@ -108,6 +112,7 @@ type Row =
   | { kind: "message"; key: string; message: Message; first: boolean; date: Date }
   | { kind: "join"; key: string; message: Message; date: Date }
   | { kind: "automod"; key: string; message: Message; date: Date }
+  | { kind: "ephemeral"; key: string; message: Message; date: Date }
   | { kind: "pending"; key: string; pending: PendingMessage; first: boolean };
 
 export type MessageListHandle = {
@@ -201,7 +206,10 @@ export const MessageList = forwardRef<
   const state = useFuwa((s) => s.instances[instanceKey]?.messages[at]);
   const pending = useFuwa((s) => s.instances[instanceKey]?.pending[at] ?? EMPTY);
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
-  const items = state?.items ?? EMPTY;
+  const stored = state?.items ?? EMPTY;
+  // Ephemeral messages for you (fuwa/ephemeral.ts) go among the channel's by time; they're only ever in memory.
+  const kept = useEphemeralIn(instanceKey, channel.id, threadId);
+  const items = useMemo(() => merged(stored, kept, (m) => dateOf(m).getTime()), [stored, kept]);
   const [editing, setEditing] = useState<string | null>(null);
   const { look, pollPlace, catalog, reactCatalog, memberById, myRoleIds } = useListLook(instanceKey, serverId, channel, me);
   const actions = useRowActions(instanceKey, serverId, channel, threadId, at, catalog, setEditing);
@@ -351,7 +359,7 @@ function useRowActions(
 }
 
 /** The rows: a divider for each day, runs of one author's messages under one header, then what's still sending. */
-function buildRows(items: Message[], pending: PendingMessage[], meId: string | undefined): Row[] {
+function buildRows(items: readonly Message[], pending: PendingMessage[], meId: string | undefined): Row[] {
   const out: Row[] = [];
   let prev: { author: string; at: Date } | null = null;
   for (const message of items) {
@@ -359,6 +367,12 @@ function buildRows(items: Message[], pending: PendingMessage[], meId: string | u
     if (!prev || !sameDay(prev.at, date)) {
       out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
       prev = null;
+    }
+    if (message.ephemeral) {
+      out.push({ kind: "ephemeral", key: `ephemeral-${message.id}`, message, date });
+      // It has a header of its own, and the next message starts a run of its own.
+      prev = { author: "", at: date };
+      continue;
     }
     if (message.kind === MessageKind.MEMBER_JOINED || message.kind === MessageKind.AUTO_MOD_ALERT) {
       out.push({ kind: message.kind === MessageKind.MEMBER_JOINED ? "join" : "automod", key: message.id, message, date });
@@ -398,7 +412,7 @@ function useListScroll({
   channel: Channel;
   threadId: string;
   state: { loading: boolean; hasMore: boolean } | undefined;
-  items: Message[];
+  items: readonly Message[];
   rows: Row[];
 }) {
   const [hidden, setHidden] = useState<number | null>(null);
@@ -630,6 +644,21 @@ function drawRow(row: Row, c: RowContext): ReactNode {
   const author = message.webhook ? webhookAuthorOf(message.webhook) : (c.memberById.get(message.authorId)?.user ?? c.users?.[message.authorId]);
   const member = c.memberById.get(message.authorId);
   const animate = !c.initial?.has(message.id);
+  if (row.kind === "ephemeral")
+    return (
+      <EphemeralRow
+        key={row.key}
+        message={message}
+        display={c.display}
+        date={row.date}
+        author={author}
+        member={member}
+        instanceKey={c.instanceKey}
+        serverId={c.serverId}
+        animate={animate}
+        clock={c.clock}
+      />
+    );
   if (row.kind === "automod")
     return (
       <AutoModAlertRow
@@ -1252,6 +1281,87 @@ function MessageContent({
       {message.gacha && <GachaShareCard message={message} instanceKey={instanceKey} />}
       <MessageButtons message={message} />
     </>
+  );
+}
+
+/**
+ * An agent's message only you can see, for a while: drawn like any message
+ * but tinted, with how long it has left and a way to dismiss it. Nothing
+ * here reaches the instance, which never kept it: no replies, reactions,
+ * pins, threads or links, only copying its text.
+ */
+const EphemeralRow = memo(function EphemeralRow({
+  message,
+  display,
+  date,
+  author,
+  member,
+  instanceKey,
+  serverId,
+  animate,
+}: Redraw & {
+  message: Message;
+  display: MessageDisplay;
+  date: Date;
+  author: User | undefined;
+  member: Member | undefined;
+  instanceKey: string;
+  serverId: string;
+  animate: boolean;
+}) {
+  const { t } = useI18n();
+  const dismiss = () => dismissEphemeral(instanceKey, message.channelId, message.threadId, message.id);
+  const menu = useContextMenu("ephemeral", () => [
+    { id: "primary", items: items(!!message.content && { id: "copy-text", label: t("chat.messages.copyText"), icon: CopyIcon, onSelect: () => copy(t, message.content, t("common.copy.text")) }) },
+    { id: "danger", items: items({ id: "dismiss", label: t("chat.ephemeral.dismiss"), icon: XIcon, onSelect: dismiss }) },
+  ]);
+  return (
+    <motion.div
+      {...(animate ? enter : {})}
+      {...menu}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
+      transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      className={cn("message-row ephemeral-row group relative first flex gap-3 px-4", display === "compact" && "compact")}
+    >
+      <MessageLine display={display} first author={author} member={member} date={date} instanceKey={instanceKey} app={!!message.webhook}>
+        {message.interaction && <UsedCommand message={message} instanceKey={instanceKey} serverId={serverId} />}
+        {message.content && <MessageBody content={message.content} emojis={message.emojis} display={display} />}
+        <Attachments files={message.attachments} animate={animate} />
+        <Embeds embeds={message.embeds} animate={animate} />
+        <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
+        <EphemeralNote until={toDate(message.ephemeral?.expiresAt).getTime()} onDismiss={dismiss} />
+      </MessageLine>
+      {message.content && (
+        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+          <CopyTextButton content={message.content} />
+        </div>
+      )}
+    </motion.div>
+  );
+});
+
+/** "Only you can see this", how long it has left (redrawn only when that changes) and Dismiss. */
+function EphemeralNote({ until, onDismiss }: { until: number; onDismiss: () => void }) {
+  const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // Once it's out of time the row goes (fuwa/ephemeral.ts), so there's nothing more to wait for.
+    if (until <= now) return;
+    const timer = setTimeout(() => setNow(Date.now()), nextTick(until, now));
+    return () => clearTimeout(timer);
+  }, [until, now]);
+  const minutes = minutesLeft(until, now);
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+      <EyeIcon aria-hidden className="size-3.5 shrink-0 text-primary" />
+      <span>{t("chat.ephemeral.onlyYou")}</span>
+      <span aria-hidden>·</span>
+      <SwapText>{minutes === null ? t("chat.ephemeral.underAMinute") : t("chat.ephemeral.minutesLeft", { count: minutes })}</SwapText>
+      <span aria-hidden>·</span>
+      <button type="button" onClick={onDismiss} className="font-bold text-primary hover:underline">
+        {t("chat.ephemeral.dismiss")}
+      </button>
+    </p>
   );
 }
 

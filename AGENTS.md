@@ -163,6 +163,17 @@
     (pure), `fuwa/typing.ts` (its own small store) and
     `components/chat/TypingLine.tsx`; desktop: `core/typing.rs` and
     `ui/typing.rs`.
+  - `api/ephemeral.rs`: ephemeral messages (docs/ephemeral-messages.md).
+    `MessageService.SendEphemeralMessage` (agents only, with Send Messages,
+    in the server's own unshared text and announcement channels) publishes
+    `EphemeralMessageCreated` with sequence 0 and stores nothing; the
+    message carries `Message.ephemeral` (who, until when, at most an hour).
+    `events::shown_to` passes it only to that person, and `Interest::take`
+    passes it whole whatever the focus. With `interaction_id` it answers
+    privately (`commands::answer`). 60 a minute per agent, in memory. Web:
+    `lib/ephemeral.ts` (pure), `fuwa/ephemeral.ts` (its own small store) and
+    `chat/MessageList.tsx`'s `EphemeralRow`; desktop: `core/ephemeral.rs` and
+    `ui/chat.rs`. Apps never count them as unread or cache them.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all

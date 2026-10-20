@@ -362,6 +362,7 @@ pub(crate) fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bo
         decoration: None,
         owner: false,
         enc: Some(Rc::new(enc)),
+        ephemeral: None,
         sig: 0,
         pre: 0,
     }

@@ -87,6 +87,7 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::CardDeleted(d) => Some(&d.channel_id),
         Payload::TypingStarted(t) => Some(&t.channel_id),
         Payload::SoundPlayed(p) => Some(&p.channel_id),
+        Payload::EphemeralMessageCreated(pb::EphemeralMessageCreated { message: Some(m) }) => Some(&m.channel_id),
         _ => None,
     }
 }
@@ -98,6 +99,10 @@ fn shown_to(account_id: &str, access: &Access, payload: &Payload) -> bool {
     match payload {
         Payload::ApplicationUpdated(_) => access.has(pb::Permission::KickMembers),
         Payload::InteractionCreated(p) => p.interaction.as_ref().is_some_and(|i| i.agent_id == account_id),
+        Payload::EphemeralMessageCreated(created) => {
+            super::ephemeral::shown_to(account_id, created)
+                && created.message.as_ref().is_some_and(|m| access.can_see(&m.channel_id))
+        }
         Payload::ModCaseUpdated(_) | Payload::ModNoteAdded(_) | Payload::ModNoteDeleted(_) => {
             super::moderation::event_shown(access, payload)
         }

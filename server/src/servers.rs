@@ -172,6 +172,7 @@ fn may_change_rules(payload: &Payload) -> bool {
             | Payload::GachaBannersUpdated(_)
             | Payload::GachaPulled(_)
             | Payload::TypingStarted(_)
+            | Payload::EphemeralMessageCreated(_)
     )
 }
 

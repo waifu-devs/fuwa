@@ -757,6 +757,8 @@ body {
 
 /* Mentions of you. */
 .mention-me { background: color-mix(in srgb, var(--primary) 12%, transparent); box-shadow: inset 3px 0 0 var(--primary); }
+/* An ephemeral message, only you can see it: fainter than a mention, its accent see-through. */
+.ephemeral-row { background: color-mix(in srgb, var(--primary) 6%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--primary) 55%, transparent); }
 
 /* Search: the words found, and the message a result opened, which glows a moment (opacity only, on the compositor). */
 mark.search-hit { background: color-mix(in srgb, var(--primary) 26%, transparent); color: inherit; border-radius: 0.25em; padding-inline: 0.1em; box-decoration-break: clone; }

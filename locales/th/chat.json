@@ -22,6 +22,12 @@
   "messages.copyId": "คัดลอก ID ข้อความ",
   "messages.edit": "แก้ไข",
   "messages.hidePreviews": "นำตัวอย่างลิงก์ออก",
+  "ephemeral.onlyYou": "มีเพียงคุณที่เห็นข้อความนี้",
+  "ephemeral.dismiss": "ปิดข้อความ",
+  "ephemeral.minutesLeft": {
+    "other": "จะหายไปใน {count} นาที"
+  },
+  "ephemeral.underAMinute": "จะหายไปในไม่ถึงหนึ่งนาที",
   "spoiler.reveal": "สปอยเลอร์ กดเพื่อแสดง",
   "leaving.title": "กำลังออกจาก fuwa",
   "leaving.about": "ข้อความของลิงก์นี้ไม่ได้บอกว่าจะไปที่ไหน ที่จริงแล้วลิงก์นี้เปิด:",

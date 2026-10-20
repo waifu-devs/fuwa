@@ -22,6 +22,12 @@
   "messages.copyId": "复制消息 ID",
   "messages.edit": "编辑",
   "messages.hidePreviews": "移除链接预览",
+  "ephemeral.onlyYou": "只有你能看到这条消息",
+  "ephemeral.dismiss": "关闭消息",
+  "ephemeral.minutesLeft": {
+    "other": "{count} 分钟后消失"
+  },
+  "ephemeral.underAMinute": "不到一分钟后消失",
   "spoiler.reveal": "剧透内容，点击显示",
   "leaving.title": "即将离开 fuwa",
   "leaving.about": "此链接的文字并未说明它指向哪里。它实际打开的是：",

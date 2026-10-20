@@ -512,6 +512,8 @@ pub fn event(e: &pb::Event) -> Value {
                 "name": p.sound.as_ref().map(|s| s.name.as_str()),
             }),
         ),
+        // Only people get these; an agent never does.
+        Some(Payload::EphemeralMessageCreated(_)) => ("ephemeral_message", json!({})),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

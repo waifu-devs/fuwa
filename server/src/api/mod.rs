@@ -14,6 +14,7 @@ mod economy;
 mod email;
 mod emoji;
 mod endpoints;
+mod ephemeral;
 mod events;
 mod friends;
 mod gacha;

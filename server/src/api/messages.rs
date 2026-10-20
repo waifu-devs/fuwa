@@ -369,6 +369,7 @@ pub(super) fn message_row(
                 pinned_at: r.get::<Option<i64>>(11)?.map(timestamp),
                 reactions: vec![],
                 gacha: None,
+                ephemeral: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -1312,6 +1313,7 @@ impl Api {
                     pinned_at: None,
                     reactions: vec![],
                     gacha,
+                    ephemeral: None,
                 };
                 // Checked again here, where no other message can take the room meanwhile.
                 if file_bytes > 0
@@ -1786,6 +1788,19 @@ impl MessageService for Api {
                     })
                     .await?;
                 Ok(pb::HideLinkPreviewsResponse { message: Some(message) })
+            }
+            .await,
+        )
+    }
+
+    async fn send_ephemeral_message(
+        &self,
+        request: Request<pb::SendEphemeralMessageRequest>,
+    ) -> Result<Response<pb::SendEphemeralMessageResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.send_ephemeral_impl(&account, request.into_inner()).await
             }
             .await,
         )

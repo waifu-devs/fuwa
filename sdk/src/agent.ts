@@ -6,7 +6,7 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
 import type { Balance, LiveTile, LiveTileContentSchema, ModReportReason, Sound } from "./gen/fuwa/v1/types_pb.js";
 import type { GrantResponse, PullResponse } from "./gen/fuwa/v1/economy_pb.js";
-import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
+import type { SendEphemeralMessageRequestSchema, SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
 import {
   AccountKind,
   InteractionKind,
@@ -80,6 +80,18 @@ function reactionEmoji(emoji: ReactionEmoji): { emoji: string; emojiId: string }
 /** What to send: text, or the whole request (attachments, embeds, a reply). */
 export type Outgoing = string | Omit<MessageInitShape<typeof SendMessageRequestSchema>, "$typeName" | "serverId" | "channelId">;
 
+/**
+ * What to send only one person: text, or the request with embeds and
+ * `expiresInSeconds` (how long their apps show it: up to an hour, 15
+ * minutes unless given).
+ */
+export type EphemeralOutgoing =
+  | string
+  | Omit<
+      MessageInitShape<typeof SendEphemeralMessageRequestSchema>,
+      "$typeName" | "serverId" | "channelId" | "userId" | "interactionId"
+    >;
+
 /** A message someone sent, and ways to answer it. */
 export interface MessageContext {
   agent: Agent;
@@ -95,6 +107,8 @@ export interface MessageContext {
   reply(content: Outgoing): Promise<Message>;
   /** Sends a message in the same channel. */
   send(content: Outgoing): Promise<Message>;
+  /** Answers its author in the same channel with a message only they see, for a while (see `agent.sendEphemeral`). */
+  replyEphemeral(content: EphemeralOutgoing): Promise<Message>;
   /** Reacts to it (see `agent.react`). */
   react(emoji: ReactionEmoji): Promise<Reaction>;
   /** Shows the agent typing in the channel `reply` and `send` post to (see `agent.typing`). */
@@ -146,6 +160,11 @@ export interface InteractionContext {
    * to five times, within 15 minutes of it.
    */
   reply(content: Outgoing): Promise<Message>;
+  /**
+   * Answers it with a message only whoever used it sees, for a while (see
+   * `agent.sendEphemeral`). Counts toward the same five answers.
+   */
+  replyEphemeral(content: EphemeralOutgoing): Promise<Message>;
 }
 
 /** How long an interaction can be answered, and its arguments are kept. */
@@ -360,6 +379,22 @@ export class Agent {
   async send(serverId: string, channelId: string, content: Outgoing): Promise<Message> {
     const req = typeof content === "string" ? { content } : content;
     const { message } = await this.api.messages.sendMessage({ ...req, serverId, channelId });
+    if (!message) throw toFuwaError(new Error("the instance didn't return the message"));
+    return message;
+  }
+
+  /**
+   * Sends a message in a channel that only `userId` sees, for a while (an
+   * ephemeral message, docs/ephemeral-messages.md): their apps mark it as
+   * only visible to them and drop it when it runs out. Nothing is stored and
+   * nobody is pinged, so they see it only if they have fuwa open. They must
+   * be a person in the server who can see the channel; the agent needs Send
+   * Messages there. At most 60 a minute, and an instance with the
+   * `ephemeral-messages` feature.
+   */
+  async sendEphemeral(serverId: string, channelId: string, userId: string, content: EphemeralOutgoing): Promise<Message> {
+    const req = typeof content === "string" ? { content } : content;
+    const { message } = await this.api.messages.sendEphemeralMessage({ ...req, serverId, channelId, userId });
     if (!message) throw toFuwaError(new Error("the instance didn't return the message"));
     return message;
   }
@@ -696,6 +731,7 @@ export class Agent {
       author: () => (message.webhook ? Promise.resolve(undefined) : message.shared?.user ? Promise.resolve(message.shared.user) : this.user(message.authorId)),
       reply: (content) => this.reply(message, content),
       send: (content) => this.send(message.serverId, message.channelId, content),
+      replyEphemeral: (content) => this.sendEphemeral(message.serverId, message.channelId, message.authorId, content),
       react: (emoji) => this.react(message, emoji),
       typing: () => this.typing(message.serverId, message.channelId),
       typingWhile: (work) => this.typingWhile(message.serverId, message.channelId, work),
@@ -718,6 +754,17 @@ export class Agent {
       reply: (content) => {
         const req = typeof content === "string" ? { content } : content;
         return this.send(interaction.serverId, interaction.channelId, { ...req, interactionId: interaction.id });
+      },
+      replyEphemeral: async (content) => {
+        const req = typeof content === "string" ? { content } : content;
+        const { message } = await this.api.messages.sendEphemeralMessage({
+          ...req,
+          serverId: interaction.serverId,
+          channelId: interaction.channelId,
+          interactionId: interaction.id,
+        });
+        if (!message) throw toFuwaError(new Error("the instance didn't return the message"));
+        return message;
       },
     };
   }

@@ -239,6 +239,32 @@ test("an agent shows it's typing and hears people type", async () => {
   await agent.stop();
 });
 
+test("an agent sends a message only one person sees, which never stays", async () => {
+  const agent = newAgent();
+  await agent.start();
+  const me = (await person.auth.getMe({})).user!.id;
+  const abort = new AbortController();
+  const stream = person.events.subscribe({ servers: [{ serverId }] }, { signal: abort.signal });
+  let sent: Promise<Message> | undefined;
+  const got = (async () => {
+    for await (const res of stream) {
+      if (res.ready) sent = agent.sendEphemeral(serverId, channelId, me, { content: "just for you", expiresInSeconds: 60 });
+      const payload = res.event?.payload;
+      if (payload?.case === "ephemeralMessageCreated") return payload.value.message;
+    }
+    return undefined;
+  })();
+  const message = await got;
+  abort.abort();
+  assert.equal(message?.content, "just for you");
+  assert.equal(message?.ephemeral?.userId, me);
+  assert.equal((await sent!).id, message?.id);
+  // Nothing keeps it: the channel's messages don't have it.
+  assert.ok((await agentMessages(agent)).every((m) => m.id !== message?.id));
+  await assert.rejects(agent.sendEphemeral(serverId, channelId, agent.me.id, "to myself"), (e: FuwaError) => e.code === Code.InvalidArgument);
+  await agent.stop();
+});
+
 test("an agent reports a message to the server's moderators", async () => {
   const agent = newAgent();
   await agent.start();

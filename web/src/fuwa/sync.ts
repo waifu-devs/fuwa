@@ -20,6 +20,7 @@ import { forgetSounds, onSoundboardEvent, refreshSounds } from "./soundboard";
 import { forgetModeration, onModEvent } from "./moderation";
 import { forgetPins, onPinEvent, refreshChannelPins } from "./pins";
 import { onTypingEvent } from "./typing";
+import { onEphemeralEvent } from "./ephemeral";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
@@ -715,6 +716,8 @@ const followEvents = (
         // Typing lives in its own store (fuwa/typing.ts): it moves no cursor and isn't news.
         onTypingEvent(key, event);
         if (event.payload.case === "typingStarted") return;
+        // So do ephemeral messages (fuwa/ephemeral.ts): kept in memory, never unread, notified or cached.
+        if (onEphemeralEvent(key, event)) return;
         const sid = event.serverId;
         if (event.sequence > 0n) {
           const last = cursors.get(sid);

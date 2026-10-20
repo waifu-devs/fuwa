@@ -22,6 +22,12 @@
   "messages.copyId": "Salin ID pesan",
   "messages.edit": "Sunting",
   "messages.hidePreviews": "Hapus pratinjau tautan",
+  "ephemeral.onlyYou": "Hanya kamu yang bisa melihat ini",
+  "ephemeral.dismiss": "Tutup pesan",
+  "ephemeral.minutesLeft": {
+    "other": "Hilang dalam {count} menit"
+  },
+  "ephemeral.underAMinute": "Hilang dalam kurang dari semenit",
   "spoiler.reveal": "Spoiler, tekan untuk menampilkan",
   "leaving.title": "Meninggalkan fuwa",
   "leaving.about": "Teks tautan ini tidak menunjukkan tujuannya. Sebenarnya tautan ini membuka:",

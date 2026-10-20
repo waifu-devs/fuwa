@@ -273,6 +273,30 @@ const TOOLS: &[Tool] = &[
         destructive: false,
     },
     Tool {
+        name: "send_ephemeral_message",
+        title: "Send a message only one person sees",
+        description: "Sends a message in a channel that only one person there sees, for a while, marked as only \
+                      visible to them: a private answer to a command, a hint, an error. It isn't stored and pings \
+                      nobody; they see it only if they have fuwa open. Needs a role that can send messages there.",
+        properties: || {
+            json!({
+                "server_id": server_id(),
+                "channel_id": channel_id(),
+                "user_id": { "type": "string", "description": "Who sees it: a member who can see the channel. May be left out with interaction_id." },
+                "content": { "type": "string", "description": "The text, up to 4000 characters." },
+                "interaction_id": {
+                    "type": "string",
+                    "description": "Answers an interaction_created event privately: only whoever ran the command \
+                                    or pressed the button sees it. Counts toward its 5 answers."
+                },
+                "expires_in_seconds": { "type": "integer", "minimum": 1, "maximum": 3600, "description": "How long it shows; 15 minutes unless set." }
+            })
+        },
+        required: &["server_id", "channel_id", "content"],
+        read_only: false,
+        destructive: false,
+    },
+    Tool {
         name: "send_typing",
         title: "Show this agent typing",
         description: "Shows this agent as typing in a channel, or in a thread's reply box, to the people who have \
@@ -939,6 +963,19 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             };
             call!(cx, message_service_client::MessageServiceClient.react(req))
                 .map(|r| json!({ "reaction": r.reaction.as_ref().map(view::reaction) }))
+        }
+        "send_ephemeral_message" => {
+            let req = pb::SendEphemeralMessageRequest {
+                server_id: sid()?,
+                channel_id: args.text("channel_id")?,
+                user_id: args.optional("user_id")?,
+                content: args.text("content")?,
+                interaction_id: args.optional("interaction_id")?,
+                expires_in_seconds: args.number("expires_in_seconds")?.unwrap_or(0).clamp(0, u32::MAX as i64) as u32,
+                ..Default::default()
+            };
+            call!(cx, message_service_client::MessageServiceClient.send_ephemeral_message(req))
+                .map(|r| json!({ "message": view::messages(r.message.as_slice(), std::slice::from_ref(&cx.me)).pop() }))
         }
         "send_typing" => {
             let req = pb::SendTypingRequest {

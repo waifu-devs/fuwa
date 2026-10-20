@@ -22,6 +22,12 @@
   "messages.copyId": "Sao chép ID tin nhắn",
   "messages.edit": "Chỉnh sửa",
   "messages.hidePreviews": "Gỡ bản xem trước liên kết",
+  "ephemeral.onlyYou": "Chỉ bạn mới thấy được tin nhắn này",
+  "ephemeral.dismiss": "Bỏ qua tin nhắn",
+  "ephemeral.minutesLeft": {
+    "other": "Biến mất sau {count} phút"
+  },
+  "ephemeral.underAMinute": "Biến mất sau chưa đầy một phút",
   "spoiler.reveal": "Nội dung ẩn, nhấn để hiện",
   "leaving.title": "Rời khỏi fuwa",
   "leaving.about": "Chữ của liên kết này không cho biết nó dẫn đến đâu. Thực ra nó mở:",

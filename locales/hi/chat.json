@@ -23,6 +23,13 @@
   "messages.copyId": "संदेश ID कॉपी करें",
   "messages.edit": "संपादित करें",
   "messages.hidePreviews": "लिंक प्रीव्यू हटाएं",
+  "ephemeral.onlyYou": "यह सिर्फ़ आपको दिख रहा है",
+  "ephemeral.dismiss": "संदेश हटाएँ",
+  "ephemeral.minutesLeft": {
+    "one": "{count} मिनट में गायब हो जाएगा",
+    "other": "{count} मिनट में गायब हो जाएगा"
+  },
+  "ephemeral.underAMinute": "एक मिनट से कम में गायब हो जाएगा",
   "spoiler.reveal": "स्पॉइलर, देखने के लिए दबाएं",
   "leaving.title": "fuwa से बाहर जा रहे हैं",
   "leaving.about": "इस लिंक के शब्द यह नहीं बताते कि यह कहां जाता है। असल में यह खुलता है:",

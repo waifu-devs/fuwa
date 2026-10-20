@@ -22,6 +22,12 @@
   "messages.copyId": "メッセージIDをコピー",
   "messages.edit": "編集",
   "messages.hidePreviews": "リンクプレビューを削除",
+  "ephemeral.onlyYou": "これはあなただけに表示されています",
+  "ephemeral.dismiss": "メッセージを閉じる",
+  "ephemeral.minutesLeft": {
+    "other": "{count}分後に消えます"
+  },
+  "ephemeral.underAMinute": "1分以内に消えます",
   "spoiler.reveal": "ネタバレ、押すと表示",
   "leaving.title": "fuwa から移動します",
   "leaving.about": "このリンクの文字は行き先を示していません。実際に開かれるのは：",

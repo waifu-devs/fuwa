@@ -23,6 +23,13 @@
   "messages.copyId": "Nachrichten-ID kopieren",
   "messages.edit": "Bearbeiten",
   "messages.hidePreviews": "Linkvorschauen entfernen",
+  "ephemeral.onlyYou": "Nur du kannst das sehen",
+  "ephemeral.dismiss": "Nachricht ausblenden",
+  "ephemeral.minutesLeft": {
+    "one": "Verschwindet in {count} Minute",
+    "other": "Verschwindet in {count} Minuten"
+  },
+  "ephemeral.underAMinute": "Verschwindet in weniger als einer Minute",
   "spoiler.reveal": "Spoiler, zum Anzeigen drücken",
   "leaving.title": "Du verlässt fuwa",
   "leaving.about": "Der Text dieses Links sagt nicht, wohin er führt. Er öffnet tatsächlich:",

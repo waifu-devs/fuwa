@@ -25,6 +25,15 @@
   "messages.copyId": "Копировать ID сообщения",
   "messages.edit": "Изменить",
   "messages.hidePreviews": "Убрать превью ссылок",
+  "ephemeral.onlyYou": "Это видите только вы",
+  "ephemeral.dismiss": "Скрыть сообщение",
+  "ephemeral.minutesLeft": {
+    "one": "Исчезнет через {count} минуту",
+    "few": "Исчезнет через {count} минуты",
+    "many": "Исчезнет через {count} минут",
+    "other": "Исчезнет через {count} минуты"
+  },
+  "ephemeral.underAMinute": "Исчезнет меньше чем через минуту",
   "spoiler.reveal": "Спойлер, нажмите, чтобы показать",
   "leaving.title": "Вы покидаете fuwa",
   "leaving.about": "Текст этой ссылки не говорит, куда она ведёт. На самом деле она открывает:",
