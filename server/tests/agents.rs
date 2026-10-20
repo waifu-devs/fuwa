@@ -362,6 +362,8 @@ async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_brows
     // A private agent is its owner's alone.
     let err = agents.look_up_agent(authed(&ana, by_name("helper"))).await.unwrap_err();
     assert_eq!(err.code(), Code::NotFound);
+    let err = agents.look_up_agent(by_name("helper")).await.unwrap_err();
+    assert_eq!(err.code(), Code::NotFound);
     let mine = agents.look_up_agent(authed(&w.owner, by_name("@helper"))).await.unwrap().into_inner().agent.unwrap();
     assert!(!mine.public);
     assert!(agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner().agents.is_empty());
@@ -387,6 +389,8 @@ async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_brows
     assert!(found.public);
     let by_id = pb::LookUpAgentRequest { agent_id: w.agent_id.clone(), ..Default::default() };
     assert!(agents.look_up_agent(authed(&ana, by_id)).await.is_ok());
+    // An invite link shows it before signing in, too.
+    assert!(agents.look_up_agent(by_name("helper")).await.is_ok());
 
     // Browse: the most servers first, until an admin features another.
     let other = agents

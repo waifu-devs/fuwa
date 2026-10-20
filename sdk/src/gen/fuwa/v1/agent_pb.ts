@@ -1043,8 +1043,8 @@ export const AgentService: GenService<{
   /**
    * One agent as someone about to add it sees it, by id or by username: what
    * an agent's invite link (<instance>/agent/<username>) and the profile
-   * card show. Public agents are found by anyone signed in; a private one
-   * only by its owner, and is NOT_FOUND to everyone else.
+   * card show. Public agents are found by anyone, signed in or not; a
+   * private one only by its owner, and is NOT_FOUND to everyone else.
    *
    * @generated from rpc fuwa.v1.AgentService.LookUpAgent
    */

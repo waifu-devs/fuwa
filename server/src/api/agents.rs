@@ -102,8 +102,9 @@ impl Api {
     }
 
     /// An agent the caller may add somewhere: any public one, or their own.
-    /// A private agent is as good as missing to everyone else.
-    async fn look_up_agent(&self, caller: &Account, req: pb::LookUpAgentRequest) -> Result<pb::AgentListing> {
+    /// A private agent is as good as missing to everyone else, and to
+    /// someone not signed in (an invite link opened before signing in).
+    async fn look_up_agent(&self, caller: Option<&Account>, req: pb::LookUpAgentRequest) -> Result<pb::AgentListing> {
         let node = self.app.node()?;
         let row = if !req.agent_id.is_empty() {
             node.agent(Some(&req.agent_id), None).await?
@@ -115,7 +116,7 @@ impl Api {
             node.agent(None, Some(&auth::validate_username(username)?)).await?
         };
         let row = row
-            .filter(|row| !row.account.disabled && (row.public || row.owner_id == caller.id))
+            .filter(|row| !row.account.disabled && (row.public || caller.is_some_and(|c| row.owner_id == c.id)))
             .ok_or(Error::NotFound("agent"))?;
         self.agent_listing(row).await
     }
@@ -487,8 +488,12 @@ impl AgentService for Api {
     ) -> Result<Response<pb::LookUpAgentResponse>, Status> {
         respond(
             async {
-                let caller = self.account(request.metadata()).await?;
-                let agent = Api::look_up_agent(self, &caller, request.into_inner()).await?;
+                // Signed in or not: an invite link shows the agent before you sign in.
+                let caller = match request.metadata().get("authorization") {
+                    Some(_) => Some(self.account(request.metadata()).await?),
+                    None => None,
+                };
+                let agent = Api::look_up_agent(self, caller.as_ref(), request.into_inner()).await?;
                 Ok(pb::LookUpAgentResponse { agent: Some(agent) })
             }
             .await,
