@@ -170,7 +170,7 @@ function DeviceMenu({ kind }: { kind: "input" | "output" }) {
           <ChevronDownIcon className="size-3.5 transition-transform duration-300 group-data-[state=open]:rotate-180" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="end" className="w-64">
+      <DropdownMenuContent side="top" align="center" className="w-60">
         <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
           {input ? <MicIcon className="size-3.5" /> : <HeadphonesIcon className="size-3.5" />}
           {t(input ? "appsettings.voice.mic" : "appsettings.voice.speakers")}
