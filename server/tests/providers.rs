@@ -553,15 +553,15 @@ async fn links_need_proof_and_the_last_way_in_stays() {
     let back = landed(&fake.sign_in(&instance, &started.authorize_url, "ana").await);
     assert_eq!(finish_link(&mut c, &admin, &back).await.unwrap_err().code(), Code::AlreadyExists);
 
-    // Someone from Twitch with nothing else: no password to ask for, so only
-    // a fresh session links or unlinks, and their one way in stays.
+    // Someone from Twitch with nothing else: no password to ask for, so an
+    // old session still links (the provider's sign-in vouches for it), only a
+    // fresh one unlinks, and their one way in stays.
     let bea = sign_in(&mut c, &instance, "twitch", "bea", Some(("bea", false))).await.unwrap().token;
     let listed = methods(&mut c, &bea).await;
     assert!(listed.needs_fresh_sign_in && !listed.needs_password);
     assert_eq!(unlink(&mut c, &bea, "twitch", "").await.unwrap_err(), Code::FailedPrecondition, "the last way in");
     instance.age_sessions(11 * 60 * 1000).await;
-    let stale = start_link(&mut c, &bea, "google", "").await.unwrap_err();
-    assert_eq!(stale.code(), Code::FailedPrecondition, "an old session can't add a way in");
+    start_link(&mut c, &bea, "google", "").await.expect("an old session can still add a way in");
     let bea = sign_in(&mut c, &instance, "twitch", "bea", None).await.unwrap().token;
     let started = start_link(&mut c, &bea, "google", "").await.unwrap();
     let back = landed(&fake.sign_in(&instance, &started.authorize_url, "bea").await);

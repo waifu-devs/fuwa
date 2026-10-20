@@ -103,9 +103,10 @@ impl Api {
 
     /// Proof beyond the session that it's the account's person: a stolen
     /// session mustn't add (or take away) a way in. The password and two-step
-    /// code where the account has them; otherwise a session from the last
-    /// ten minutes.
-    pub(super) async fn confirm_owner(&self, caller: &Caller, password: &str, code: &str) -> Result<()> {
+    /// code where the account has them; otherwise, when `fresh` asks for it,
+    /// a session from the last ten minutes. Linking doesn't: the provider's
+    /// own sign-in stands in for it, and only the new way in is at stake.
+    pub(super) async fn confirm_owner(&self, caller: &Caller, password: &str, code: &str, fresh: bool) -> Result<()> {
         let account = &caller.account;
         if account.has_password() {
             self.confirm_password(account, password).await?;
@@ -113,7 +114,7 @@ impl Api {
         if account.two_factor {
             return self.confirm_code(account, code).await;
         }
-        if account.has_password() {
+        if account.has_password() || !fresh {
             return Ok(());
         }
         let started = self.app.node()?.session_started(&caller.token_hash).await?.unwrap_or(0);
@@ -173,7 +174,7 @@ impl Api {
         if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));
         }
-        self.confirm_owner(&caller, &req.password, &req.code).await?;
+        self.confirm_owner(&caller, &req.password, &req.code, false).await?;
         sso::starts().start(&[(&format!("link {}", account.id), MAX_LINK_STARTS)])?;
         let sign_in = sso::SignIn {
             state: auth::new_token(),
@@ -237,7 +238,7 @@ impl Api {
                 "{name} is the only way you can sign in right now; add another first"
             )));
         }
-        self.confirm_owner(&caller, &req.password, &req.code).await?;
+        self.confirm_owner(&caller, &req.password, &req.code, true).await?;
         // Checked again as it's written, so two unlinks at once can't both go.
         let others_work = methods.iter().any(|m| m.works && provider_name(&m.kind).is_none());
         let working: Vec<&str> = methods.iter().filter(|m| m.works && m.kind != id).map(|m| m.kind.as_str()).collect();

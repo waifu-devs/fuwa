@@ -298,8 +298,9 @@ message ListSignInMethodsResponse {
   // False for accounts that sign in through the instance's identity
   // provider (their organization decides) and agents.
   bool can_link = 3;
-  // What linking or unlinking asks for: the password, a two-step code, or
-  // (without either) a session from the last ten minutes, so sign in again.
+  // What linking or unlinking asks for: the password and a two-step code.
+  // Without either, unlinking (not linking) asks for a session from the last
+  // ten minutes, so sign in again.
   bool needs_password = 4;
   bool needs_code = 5;
   bool needs_fresh_sign_in = 6;

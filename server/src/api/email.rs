@@ -255,7 +255,7 @@ impl Api {
             return Err(off());
         }
         let email = normalize_address(&req.email)?;
-        self.confirm_owner(&caller, &req.password, &req.code).await?;
+        self.confirm_owner(&caller, &req.password, &req.code, false).await?;
         // Whether the address is someone else's is only said once its code
         // is typed, so this doesn't tell anyone which addresses are here.
         let (ticket, expires_at) = self.send_code(&email, &account.id).await?;

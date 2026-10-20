@@ -250,7 +250,7 @@ function Proof({
       <p className="font-extrabold">
         {adding ? t("accountsettings.signIn.addEmail") : t(linking ? "accountsettings.signIn.linkTitle" : "accountsettings.signIn.unlinkTitle", { name: asking.name })}
       </p>
-      {listed.needsFreshSignIn && <p className="text-sm text-muted-foreground">{t("accountsettings.signIn.freshNote")}</p>}
+      {!linking && listed.needsFreshSignIn && <p className="text-sm text-muted-foreground">{t("accountsettings.signIn.freshNote")}</p>}
       {adding && (
         <ProofField id="sign-in-proof-email" label={t("accountsettings.signIn.emailLabel")}>
           <Input
