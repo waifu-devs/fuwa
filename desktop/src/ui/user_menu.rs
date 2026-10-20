@@ -322,6 +322,25 @@ impl FuwaApp {
             list = rise(row.into_any_element(), list);
         }
 
+        self.hung_menu("status", list, &places, crate::ui::rail::RAIL + 8.0, 256.0, 0.0, window, cx)
+    }
+
+    /// A menu over the bottom of the sidebar, `width` wide from `left`, holding
+    /// `list` with the highlight that glides between its lines. `origin` is how
+    /// far across it hangs from its button (0 its left, 1 its right).
+    #[allow(clippy::too_many_arguments)]
+    fn hung_menu(
+        &mut self,
+        id: &'static str,
+        list: Div,
+        places: &Places,
+        left: f32,
+        width: f32,
+        origin: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = pal(cx);
         // The highlight glides from line to line, as the web's Animate UI menus do.
         let at = self.hovered.as_deref().and_then(|h| h.strip_prefix("um|")).and_then(|h| {
             let places = places.borrow();
@@ -350,12 +369,12 @@ impl FuwaApp {
                 .bg(p.accent)
                 .opacity(shown.clamp(0.0, 1.0))
         });
-        let list = placed(div().id("um-list").relative(), String::new(), &places)
+        let list = placed(div().id("um-list").relative(), String::new(), places)
             .when_some(highlight, |el, h| el.child(h))
             .child(list);
 
         div()
-            .id("menu-status-away")
+            .id(SharedString::from(format!("menu-{id}-away")))
             .absolute()
             .inset_0()
             .occlude()
@@ -365,30 +384,30 @@ impl FuwaApp {
             }))
             .child(
                 div()
-                    .id("menu-status")
+                    .id(SharedString::from(format!("menu-{id}")))
                     .absolute()
-                    // The web's side="top" align="start", 4px over the button under your name.
+                    // The web's side="top", 4px over the buttons at the bottom of the sidebar.
                     .bottom(px(56.0))
-                    .left(px(crate::ui::rail::RAIL + 8.0))
+                    .left(px(left))
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    // The web's menus grow in from the corner they hang from (side="top" align="start").
+                    // The web's menus grow in from the corner they hang from (side="top").
                     // Closed, it shrinks back toward that corner as it fades (the web's `exit`).
                     .child(crate::ui::overlay::leaving_pose(
-                        div().transform_origin(0.0, 1.0).child(motion::pop_in(
+                        div().transform_origin(origin, 1.0).child(motion::pop_in(
                             div()
-                                .w(px(256.0))
+                                .w(px(width))
                                 .p(px(4.0))
                                 .rounded(radius_md())
                                 .border_1()
                                 .border_color(p.border)
-                                .bg(popover)
+                                .bg(p.card)
                                 .shadow_md()
                                 .text_size(px(14.0))
                                 .line_height(px(20.0))
                                 .text_color(p.foreground)
                                 .child(list),
-                            "menu-status",
-                            (0.0, 1.0),
+                            SharedString::from(format!("menu-{id}")),
+                            (origin, 1.0),
                             0.95,
                             0.0,
                         )),
@@ -398,6 +417,70 @@ impl FuwaApp {
                     )),
             )
             .into_any_element()
+    }
+
+    /// The menu over the arrow by mute (`input`) or deafen: the microphones or
+    /// speakers in `names`, to switch to at once (in a call too), and Voice &
+    /// video settings. Like the web's `DeviceMenu` in `calls/parts.tsx`.
+    pub(crate) fn devices_menu(
+        &mut self,
+        input: bool,
+        names: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = pal(cx);
+        let places: Places = window.use_keyed_state("dm-places", cx, |_, _| Places::default()).read(cx).clone();
+        let value = if input { &self.prefs.input_device } else { &self.prefs.output_device }.clone();
+        // A picked device that's gone plays on the system's, as the settings show it.
+        let known = names.contains(&value);
+        let mut list = div().flex().flex_col().child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(8.0))
+                .py(px(6.0))
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .child(icon(if input { "mic" } else { "headphones" }).size(px(14.0)))
+                .child(t(if input { "appsettings.voice.mic" } else { "appsettings.voice.speakers" }).to_uppercase()),
+        );
+        for (n, name) in std::iter::once(String::new()).chain(names.iter().cloned()).enumerate() {
+            let shown = if n == 0 { t("appsettings.voice.systemDefault") } else { name.clone() };
+            let on = if n == 0 { !known } else { name == value };
+            let row = self
+                .menu_row(&format!("device-{n}"), &places, cx)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.menu = None;
+                    let name = name.clone();
+                    this.core.set_prefs(|pr| {
+                        if input {
+                            pr.input_device = name;
+                        } else {
+                            pr.output_device = name;
+                        }
+                    });
+                    this.prefs = this.core.prefs();
+                    cx.notify();
+                }))
+                .child(div().flex_1().min_w_0().truncate().child(shown))
+                .when(on, |el| el.child(icon("check").size(px(16.0)).text_color(p.primary)));
+            list = list.child(row);
+        }
+        list = list.child(separator(&p));
+        let row = self.icon_row("voice-settings", "settings", t("settings.nav.voice"), &places, &p, cx).on_click(
+            cx.listener(|this, _, window, cx| {
+                this.menu = None;
+                this.open_voice_settings(window, cx);
+            }),
+        );
+        list = list.child(row);
+        // Across the sidebar, growing from its right, where the arrows are.
+        let width = crate::ui::sidebar::SIDEBAR - 16.0;
+        self.hung_menu("devices", list, &places, crate::ui::rail::RAIL + 8.0, width, 1.0, window, cx)
     }
 
     /// One of the menu's lines: the web's `DropdownMenuItem` (px-2 py-1.5),
@@ -444,6 +527,17 @@ impl FuwaApp {
             view.update(cx, |view, cx| {
                 view.page = crate::ui::settings::Page::Profile;
                 view.account.key = Some(key);
+                cx.notify();
+            });
+        }
+    }
+
+    /// Settings, on Voice & video.
+    pub(crate) fn open_voice_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        if let Some(view) = &self.settings {
+            view.update(cx, |view, cx| {
+                view.page = crate::ui::settings::Page::Voice;
                 cx.notify();
             });
         }

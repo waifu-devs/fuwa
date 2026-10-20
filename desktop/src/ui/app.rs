@@ -240,6 +240,12 @@ pub enum Menu {
     Status {
         key: String,
     },
+    /// The microphones (`input`) or speakers there are, from the arrow by mute
+    /// or deafen; `names` as they were when it opened.
+    Devices {
+        input: bool,
+        names: Vec<String>,
+    },
 }
 
 /// The @ list while someone types a mention.
@@ -2261,6 +2267,7 @@ impl FuwaApp {
             let el = match menu {
                 Menu::Server { key, server } => Some(self.server_bell_menu(&key, &server, cx)),
                 Menu::Status { key } => Some(self.status_menu(&key, window, cx)),
+                Menu::Devices { input, names } => Some(self.devices_menu(input, &names, window, cx)),
                 _ => None,
             };
             crate::ui::overlay::set_leaving(None, cx);
@@ -2442,6 +2449,7 @@ impl FuwaApp {
                 match self.menu.clone() {
                     Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
                     Some(Menu::Status { key }) => Some(self.status_menu(&key, window, cx)),
+                    Some(Menu::Devices { input, names }) => Some(self.devices_menu(input, &names, window, cx)),
                     _ => None,
                 },
                 |el, menu| el.child(menu),

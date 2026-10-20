@@ -270,6 +270,8 @@
   "userPanel.sharing": "正在分享你的動態",
   "userPanel.notSharing": "未分享你的動態",
   "userPanel.settings": "設定",
+  "userPanel.micDevices": "切換麥克風",
+  "userPanel.speakerDevices": "切換喇叭",
   "instanceSidebar.settings": "執行個體設定",
   "instanceSidebar.browse": "探索伺服器",
   "instanceSidebar.yourServers": "你的伺服器",

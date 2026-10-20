@@ -270,6 +270,8 @@
   "userPanel.sharing": "アクティビティを共有中",
   "userPanel.notSharing": "アクティビティを共有していません",
   "userPanel.settings": "設定",
+  "userPanel.micDevices": "マイクを切り替え",
+  "userPanel.speakerDevices": "スピーカーを切り替え",
   "instanceSidebar.settings": "インスタンス設定",
   "instanceSidebar.browse": "サーバーを見つける",
   "instanceSidebar.yourServers": "あなたのサーバー",

@@ -155,7 +155,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
         </DropdownMenuContent>
       </DropdownMenu>
       {addingSeen && <AddAccountDialog instanceKey={instanceKey} open={adding} onOpenChange={setAdding} />}
-      <MuteButtons />
+      <MuteButtons pickers />
       <button
         type="button"
         onClick={() => openSettings()}

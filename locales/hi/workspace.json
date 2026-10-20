@@ -278,6 +278,8 @@
   "userPanel.sharing": "आप क्या कर रहे हैं, यह दिखा रहे हैं",
   "userPanel.notSharing": "आप क्या कर रहे हैं, यह नहीं दिखा रहे",
   "userPanel.settings": "सेटिंग्स",
+  "userPanel.micDevices": "माइक्रोफ़ोन बदलें",
+  "userPanel.speakerDevices": "स्पीकर बदलें",
   "instanceSidebar.settings": "इंस्टेंस सेटिंग्स",
   "instanceSidebar.browse": "सर्वर ब्राउज़ करें",
   "instanceSidebar.yourServers": "आपके सर्वर",

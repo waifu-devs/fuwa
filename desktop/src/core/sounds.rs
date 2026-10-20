@@ -670,6 +670,11 @@ pub fn pick_devices(input: &str, output: &str) {
     *PICKED.lock() = (input.to_owned(), output.to_owned());
 }
 
+/// The names of the devices picked, as [`pick_devices`] last set them.
+pub fn picked() -> (String, String) {
+    PICKED.lock().clone()
+}
+
 /// The microphone and speakers calls use: the ones picked, or the system's.
 pub fn picked_input() -> Option<cpal::Device> {
     input_device(&PICKED.lock().0)
