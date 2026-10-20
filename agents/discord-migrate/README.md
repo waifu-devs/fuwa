@@ -118,6 +118,15 @@ comment first). Once the service is up, its log has the link that adds the bot
 to a Discord server: Railway > `discord-migrate` > Deployments > View logs,
 the line `Add it to a server with https://discord.com/oauth2/...`.
 
+fuwa.chat's bot is added with
+<https://discord.com/oauth2/authorize?client_id=1561062906718855388&permissions=84992&integration_type=0&scope=bot+applications.commands>:
+the `bot` and `applications.commands` scopes, and `permissions=84992`, the sum
+of what the bot asks for and nothing more (View Channels 1024, Send Messages
+2048, Embed Links 16384, Read Message History 65536). The same link is set in
+the Developer Portal (Installation > Install Link > Custom URL), so Discord's
+own "Add App" button asks for the same. A bot of your own has its client id in
+place of `1561062906718855388`.
+
 ## Running it
 
 ```sh
