@@ -11,6 +11,7 @@ mod channels;
 mod commands;
 mod dms;
 mod economy;
+mod email;
 mod emoji;
 mod endpoints;
 mod events;

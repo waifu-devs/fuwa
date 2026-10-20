@@ -17,8 +17,15 @@ service AccountService {
   // and FinishProviderLink, from the same account, adds it.
   rpc StartProviderLink(StartProviderLinkRequest) returns (StartProviderLinkResponse);
   rpc FinishProviderLink(FinishProviderLinkRequest) returns (FinishProviderLinkResponse);
-  // Refused for the last way in that works.
+  // Refused for the last way in that works. Provider "email" removes the
+  // account's email address.
   rpc UnlinkProvider(UnlinkProviderRequest) returns (UnlinkProviderResponse);
+  // Adding an email address to sign in with codes. Start needs the same
+  // proof as StartProviderLink and emails a code to the address; Finish,
+  // from the same account and with that code, adds it. One address per
+  // account, and an address belongs to one account.
+  rpc StartEmailLink(StartEmailLinkRequest) returns (StartEmailLinkResponse);
+  rpc FinishEmailLink(FinishEmailLinkRequest) returns (FinishEmailLinkResponse);
 
   // Every device signed in to the account, the caller's first.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
@@ -296,6 +303,9 @@ message ListSignInMethodsResponse {
   bool needs_password = 4;
   bool needs_code = 5;
   bool needs_fresh_sign_in = 6;
+  // Whether the account can add an email address to sign in with now: the
+  // instance sends codes and the account has no address yet.
+  bool can_add_email = 7;
 }
 
 message StartProviderLinkRequest {
@@ -329,3 +339,25 @@ message UnlinkProviderRequest {
 }
 
 message UnlinkProviderResponse {}
+
+message StartEmailLinkRequest {
+  string email = 1;
+  // Like StartProviderLinkRequest's.
+  string password = 2;
+  string code = 3;
+}
+
+message StartEmailLinkResponse {
+  string ticket = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message FinishEmailLinkRequest {
+  string ticket = 1;
+  // The six digits from the email.
+  string code = 2;
+}
+
+message FinishEmailLinkResponse {
+  SignInMethod method = 1;
+}

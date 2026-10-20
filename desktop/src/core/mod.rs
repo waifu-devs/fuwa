@@ -27,6 +27,7 @@ pub mod config;
 pub mod dms;
 pub mod economy;
 pub mod effects;
+pub mod email;
 pub mod emoji;
 pub mod fonts;
 pub mod foreground;

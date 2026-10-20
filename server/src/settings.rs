@@ -20,6 +20,7 @@ pub const FIELDS: &[&str] = &[
     "sso_provider",
     "provider_accounts",
     "sign_in_providers",
+    "email_accounts",
     "server_creation",
     "agent_creation",
     "agent_endpoints",
@@ -92,6 +93,11 @@ pub struct Settings {
     pub provider_accounts: Accounts,
     /// Google, X and Twitch, as the admins set them up; off until then.
     pub sign_in_providers: Vec<crate::sso::providers::Setting>,
+    /// Signing in with codes sent by email.
+    pub email_accounts: Accounts,
+    /// How the instance sends email ("smtp", "ses", "resend"), or empty when
+    /// it can't. From the environment alone (`Config::mail`); not a setting.
+    pub mail_provider: String,
     pub server_creation: pb::ServerCreation,
     pub agent_creation: pb::AgentCreation,
     /// Where agents' endpoints may point (docs/agent-endpoints.md).
@@ -168,6 +174,8 @@ impl Settings {
             sso_provider: crate::sso::Provider::default(),
             provider_accounts: Accounts::Open,
             sign_in_providers: Vec::new(),
+            email_accounts: config.email_accounts,
+            mail_provider: config.mail.as_ref().map(|mail| mail.name().to_string()).unwrap_or_default(),
             server_creation: config.server_creation,
             agent_creation: config.agent_creation,
             agent_endpoints: config.agent_endpoints,
@@ -260,6 +268,17 @@ impl Settings {
         self.sso_accounts.sign_up() && self.sso_sign_in()
     }
 
+    /// Whether people can sign in with a code sent by email: it's on, and
+    /// the instance can send email.
+    pub fn email_sign_in(&self) -> bool {
+        self.email_accounts.sign_in() && !self.mail_provider.is_empty()
+    }
+
+    /// Whether someone new can sign in that way and get an account.
+    pub fn email_sign_up(&self) -> bool {
+        self.email_accounts.sign_up() && self.email_sign_in()
+    }
+
     /// A sign-in provider people can use right now.
     pub fn sign_in_provider(&self, id: &str) -> Option<&crate::sso::providers::Setting> {
         if !self.provider_accounts.sign_in() || crate::linked::client_id(&self.public_url).is_none() {
@@ -311,6 +330,12 @@ impl Settings {
                 Accounts::Off => pb::ProviderAccounts::Off,
             } as i32,
             sign_in_providers: self.sign_in_providers.iter().map(|setting| setting.to_pb()).collect(),
+            email_accounts: match self.email_accounts {
+                Accounts::Open => pb::EmailAccounts::Open,
+                Accounts::Closed => pb::EmailAccounts::Closed,
+                Accounts::Off => pb::EmailAccounts::Off,
+            } as i32,
+            mail_provider: self.mail_provider.clone(),
             server_creation: self.server_creation as i32,
             agent_creation: self.agent_creation as i32,
             agent_endpoints: self.agent_endpoints as i32,
@@ -442,6 +467,14 @@ impl Settings {
                 let settings = crate::sso::providers::from_pb(&from.sign_in_providers, &self.sign_in_providers)?;
                 serde_json::to_value(settings).map_err(|err| Error::internal(err.to_string()))?
             }
+            "email_accounts" => Value::from(
+                match pb::EmailAccounts::try_from(from.email_accounts).unwrap_or(pb::EmailAccounts::Unspecified) {
+                    pb::EmailAccounts::Open => "open",
+                    pb::EmailAccounts::Closed => "closed",
+                    pb::EmailAccounts::Off => "off",
+                    pb::EmailAccounts::Unspecified => "",
+                },
+            ),
             "server_creation" => Value::from(
                 match pb::ServerCreation::try_from(from.server_creation).unwrap_or(pb::ServerCreation::Unspecified) {
                     pb::ServerCreation::Everyone => "everyone",
@@ -563,6 +596,7 @@ impl Settings {
             "sign_in_providers" => {
                 serde_json::to_value(&self.sign_in_providers).map_err(|err| Error::internal(err.to_string()))?
             }
+            "email_accounts" => Value::from(self.email_accounts.as_str()),
             "server_creation" => Value::from(match self.server_creation {
                 pb::ServerCreation::Admins => "admins",
                 pb::ServerCreation::Disabled => "off",
@@ -640,7 +674,7 @@ impl Settings {
             "name" => self.name = name(value)?,
             "public_url" => self.public_url = public_url(value)?,
             "allowed_origins" => self.allowed_origins = origins(value)?,
-            "local_accounts" | "linked_accounts" | "sso_accounts" | "provider_accounts" => {
+            "local_accounts" | "linked_accounts" | "sso_accounts" | "provider_accounts" | "email_accounts" => {
                 let accounts = value
                     .as_str()
                     .and_then(Accounts::parse)
@@ -649,6 +683,7 @@ impl Settings {
                     "local_accounts" => self.local_accounts = accounts,
                     "linked_accounts" => self.linked_accounts = accounts,
                     "provider_accounts" => self.provider_accounts = accounts,
+                    "email_accounts" => self.email_accounts = accounts,
                     _ => self.sso_accounts = accounts,
                 }
             }

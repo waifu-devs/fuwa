@@ -282,13 +282,13 @@ fn sign(request: &Request<'_>, config: &S3Config, now: SystemTime) -> Signed {
     }
 }
 
-fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
+pub(crate) fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes any key length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -304,7 +304,7 @@ fn canonical_query(query: &[(&str, String)]) -> String {
 }
 
 /// `20130524T000000Z`, in UTC.
-fn amz_date(now: SystemTime) -> String {
+pub(crate) fn amz_date(now: SystemTime) -> String {
     let secs = now.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
     let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Howard Hinnant's days-to-civil.

@@ -277,6 +277,38 @@ export const providerSignInInfo = (url: string, provider: string, state: string)
     return { origin: r.returnOrigin, provider: r.providerName };
   });
 
+// ───────────────────────── Email codes ─────────────────────────
+
+/** Emails a six-digit sign-in code to `email`; the ticket goes back with the code. */
+export const startEmailSignIn = (url: string, email: string) =>
+  call((signal) => makeApi(url, () => null).auth.startEmailSignIn({ email }, { signal }));
+
+/**
+ * Finishes signing in with an emailed code. Someone new is asked first
+ * (`newAccount`), then comes back with `create` and the same code; two-step
+ * accounts get a `ticket` for `verifyTwoFactor`.
+ */
+export const finishEmailSignIn = (url: string, ticket: string, code: string, create?: { username: string }) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      makeApi(url, () => null).auth.finishEmailSignIn(
+        { ticket, code, create: !!create, username: create?.username ?? "" },
+        { signal },
+      ),
+    );
+    if (res.newAccount) return { newAccount: res.newAccount } as const;
+    if (res.twoFactorTicket) return { ticket: res.twoFactorTicket } as const;
+    return { key: addAccount(url, res.token, res.user), user: res.user, created: res.created } as const;
+  });
+
+/** Emails a code to an address to add to your account, proving it's you like linking a provider. */
+export const startEmailLink = (key: string, email: string, proof: { password: string; code: string }) =>
+  call((signal) => api(key).account.startEmailLink({ email, ...proof }, { signal }));
+
+/** Adds the address once its code is typed. */
+export const finishEmailLink = (key: string, ticket: string, code: string) =>
+  call((signal) => api(key).account.finishEmailLink({ ticket, code }, { signal }));
+
 /** How your account signs in, and what it could link. */
 export const listSignInMethods = (key: string) =>
   call((signal) => api(key).account.listSignInMethods({}, { signal }));

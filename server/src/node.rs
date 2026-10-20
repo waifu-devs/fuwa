@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0027_profile_item_pictures.sql"),
     include_str!("../migrations/node/0028_app_settings.sql"),
     include_str!("../migrations/node/0029_read_marks.sql"),
+    include_str!("../migrations/node/0030_email_sign_in.sql"),
 ];
 
 /// The places one account's read marks are kept for, at most; past it the
@@ -198,6 +199,18 @@ pub struct LinkedProvider {
     pub provider: String,
     pub name: String,
     pub linked_at: i64,
+}
+
+/// A code sent by email, waiting to be typed (`api/email.rs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmailCode {
+    pub ticket_hash: String,
+    /// Lowercase.
+    pub email: String,
+    pub code_hash: String,
+    /// The account adding the address; empty for a sign-in.
+    pub account_id: String,
+    pub expires_at: i64,
 }
 
 /// What a profile change sets; `None` leaves a field as it is.
@@ -1495,6 +1508,89 @@ impl NodeDb {
     pub async fn take_ticket(&self, ticket_hash: &str) -> Result<bool> {
         db::write(&self.db, async |conn| {
             Ok(conn.execute("DELETE FROM sign_in_tickets WHERE ticket_hash = ?1", [ticket_hash]).await? > 0)
+        })
+        .await
+    }
+
+    // ───────────────────────── Email codes ─────────────────────────
+
+    /// Keeps a code sent by email until it's typed.
+    pub async fn create_email_code(&self, code: &EmailCode) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO email_codes (ticket_hash, email, code_hash, account_id, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                (
+                    code.ticket_hash.as_str(),
+                    code.email.as_str(),
+                    code.code_hash.as_str(),
+                    code.account_id.as_str(),
+                    code.expires_at,
+                ),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Counts a try at a code and gives it, or None when it ran out or used
+    /// up its `tries`. Like [`try_ticket`](Self::try_ticket), the try is
+    /// counted before the code is checked, in the write that finds it, so
+    /// guesses sent all at once can't get past the limit.
+    pub async fn try_email_code(&self, ticket_hash: &str, tries: i64) -> Result<Option<EmailCode>> {
+        db::write(&self.db, async |conn| {
+            let counted = conn
+                .execute(
+                    "UPDATE email_codes SET tries = tries + 1 WHERE ticket_hash = ?1 AND tries < ?2 AND expires_at > ?3",
+                    (ticket_hash, tries, now_ms()),
+                )
+                .await?;
+            if counted == 0 {
+                return Ok(None);
+            }
+            query_one(
+                conn,
+                "SELECT ticket_hash, email, code_hash, account_id, expires_at FROM email_codes WHERE ticket_hash = ?1",
+                [ticket_hash],
+                |r| {
+                    Ok(EmailCode {
+                        ticket_hash: r.get(0)?,
+                        email: r.get(1)?,
+                        code_hash: r.get(2)?,
+                        account_id: r.get(3)?,
+                        expires_at: r.get(4)?,
+                    })
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Gives back the try a right code counted, so someone new picking a
+    /// username isn't charged for each one they try.
+    pub async fn email_code_right(&self, ticket_hash: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE email_codes SET tries = max(tries - 1, 0) WHERE ticket_hash = ?1", [ticket_hash])
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Uses a code up. False if another request already did.
+    pub async fn take_email_code(&self, ticket_hash: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM email_codes WHERE ticket_hash = ?1", [ticket_hash]).await? > 0)
+        })
+        .await
+    }
+
+    /// Forgets codes that ran out, and the addresses they were sent to.
+    pub async fn sweep_email_codes(&self, now: i64) -> Result<u64> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM email_codes WHERE expires_at < ?1", [now]).await?)
         })
         .await
     }

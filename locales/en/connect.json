@@ -97,5 +97,20 @@
   "legal.termsTitle": "Terms of Service",
   "legal.privacyTitle": "Privacy Policy",
   "legal.agree": "By continuing, you agree to the {terms} and the {privacy}.",
-  "legal.home": "Back to fuwa"
+  "legal.home": "Back to fuwa",
+  "email.name": "email",
+  "email.continue": "Continue with email",
+  "email.closed": "For accounts here that already have an email address. New ones aren't being made right now.",
+  "email.title": "Sign in with email",
+  "email.hint": "We'll email you a six-digit code. No password needed.",
+  "email.back": "Back to the other ways in",
+  "email.address": "Email address",
+  "email.send": "Email me a code",
+  "email.checkTitle": "Check your email",
+  "email.checkHint": "We sent a code to {email}. It works for 10 minutes.",
+  "email.code": "Code from the email",
+  "email.otherAddress": "Use another address",
+  "email.resend": "Send a new code",
+  "email.resent": "A new code is on its way. Only the newest one works.",
+  "email.newNote": "You'll sign in here with codes sent to your email. Pick the name people see you by; you can change it later."
 }

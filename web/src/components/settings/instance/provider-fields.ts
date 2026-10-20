@@ -1,6 +1,6 @@
 import { clone, create } from "@bufbuild/protobuf";
 import { LogInIcon } from "lucide-react";
-import { ProviderAccounts, SignInProviderSettingSchema, type InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import { EmailAccounts, ProviderAccounts, SignInProviderSettingSchema, type InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { I18n } from "@/i18n/react";
 
 /** The providers fuwa knows, in the order it shows them, and where an admin makes an app for each. */
@@ -18,9 +18,15 @@ export const settingOf = (s: InstanceSettings, id: string) =>
 
 export const accountsOf = (s: InstanceSettings) => s.providerAccounts || ProviderAccounts.OPEN;
 
+export const emailAccountsOf = (s: InstanceSettings) => s.emailAccounts || EmailAccounts.OPEN;
+
+/** What each mail provider is called, by `InstanceSettings.mailProvider`. */
+export const MAIL_PROVIDERS: Record<string, string> = { smtp: "SMTP", ses: "Amazon SES", resend: "Resend" };
+
 /** The instance settings the sign-in providers page reads. */
 export const SIGN_IN_PROVIDER_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
   { path: "provider_accounts", get: accountsOf, copy: (into, from) => (into.providerAccounts = from.providerAccounts) },
+  { path: "email_accounts", get: emailAccountsOf, copy: (into, from) => (into.emailAccounts = from.emailAccounts) },
   {
     path: "sign_in_providers",
     get: (s) =>
@@ -43,5 +49,6 @@ export const signInProviderSection = (t: I18n["t"]) => ({
   settings: [
     { id: "provider-accounts", label: t("instancesettings.nav.providerAccounts"), keywords: "sign up new accounts" },
     ...PROVIDERS.map((p) => ({ id: `provider-${p.id}`, label: p.name, keywords: "client id secret app" })),
+    { id: "email-accounts", label: t("instancesettings.nav.emailAccounts"), keywords: "email code mail smtp ses resend" },
   ],
 });

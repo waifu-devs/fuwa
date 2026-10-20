@@ -38,6 +38,13 @@ pub struct Config {
     /// FUWA_SSO_ACCOUNTS: open | closed | off (default). Signing in through
     /// the identity provider admins set up in the app (single sign-on).
     pub sso_accounts: Accounts,
+    /// FUWA_EMAIL_ACCOUNTS: open (default) | closed | off. Signing in with
+    /// a code sent by email, which needs `mail`.
+    pub email_accounts: Accounts,
+    /// How the instance sends email (FUWA_MAIL_PROVIDER and the provider's
+    /// variables, `mail.rs`); None sends nothing. Env only: its credentials
+    /// never leave this process's environment.
+    pub mail: Option<crate::mail::Config>,
     /// FUWA_SERVER_CREATION: everyone (default) | admins | off.
     pub server_creation: pb::ServerCreation,
     /// FUWA_AGENT_CREATION: who may make agents (bot accounts): everyone
@@ -205,6 +212,8 @@ impl std::fmt::Debug for Config {
             .field("sign_in_queue", &self.sign_in_queue)
             .field("automod_providers", &self.automod_providers)
             .field("gifs", &self.gifs)
+            .field("email_accounts", &self.email_accounts)
+            .field("mail", &self.mail)
             .finish()
     }
 }
@@ -422,6 +431,8 @@ impl Config {
             None => Accounts::Off,
             Some(_) => accounts("FUWA_SSO_ACCOUNTS")?,
         };
+        let email_accounts = accounts("FUWA_EMAIL_ACCOUNTS")?;
+        let mail = crate::mail::Config::from_lookup(&get)?;
         let linked_issuer = get("FUWA_LINKED_ISSUER")
             .map(|url| url.trim().trim_end_matches('/').to_string())
             .unwrap_or_else(|| DEFAULT_LINKED_ISSUER.into());
@@ -723,6 +734,8 @@ impl Config {
             linked_accounts,
             linked_issuer,
             sso_accounts,
+            email_accounts,
+            mail,
             server_creation,
             agent_creation,
             agent_endpoints,

@@ -57,6 +57,16 @@ service AuthService {
   rpc StartProviderSignIn(StartProviderSignInRequest) returns (StartProviderSignInResponse);
   rpc GetProviderSignIn(GetProviderSignInRequest) returns (GetProviderSignInResponse);
   rpc FinishProviderSignIn(FinishProviderSignInRequest) returns (FinishProviderSignInResponse);
+
+  // Signing in with a code sent by email (NodeInfo.auth.email_sign_in), in
+  // two calls. StartEmailSignIn emails six digits to the address and returns
+  // a ticket; FinishEmailSignIn trades the ticket and the code for a
+  // session. The start answers the same whether or not an account here has
+  // the address. Someone new picks a username first, as with
+  // FinishProviderSignIn; an account with two-step sign-in on still needs
+  // its code (VerifyTwoFactor).
+  rpc StartEmailSignIn(StartEmailSignInRequest) returns (StartEmailSignInResponse);
+  rpc FinishEmailSignIn(FinishEmailSignInRequest) returns (FinishEmailSignInResponse);
 }
 
 message SignUpRequest {
@@ -297,4 +307,39 @@ message NewProviderAccount {
   // What use_profile would copy.
   string display_name = 3;
   bool has_picture = 4;
+}
+
+message StartEmailSignInRequest {
+  string email = 1;
+}
+
+message StartEmailSignInResponse {
+  // Sent back with the code. Keep it to this app: it's half of what signs in.
+  string ticket = 1;
+  // When the code stops working (ten minutes from now).
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message FinishEmailSignInRequest {
+  string ticket = 1;
+  // The six digits from the email. Five wrong tries end the ticket.
+  string code = 2;
+  // For someone new (the answer had new_account): make the account, with
+  // this username.
+  bool create = 3;
+  string username = 4;
+}
+
+message FinishEmailSignInResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+  bool created = 4;
+  // Set, with nothing else, when the account needs a two-step code too:
+  // send it to VerifyTwoFactor.
+  string two_factor_ticket = 5;
+  // Set, with nothing else, for someone new while sign-ups are open: ask
+  // for a username, then call again with create and the same code. The
+  // ticket stays usable until it runs out.
+  NewProviderAccount new_account = 6;
 }

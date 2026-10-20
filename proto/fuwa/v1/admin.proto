@@ -295,6 +295,14 @@ message InstanceSettings {
   // (SoundboardService.PlaySound); unset for no cap.
   // FUWA_LIMIT_SOUND_PLAYS_PER_MINUTE.
   optional int64 sound_plays_per_minute = 67;
+  // Whether people sign in with codes sent by email, and whether someone
+  // new gets an account that way. FUWA_EMAIL_ACCOUNTS, open unless set; it
+  // works only while the instance can send email (mail_provider).
+  EmailAccounts email_accounts = 68;
+  // How the instance sends email, set in its environment alone
+  // (FUWA_MAIL_PROVIDER: "smtp", "ses" or "resend"), so its credentials are
+  // never in the database or sent anywhere. Empty when it can't. Read-only.
+  string mail_provider = 69;
 }
 
 // One sign-in provider, as an instance's admins set it up. Its redirect URI,
@@ -321,6 +329,17 @@ enum ProviderAccounts {
   PROVIDER_ACCOUNTS_CLOSED = 2;
   // Nobody signs in or links with them.
   PROVIDER_ACCOUNTS_OFF = 3;
+}
+
+// Whether people sign in with codes sent by email.
+enum EmailAccounts {
+  EMAIL_ACCOUNTS_UNSPECIFIED = 0;
+  // Someone new gets an account here.
+  EMAIL_ACCOUNTS_OPEN = 1;
+  // Only accounts that have the address sign in with it.
+  EMAIL_ACCOUNTS_CLOSED = 2;
+  // Nobody signs in or adds an address.
+  EMAIL_ACCOUNTS_OFF = 3;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made
