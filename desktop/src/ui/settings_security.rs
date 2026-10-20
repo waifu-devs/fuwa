@@ -1223,7 +1223,9 @@ impl SettingsView {
                 .bg(alpha(p.muted, 0.4))
                 .p(px(16.0))
                 .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title))
-                .when(!linking && listed.needs_fresh_sign_in, |el| el.child(hint(t("accountsettings.signIn.freshNote"), p)))
+                .when(!linking && listed.needs_fresh_sign_in, |el| {
+                    el.child(hint(t("accountsettings.signIn.freshNote"), p))
+                })
                 .when(listed.needs_password, |el| {
                     el.when_some(self.security.password.clone(), |el, s| {
                         el.child(
