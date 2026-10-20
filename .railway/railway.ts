@@ -73,7 +73,8 @@ const FEEDBACK_CHANNEL = "01M3YTPEZBVSPZVWGFZ5AGGE6R/01M4ARF2YAS9698KE30AKZ2DG1"
 /**
  * Whether to run the Discord migration bot (agents/discord-migrate), which copies a
  * Discord server into a fuwa.chat server. It needs two shared variables first; see
- * where it's declared below. False removes the service but keeps its volume.
+ * where it's declared below. False removes the service but keeps its volume. Its
+ * Discord install link is in agents/discord-migrate/README.md.
  */
 const DISCORD_MIGRATE = true;
 /** The migration bot's volume, where each migration's progress is kept: small JSON files. */
