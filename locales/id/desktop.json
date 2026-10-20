@@ -721,5 +721,29 @@
   "media.unmute": "Bunyikan",
   "media.cantPlay": "Jenis file ini tidak bisa diputar di aplikasi. Simpan untuk memutarnya.",
   "media.broken": "File ini tidak dapat dibaca.",
-  "media.noSpeakers": "Tidak dapat membuka speaker."
+  "media.noSpeakers": "Tidak dapat membuka speaker.",
+  "agents.title": "Agen",
+  "agents.about": "Bot yang bisa ditambahkan oleh siapa pun yang mengelola server.",
+  "agents.showAll": {
+    "other": "Tampilkan semua {count} agen"
+  },
+  "agents.madeBy": "Dibuat oleh {name}",
+  "agents.private": "Privat: hanya Anda yang bisa menambahkannya.",
+  "agents.add": "Tambahkan",
+  "agents.alreadyIn": "Sudah di sini",
+  "agents.addedTo": "{agent} ditambahkan ke {server}",
+  "agents.missing": "Agen tidak ditemukan",
+  "agents.missingAbout": "Tidak ada agen dengan nama itu di sini, atau agen itu privat.",
+  "agents.signInFirst": "Masuk ke {host} untuk menambahkan agennya.",
+  "agents.copyLink": "Salin tautan undangan",
+  "agents.adminNav": "Agen",
+  "agents.adminNavAbout": "Unggulkan agen publik di Jelajahi",
+  "agents.adminAbout": "Agen publik tampil di Jelajahi untuk semua orang di sini. Agen yang Anda unggulkan tampil paling depan, dalam ukuran besar, sesuai urutan yang Anda atur.",
+  "agents.adminCount": {
+    "other": "{count} agen publik"
+  },
+  "agents.adminNone": "Belum ada agen publik. Agen akan tampil di sini setelah pemiliknya menjadikannya publik.",
+  "agents.featuredNow": "Mengunggulkan {agent} di Jelajahi",
+  "agents.unfeaturedNow": "Berhenti mengunggulkan {agent}",
+  "agents.withRoles": "Bergabung dengan peran:"
 }

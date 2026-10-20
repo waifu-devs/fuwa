@@ -721,5 +721,29 @@
   "media.unmute": "Bật tiếng",
   "media.cantPlay": "Loại tệp này không phát được trong ứng dụng. Hãy lưu về để phát.",
   "media.broken": "Không đọc được tệp này.",
-  "media.noSpeakers": "Không mở được loa."
+  "media.noSpeakers": "Không mở được loa.",
+  "agents.title": "Tác tử",
+  "agents.about": "Bot mà ai quản lý máy chủ cũng có thể thêm.",
+  "agents.showAll": {
+    "other": "Hiện tất cả {count} tác tử"
+  },
+  "agents.madeBy": "Tạo bởi {name}",
+  "agents.private": "Riêng tư: chỉ bạn mới thêm được.",
+  "agents.add": "Thêm",
+  "agents.alreadyIn": "Đã có ở đây",
+  "agents.addedTo": "Đã thêm {agent} vào {server}",
+  "agents.missing": "Không tìm thấy tác tử",
+  "agents.missingAbout": "Không có tác tử nào tên như vậy ở đây, hoặc nó đang ở chế độ riêng tư.",
+  "agents.signInFirst": "Đăng nhập vào {host} để thêm các tác tử của nó.",
+  "agents.copyLink": "Sao chép liên kết mời",
+  "agents.adminNav": "Tác tử",
+  "agents.adminNavAbout": "Làm nổi bật các tác tử công khai trong Khám phá",
+  "agents.adminAbout": "Các tác tử công khai hiện trong Khám phá cho mọi người ở đây. Những tác tử bạn làm nổi bật sẽ đứng đầu, hiển thị lớn, theo thứ tự bạn sắp xếp.",
+  "agents.adminCount": {
+    "other": "{count} tác tử công khai"
+  },
+  "agents.adminNone": "Chưa có tác tử công khai nào. Tác tử sẽ hiện ở đây khi chủ sở hữu đặt nó thành công khai.",
+  "agents.featuredNow": "Đang làm nổi bật {agent} trong Khám phá",
+  "agents.unfeaturedNow": "Đã ngừng làm nổi bật {agent}",
+  "agents.withRoles": "Tham gia với vai trò:"
 }

@@ -721,5 +721,29 @@
   "media.unmute": "取消静音",
   "media.cantPlay": "应用内无法播放此类文件。请保存后播放。",
   "media.broken": "无法读取此文件。",
-  "media.noSpeakers": "无法打开扬声器。"
+  "media.noSpeakers": "无法打开扬声器。",
+  "agents.title": "智能体",
+  "agents.about": "任何管理服务器的人都可以添加的机器人。",
+  "agents.showAll": {
+    "other": "显示全部 {count} 个智能体"
+  },
+  "agents.madeBy": "由 {name} 创建",
+  "agents.private": "私密：只有你可以添加它。",
+  "agents.add": "添加",
+  "agents.alreadyIn": "已在此处",
+  "agents.addedTo": "已将 {agent} 添加到 {server}",
+  "agents.missing": "找不到智能体",
+  "agents.missingAbout": "这里没有叫这个名字的智能体，或者它是私密的。",
+  "agents.signInFirst": "登录 {host} 以添加它的智能体。",
+  "agents.copyLink": "复制邀请链接",
+  "agents.adminNav": "智能体",
+  "agents.adminNavAbout": "在“浏览”中精选公开智能体",
+  "agents.adminAbout": "公开智能体会在“浏览”中向这里的所有人显示。你精选的智能体会按你排列的顺序以大卡片排在最前。",
+  "agents.adminCount": {
+    "other": "{count} 个公开智能体"
+  },
+  "agents.adminNone": "还没有公开智能体。智能体的所有者将其设为公开后，它就会显示在这里。",
+  "agents.featuredNow": "已在“浏览”中精选 {agent}",
+  "agents.unfeaturedNow": "已取消精选 {agent}",
+  "agents.withRoles": "加入时带有的身份组："
 }
