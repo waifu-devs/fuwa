@@ -614,7 +614,10 @@ impl Presence {
         let mut snapshot = Vec::new();
         let stream = inner.watchers[user_id].last().expect("just added");
         let seen: Vec<(String, Vec<String>)> = match on_screen {
-            false => index.neighbours(user_id, online).into_iter().collect(),
+            false => {
+                let candidates = people.keys().map(String::as_str);
+                index.neighbours(user_id, candidates, people.len(), online).into_iter().collect()
+            }
             true => index
                 .audience(user_id, inner.large, online, &HashSet::new())
                 .into_iter()
@@ -691,7 +694,10 @@ impl Presence {
             && let Some(own) = &person.last
         {
             let watchers = &inner.watchers;
-            for other in index.members_where(server_id, |id| id != user_id && watchers.contains_key(id)) {
+            let candidates = watchers.keys().map(String::as_str);
+            for other in index
+                .members_among(server_id, candidates, watchers.len(), |id| id != user_id && watchers.contains_key(id))
+            {
                 let shared = index.shared_servers(user_id, &other);
                 let presence = seen(own, person.shows_activity_in(&shared));
                 // Invisible stays out of sight: nothing is sent for them.
@@ -703,7 +709,10 @@ impl Presence {
         // And the newcomer sees who's online there.
         if let Some(streams) = inner.watchers.get(user_id) {
             let people = &inner.people;
-            for other in index.members_where(server_id, |id| id != user_id && online(people.get(id))) {
+            let candidates = people.keys().map(String::as_str);
+            for other in
+                index.members_among(server_id, candidates, people.len(), |id| id != user_id && online(people.get(id)))
+            {
                 let presence = people[&other].seen_in(&other, &index.shared_servers(&other, user_id));
                 if presence.status != pb::PresenceStatus::Offline as i32 {
                     send_where(streams, &presence, &mut behind, |w| shows(w, &other));
@@ -722,7 +731,11 @@ impl Presence {
         let watchers = &inner.watchers;
         let involved = |id: &str| people.contains_key(id) || watchers.contains_key(id);
         if involved(user_id) {
-            for other in index.members_where(server_id, |id| id != user_id && involved(id)) {
+            // Everyone kept here, each once.
+            let candidates =
+                people.keys().chain(watchers.keys().filter(|id| !people.contains_key(*id))).map(String::as_str);
+            let count = people.len() + watchers.len();
+            for other in index.members_among(server_id, candidates, count, |id| id != user_id && involved(id)) {
                 inner.part(index, user_id, &other, server_id, &mut behind);
             }
         }

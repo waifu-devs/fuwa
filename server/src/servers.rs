@@ -1287,6 +1287,64 @@ impl Servers {
         Ok(entries)
     }
 
+    /// [`entries`](Self::entries) in batches of at most `most` member ids, to
+    /// `tx`, without holding every server's members at once. A server with
+    /// more members than fit in one batch has its entry split over batches in
+    /// a row, each with its profile and the later ones with no invites.
+    /// Returns how many servers went, or `None` once `tx` is closed.
+    pub async fn send_entries(
+        &self,
+        most: usize,
+        tx: &tokio::sync::mpsc::Sender<Vec<cpb::ServerEntry>>,
+    ) -> Result<Option<usize>> {
+        let most = most.max(1);
+        let all = self.all();
+        let (mut batch, mut room) = (Vec::new(), most);
+        for sdb in &all {
+            let conn = sdb.read()?;
+            let server = load_server(&conn).await?;
+            let invite_codes = query_all(&conn, "SELECT code FROM invites", (), |r| r.get::<String>(0)).await?;
+            let mut entry = cpb::ServerEntry { server: Some(server.clone()), member_ids: Vec::new(), invite_codes };
+            let (mut after, mut continued) = (String::new(), false);
+            loop {
+                let page = query_all(
+                    &conn,
+                    "SELECT user_id FROM members WHERE user_id > ?1 ORDER BY user_id LIMIT ?2",
+                    (after.as_str(), room as i64),
+                    |r| r.get::<String>(0),
+                )
+                .await?;
+                let more = page.len() == room;
+                if let Some(last) = page.last() {
+                    after = last.clone();
+                }
+                room -= page.len();
+                entry.member_ids.extend(page);
+                if room > 0 {
+                    break;
+                }
+                batch.push(std::mem::replace(
+                    &mut entry,
+                    cpb::ServerEntry { server: Some(server.clone()), ..Default::default() },
+                ));
+                if tx.send(std::mem::take(&mut batch)).await.is_err() {
+                    return Ok(None);
+                }
+                (room, continued) = (most, true);
+                if !more {
+                    break;
+                }
+            }
+            if !continued || !entry.member_ids.is_empty() {
+                batch.push(entry);
+            }
+        }
+        if !batch.is_empty() && tx.send(batch).await.is_err() {
+            return Ok(None);
+        }
+        Ok(Some(all.len()))
+    }
+
     /// Every server here, in id order.
     pub fn all(&self) -> Vec<Arc<ServerDb>> {
         let mut all: Vec<Arc<ServerDb>> = self.read().values().cloned().collect();
@@ -2100,6 +2158,54 @@ pub async fn drop_application(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Entries go in batches of at most so many member ids, a big server's
+    /// split over batches in a row, and every member goes exactly once.
+    #[tokio::test]
+    async fn entries_go_in_batches() {
+        let dir = tempfile::tempdir().unwrap();
+        let servers = Servers::open(dir.path(), None, Arc::new(Hub::default()), false, None, "").await.unwrap();
+        let user = |id: String| pb::User { id, username: new_id().to_lowercase(), ..Default::default() };
+        let owner = user(new_id());
+        let new = |name: &str| NewServer {
+            name: name.into(),
+            description: String::new(),
+            icon_url: String::new(),
+            discoverable: false,
+        };
+        let big = servers.create(&owner, new("big")).await.unwrap();
+        servers.create(&owner, new("small")).await.unwrap();
+        let sdb = servers.get(&big.id).await.unwrap();
+        for _ in 0..6 {
+            let member = user(new_id());
+            sdb.write(&member.id, async |conn, events| {
+                let member = add_member(conn, &member, &sdb.id, now_ms(), false).await?;
+                events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member) }));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        assert_eq!(servers.send_entries(3, &tx).await.unwrap(), Some(2));
+        drop(tx);
+        let mut batches = Vec::new();
+        while let Some(batch) = rx.recv().await {
+            batches.push(batch);
+        }
+        assert!(batches.iter().all(|b| b.iter().map(|e| e.member_ids.len()).sum::<usize>() <= 3));
+        let mut whole: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in batches.into_iter().flatten() {
+            whole.entry(entry.server.unwrap().id).or_default().extend(entry.member_ids);
+        }
+        assert_eq!(whole.len(), 2);
+        let mut members = whole.remove(&big.id).unwrap();
+        assert_eq!(members.len(), 7);
+        members.dedup();
+        assert_eq!(members.len(), 7);
+        assert_eq!(whole.into_values().next().unwrap(), [owner.id]);
+    }
 
     /// A server file as fuwa made them before concurrent writes: WAL mode,
     /// AUTOINCREMENT sequences, and a message its deleted channel left behind.

@@ -459,6 +459,39 @@ impl Internal {
         }
     }
 
+    /// Takes what a shard says it holds (RegisterShard, or its pieces put
+    /// back together).
+    async fn register(&self, mut req: cpb::RegisterShardRequest) -> Result<cpb::RegisterShardResponse> {
+        super::check_shard_id(&req.shard_id).map_err(Error::invalid)?;
+        if !req.region.is_empty() {
+            super::check_region(&req.region).map_err(Error::invalid)?;
+        }
+        let region_name = Some(req.region_name.as_str()).filter(|name| !name.is_empty());
+        // Servers on their way to or from this shard aren't taken from
+        // what it says until the move says so.
+        let (answer, settled) = super::moves::sort_registration(self.shards()?, &req.shard_id, &mut req.servers);
+        let ids: Vec<String> =
+            req.servers.iter().filter_map(|entry| entry.server.as_ref().map(|s| s.id.clone())).collect();
+        self.app.node()?.register_shard(&req.shard_id, &req.url, &req.region, &ids).await?;
+        let started_at = req.started_at.as_ref().map(crate::id::millis).unwrap_or_default();
+        self.shards()?.register(&req.shard_id, &req.url, &req.region, region_name, started_at)?;
+        for server_id in settled {
+            super::moves::settled(&self.app, &server_id).await;
+        }
+        // Servers gone from the shard keep their notification settings: the
+        // file may only be moving to another shard.
+        let gone = self.app.index.register(&req.shard_id, req.servers);
+        if !gone.is_empty() {
+            tracing::info!(shard = %req.shard_id, servers = gone.len(), "servers no longer on this shard");
+        }
+        let shards = self.shards()?;
+        if !shards.left.read().unwrap_or_else(|p| p.into_inner()).is_empty() {
+            let index = &self.app.index;
+            shards.left.write().unwrap_or_else(|p| p.into_inner()).retain(|id| index.placement(id).is_none());
+        }
+        Ok(answer)
+    }
+
     /// The leftover server files a shard is to take: all of them for the
     /// first shard to ask (and again for it, until it has them), none for
     /// any other.
@@ -476,6 +509,48 @@ impl Internal {
                 names
             }
         })
+    }
+}
+
+/// A registration coming in pieces (RegisterShardInPieces), put back together.
+#[derive(Default)]
+struct Pieces {
+    whole: Option<cpb::RegisterShardRequest>,
+    done: bool,
+}
+
+impl Pieces {
+    fn add(&mut self, piece: cpb::RegisterShardInPiecesRequest) -> Result<()> {
+        if self.done {
+            return Err(Error::invalid("a piece came after the last"));
+        }
+        self.done = piece.last;
+        let piece = piece.piece.unwrap_or_default();
+        let Some(whole) = &mut self.whole else {
+            self.whole = Some(piece);
+            return Ok(());
+        };
+        if !piece.shard_id.is_empty() && piece.shard_id != whole.shard_id {
+            return Err(Error::invalid("pieces of one registration name different shards"));
+        }
+        for entry in piece.servers {
+            let id = |e: &cpb::ServerEntry| e.server.as_ref().map(|s| s.id.clone());
+            match whole.servers.last_mut() {
+                Some(before) if id(before).is_some() && id(before) == id(&entry) => {
+                    before.member_ids.extend(entry.member_ids);
+                    before.invite_codes.extend(entry.invite_codes);
+                }
+                _ => whole.servers.push(entry),
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<cpb::RegisterShardRequest> {
+        match self.whole {
+            Some(whole) if self.done => Ok(whole),
+            _ => Err(Error::invalid("the registration ended before its last piece")),
+        }
     }
 }
 
@@ -597,38 +672,22 @@ impl DirectoryService for Internal {
         &self,
         request: Request<cpb::RegisterShardRequest>,
     ) -> Result<Response<cpb::RegisterShardResponse>, Status> {
+        respond(self.register(request.into_inner()).await)
+    }
+
+    async fn register_shard_in_pieces(
+        &self,
+        request: Request<tonic::Streaming<cpb::RegisterShardInPiecesRequest>>,
+    ) -> Result<Response<cpb::RegisterShardInPiecesResponse>, Status> {
         respond(
             async {
-                let mut req = request.into_inner();
-                super::check_shard_id(&req.shard_id).map_err(Error::invalid)?;
-                if !req.region.is_empty() {
-                    super::check_region(&req.region).map_err(Error::invalid)?;
+                let mut stream = request.into_inner();
+                let mut whole = Pieces::default();
+                while let Some(piece) = stream.message().await.map_err(Error::retried)? {
+                    whole.add(piece)?;
                 }
-                let region_name = Some(req.region_name.as_str()).filter(|name| !name.is_empty());
-                // Servers on their way to or from this shard aren't taken from
-                // what it says until the move says so.
-                let (answer, settled) =
-                    super::moves::sort_registration(self.shards()?, &req.shard_id, &mut req.servers);
-                let ids: Vec<String> =
-                    req.servers.iter().filter_map(|entry| entry.server.as_ref().map(|s| s.id.clone())).collect();
-                self.app.node()?.register_shard(&req.shard_id, &req.url, &req.region, &ids).await?;
-                let started_at = req.started_at.as_ref().map(crate::id::millis).unwrap_or_default();
-                self.shards()?.register(&req.shard_id, &req.url, &req.region, region_name, started_at)?;
-                for server_id in settled {
-                    super::moves::settled(&self.app, &server_id).await;
-                }
-                // Servers gone from the shard keep their notification settings: the
-                // file may only be moving to another shard.
-                let gone = self.app.index.register(&req.shard_id, req.servers);
-                if !gone.is_empty() {
-                    tracing::info!(shard = %req.shard_id, servers = gone.len(), "servers no longer on this shard");
-                }
-                let shards = self.shards()?;
-                if !shards.left.read().unwrap_or_else(|p| p.into_inner()).is_empty() {
-                    let index = &self.app.index;
-                    shards.left.write().unwrap_or_else(|p| p.into_inner()).retain(|id| index.placement(id).is_none());
-                }
-                Ok(answer)
+                let answer = self.register(whole.finish()?).await?;
+                Ok(cpb::RegisterShardInPiecesResponse { answer: Some(answer) })
             }
             .await,
         )
@@ -980,5 +1039,55 @@ impl DirectoryService for Internal {
                 .map_err(|_| Status::unavailable("the other instance stopped sending that file"))
         });
         Ok(Response::new(Box::pin(futures::stream::once(async move { Ok(first) }).chain(rest))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, members: &[&str], invites: &[&str]) -> cpb::ServerEntry {
+        cpb::ServerEntry {
+            server: Some(pb::Server { id: id.into(), ..Default::default() }),
+            member_ids: members.iter().map(|m| m.to_string()).collect(),
+            invite_codes: invites.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    fn piece(servers: Vec<cpb::ServerEntry>, last: bool) -> cpb::RegisterShardInPiecesRequest {
+        let piece = cpb::RegisterShardRequest { servers, ..Default::default() };
+        cpb::RegisterShardInPiecesRequest { piece: Some(piece), last }
+    }
+
+    fn first(shard_id: &str) -> cpb::RegisterShardInPiecesRequest {
+        let piece =
+            cpb::RegisterShardRequest { shard_id: shard_id.into(), url: "http://a".into(), ..Default::default() };
+        cpb::RegisterShardInPiecesRequest { piece: Some(piece), last: false }
+    }
+
+    #[test]
+    fn pieces_make_one_registration() {
+        let mut pieces = Pieces::default();
+        pieces.add(first("a")).unwrap();
+        pieces.add(piece(vec![entry("s1", &["u1", "u2"], &["code"])], false)).unwrap();
+        pieces.add(piece(vec![entry("s1", &["u3"], &[]), entry("s2", &["u1"], &[])], false)).unwrap();
+        pieces.add(piece(vec![], true)).unwrap();
+        assert!(pieces.add(piece(vec![], false)).is_err());
+        let whole = pieces.finish().unwrap();
+        assert_eq!((whole.shard_id.as_str(), whole.url.as_str()), ("a", "http://a"));
+        assert_eq!(whole.servers, [entry("s1", &["u1", "u2", "u3"], &["code"]), entry("s2", &["u1"], &[])]);
+    }
+
+    #[test]
+    fn a_registration_cut_short_is_refused() {
+        let mut pieces = Pieces::default();
+        pieces.add(first("a")).unwrap();
+        pieces.add(piece(vec![entry("s1", &["u1"], &[])], false)).unwrap();
+        assert!(pieces.finish().is_err());
+        assert!(Pieces::default().finish().is_err());
+
+        let mut pieces = Pieces::default();
+        pieces.add(first("a")).unwrap();
+        assert!(pieces.add(first("b")).is_err());
     }
 }

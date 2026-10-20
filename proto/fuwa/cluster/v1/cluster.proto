@@ -27,6 +27,9 @@ service DirectoryService {
   // A shard says which servers it holds, when it starts and whenever it has
   // lost track of what the directory knows.
   rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse);
+  // RegisterShard in pieces, so a shard's memberships needn't fit in one
+  // message.
+  rpc RegisterShardInPieces(stream RegisterShardInPiecesRequest) returns (RegisterShardInPiecesResponse);
   // Which shard holds each server, and where to reach it.
   rpc Placements(PlacementsRequest) returns (PlacementsResponse);
   // A server's profile changed.
@@ -358,6 +361,19 @@ message RegisterShardRequest {
   // When this shard's process started: the same every time it registers
   // until it restarts.
   google.protobuf.Timestamp started_at = 6;
+}
+
+// One piece of a registration. The first has the shard's fields; the others
+// only add servers. A server's entry may be split over pieces in a row: each
+// later one with the same server adds to its members and invites. Nothing is
+// taken until the piece marked last.
+message RegisterShardInPiecesRequest {
+  RegisterShardRequest piece = 1;
+  bool last = 2;
+}
+
+message RegisterShardInPiecesResponse {
+  RegisterShardResponse answer = 1;
 }
 
 message RegisterShardResponse {

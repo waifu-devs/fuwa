@@ -237,18 +237,7 @@ async fn register(app: &App, link: &Link) {
         let before = link.changes.load(Ordering::SeqCst);
         link.dirty.store(false, Ordering::SeqCst);
         let registered = async {
-            let servers = app.servers.entries().await?;
-            let count = servers.len();
-            let cluster = &app.config.cluster;
-            let request = cpb::RegisterShardRequest {
-                shard_id: link.id.clone(),
-                url: link.url.clone(),
-                servers,
-                region: cluster.region.clone(),
-                region_name: cluster.region_name.clone().unwrap_or_default(),
-                started_at: Some(crate::id::timestamp(link.started_at)),
-            };
-            let answer = link.directory().register_shard(request).await?.into_inner();
+            let (count, answer) = send_registration(app, link).await?;
             super::moves::after_registering(app, &answer).await;
             Ok::<_, Error>(count)
         }
@@ -269,6 +258,81 @@ async fn register(app: &App, link: &Link) {
         }
     }
     link.dirty.store(true, Ordering::SeqCst);
+}
+
+/// Member ids in one piece of a registration: about 1.4 MB, far under the
+/// cluster's message limit however many members the shard's servers have.
+const PIECE_IDS: usize = 50_000;
+
+/// Tells the directory every server here and who's in it, in pieces
+/// (RegisterShardInPieces), or in one message to a directory from before
+/// pieces. Returns how many servers went, and the directory's answer.
+async fn send_registration(app: &App, link: &Link) -> Result<(usize, cpb::RegisterShardResponse)> {
+    // Batches of servers, then an empty one once every server was read: a
+    // read that fails sends no empty one, so the last piece never goes and the
+    // directory takes nothing.
+    let (entries_tx, mut entries_rx) = mpsc::channel::<Vec<cpb::ServerEntry>>(2);
+    let (pieces_tx, pieces_rx) = mpsc::channel(2);
+    let read = async {
+        let sent = app.servers.send_entries(PIECE_IDS, &entries_tx).await;
+        if let Ok(Some(_)) = sent {
+            let _ = entries_tx.send(Vec::new()).await;
+        }
+        drop(entries_tx);
+        sent
+    };
+    // Stops at once if the call ends early (refused, or a directory from
+    // before pieces), whether or not the stream it was reading is let go.
+    let answered = tokio_util::sync::CancellationToken::new();
+    let stop = answered.clone();
+    let pieces = async move {
+        let mut first = Some(first_piece(app, link));
+        while let Some(servers) = stop.run_until_cancelled(entries_rx.recv()).await.flatten() {
+            let last = servers.is_empty();
+            let piece = cpb::RegisterShardRequest { servers, ..first.take().unwrap_or_default() };
+            let piece = cpb::RegisterShardInPiecesRequest { piece: Some(piece), last };
+            if !matches!(stop.run_until_cancelled(pieces_tx.send(piece)).await, Some(Ok(()))) || last {
+                return;
+            }
+        }
+    };
+    let call = async {
+        let answer = link.directory().register_shard_in_pieces(ReceiverStream::new(pieces_rx)).await;
+        answered.cancel();
+        answer
+    };
+    let (sent, (), answer) = tokio::join!(read, pieces, call);
+    if let Err(status) = &answer
+        && status.code() == tonic::Code::Unimplemented
+    {
+        return register_whole(app, link).await;
+    }
+    // A read that failed explains a refused call better than the refusal.
+    let sent = sent?;
+    let answer = answer.map_err(Error::retried)?.into_inner().answer.unwrap_or_default();
+    let count = sent.ok_or_else(|| Error::internal("the directory answered before the last piece"))?;
+    Ok((count, answer))
+}
+
+/// The shard's own fields of a registration, with no servers yet.
+fn first_piece(app: &App, link: &Link) -> cpb::RegisterShardRequest {
+    let cluster = &app.config.cluster;
+    cpb::RegisterShardRequest {
+        shard_id: link.id.clone(),
+        url: link.url.clone(),
+        region: cluster.region.clone(),
+        region_name: cluster.region_name.clone().unwrap_or_default(),
+        started_at: Some(crate::id::timestamp(link.started_at)),
+        ..Default::default()
+    }
+}
+
+/// RegisterShard as one message, for a directory from before pieces.
+async fn register_whole(app: &App, link: &Link) -> Result<(usize, cpb::RegisterShardResponse)> {
+    let servers = app.servers.entries().await?;
+    let count = servers.len();
+    let request = cpb::RegisterShardRequest { servers, ..first_piece(app, link) };
+    Ok((count, link.directory().register_shard(request).await?.into_inner()))
 }
 
 /// Before a shard stops (a deploy, a restart), has the directory move its
