@@ -424,19 +424,17 @@ impl SettingsView {
                         window,
                         cx,
                     ))
-                    .when(!video, |el| {
-                        el.child(self.labeled_slider(
-                            ids("blur"),
-                            &t("appsettings.backdrop.blur"),
-                            format!("{}px", b.blur),
-                            (f32::from(themes::BLUR.0), f32::from(themes::BLUR.1), 1.0),
-                            f32::from(b.blur),
-                            Self::backdrop_setter(target, |b, v| b.blur = v),
-                            p,
-                            window,
-                            cx,
-                        ))
-                    }),
+                    .child(self.labeled_slider(
+                        ids("blur"),
+                        &t("appsettings.backdrop.blur"),
+                        format!("{}px", b.blur),
+                        (f32::from(themes::BLUR.0), f32::from(themes::BLUR.1), 1.0),
+                        f32::from(b.blur),
+                        Self::backdrop_setter(target, |b, v| b.blur = v),
+                        p,
+                        window,
+                        cx,
+                    )),
                 SharedString::from(format!("{}-in", ids("pic-opts"))),
                 Duration::ZERO,
                 -6.0,
