@@ -202,6 +202,10 @@ pub enum Dialog {
         key: String,
         server: String,
     },
+    /// Adding an agent to a server you manage (`ui/add_agent.rs`, the agent in `home.agents.page`).
+    AddAgent {
+        key: String,
+    },
     /// Starting a screen share in the call you're in (`ui/screen_share.rs`).
     ShareScreen,
     /// Before a masked link opens: where it really goes (`ui/leaving.rs`).
@@ -1899,7 +1903,7 @@ impl FuwaApp {
         let core = self.core.clone();
         match dialog {
             Dialog::CreateServer { .. } => self.create_server_now(window, cx),
-            Dialog::Apply { .. } | Dialog::Application { .. } => {}
+            Dialog::Apply { .. } | Dialog::Application { .. } | Dialog::AddAgent { .. } => {}
             Dialog::ShareScreen => self.start_share(cx),
             // Enter is "Go back", the safe answer, as the web's focus starts there.
             Dialog::Leaving { .. } => self.close_dialog(cx),

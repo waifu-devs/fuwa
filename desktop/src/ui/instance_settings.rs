@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod accounts;
+mod agents;
 mod announcement;
 mod calls;
 mod controls;
@@ -75,12 +76,13 @@ enum Page {
     Servers,
     ProfileItems,
     Announcement,
+    Agents,
 }
 
 impl Page {
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
-        matches!(self, Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement)
+        matches!(self, Page::Accounts | Page::Servers | Page::Agents | Page::ProfileItems | Page::Announcement)
     }
 }
 
@@ -174,6 +176,7 @@ pub struct InstanceSettingsView {
     sso: sso::Sso,
     accounts: accounts::Accounts,
     servers: servers::Servers,
+    agents: agents::Agents,
     federation: federation::Federation,
     gifs: gifs::Gifs,
     providers: providers::Providers,
@@ -258,6 +261,7 @@ impl InstanceSettingsView {
             announce,
             sso,
             accounts,
+            agents: Default::default(),
             servers,
             federation,
             gifs,
@@ -788,8 +792,12 @@ impl Render for InstanceSettingsView {
         let inner = main.min(960.0);
         self.column = inner - 64.0 - 80.0;
 
-        let groups =
-            frame::groups(&self.name(), self.instance_has("profile-items"), self.instance_has("link-previews"));
+        let groups = frame::groups(
+            &self.name(),
+            self.instance_has("profile-items"),
+            self.instance_has("link-previews"),
+            self.instance_has("agent-discovery"),
+        );
         let menu = self.menu(&groups, &p, window, cx);
         let (label, about) = groups
             .iter()
@@ -802,6 +810,7 @@ impl Render for InstanceSettingsView {
             match page {
                 Page::Accounts => self.accounts_page(&p, window, cx),
                 Page::Servers => self.servers_page(&p, window, cx),
+                Page::Agents => self.agents_page(&p, window, cx),
                 Page::Announcement => self.announcement_page(&p, window, cx),
                 Page::ProfileItems => {
                     let (core, key) = (self.core.clone(), self.key.clone());
@@ -847,7 +856,9 @@ impl Render for InstanceSettingsView {
                 Page::Moderation => self.moderation_page(&p, window, cx),
                 Page::Federation => self.federation_page(&p, window, cx),
                 Page::Gifs => self.gifs_page(&p, window, cx),
-                Page::Accounts | Page::Servers | Page::ProfileItems | Page::Announcement => div().into_any_element(),
+                Page::Accounts | Page::Servers | Page::Agents | Page::ProfileItems | Page::Announcement => {
+                    div().into_any_element()
+                }
             }
         };
 

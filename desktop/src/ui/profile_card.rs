@@ -429,6 +429,46 @@ impl FuwaApp {
                 6.0,
             ));
         }
+        // An agent you may add (public, or yours) to a server you manage here.
+        if let Some(agent) = self.addable_agent(key, user.as_ref(), cx) {
+            let (k, name) = (key.to_owned(), user.as_ref().map(|u| u.username.clone()).unwrap_or_default());
+            let fg = p.primary_foreground;
+            column = column.child(motion::rise(
+                under_box(&p).child(
+                    div()
+                        .id("profile-add-agent")
+                        .group("profile-add-agent")
+                        .h(px(36.0))
+                        .px(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(8.0))
+                        .rounded(radius_xl())
+                        .bg(p.primary)
+                        .text_color(fg)
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.92))
+                        .active(|s| s.scale(0.96))
+                        // The server tips and grows while pointed at.
+                        .child(
+                            div()
+                                .id("profile-add-agent-icon")
+                                .group_hover("profile-add-agent", |s| s.rotate(gpui_kit::radians(-0.21)).scale(1.1))
+                                .child(icon("server").size(px(16.0))),
+                        )
+                        .child(t("accountsettings.agents.addToServer"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_add_agent(&k, &name, Some(agent.clone()), window, cx)
+                        })),
+                ),
+                "profile-add-agent-in",
+                Duration::from_millis(50),
+                6.0,
+            ));
+        }
         if let (Some(sid), false) = (server, f.moderation.is_empty()) {
             let timed_out = f.member.as_ref().and_then(|m| timed_out_until(m, now_ms())).is_some();
             let mut row = under_box(&p).flex().gap(px(6.0));

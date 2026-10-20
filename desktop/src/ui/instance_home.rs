@@ -60,6 +60,8 @@ pub struct Home {
     pub apply: Option<crate::ui::join::ApplyForm>,
     /// Making a server (`ui/join.rs`).
     pub create: crate::ui::join::CreateForm,
+    /// Browse's agents and adding one to a server (`ui/add_agent.rs`).
+    pub(crate) agents: crate::ui::add_agent::Agents,
     /// Asks how your applications went every half a minute.
     _watch: Task<()>,
     /// The page's scrolling, so only the cards in sight are built (`windowed.rs`).
@@ -125,6 +127,7 @@ impl Home {
                 invite: None,
                 apply: None,
                 create,
+                agents: Default::default(),
                 _watch: watch,
             },
             subs,
@@ -155,6 +158,7 @@ impl FuwaApp {
 
     fn load_browse(&mut self, key: &str, cx: &mut Context<Self>) {
         self.home.browse.entry(key.to_owned()).or_insert(Browse::Loading);
+        self.load_browse_agents(key, cx);
         let (core, k) = (self.core.clone(), key.to_owned());
         self.run(cx, async move { core.discover(&k).await }, {
             let key = key.to_owned();
@@ -174,11 +178,18 @@ impl FuwaApp {
         });
     }
 
-    /// "Open" in the invite box: the invite's page, on its own instance.
+    /// "Open" in the invite box: the invite's page, on its own instance, or
+    /// an agent's link, to add it to a server (where the instance has that).
     pub(crate) fn open_typed_invite(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Nav::Instance { key } = self.nav.clone() else { return };
         let text = self.home.invite_field.read(cx).value().to_string();
         if text.trim().is_empty() {
+            return;
+        }
+        let agents = self.core.shared.read(|s| s.instance(&key).is_some_and(|i| i.has("agent-discovery")));
+        if let Some((at, username)) = join::parse_agent_link(&text, &key).filter(|_| agents) {
+            self.home.invite_field.update(cx, |s, cx| s.set_value("", window, cx));
+            self.open_agent_link(&at, &username, window, cx);
             return;
         }
         let Some((at, code)) = join::parse_invite(&text, &key) else {
@@ -424,6 +435,7 @@ impl FuwaApp {
             .flex_col()
             .child(self.hero(key, width, &p, window, cx))
             .child(self.have_invite(&p, window, cx))
+            .children(self.browse_agents(key, width, cols, &p, cx))
             .child(self.browse_header(&p, window, cx))
             .child(self.browse_results(key, width, cols, &p, window, cx));
         div()

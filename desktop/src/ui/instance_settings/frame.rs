@@ -57,7 +57,7 @@ fn entry(id: &'static str, key: &str, keywords: &'static str) -> (&'static str, 
 }
 
 /// The menu: the instance's settings, then what an admin manages (the web's `settingsGroups`).
-pub(super) fn groups(name: &str, items_here: bool, previews_here: bool) -> Vec<Group> {
+pub(super) fn groups(name: &str, items_here: bool, previews_here: bool, agents_here: bool) -> Vec<Group> {
     let instance = vec![
         Section::new(
             Page::General,
@@ -267,10 +267,23 @@ pub(super) fn groups(name: &str, items_here: bool, previews_here: bool) -> Vec<G
             entry("announcement-ends", "instancesettings.nav.announcementEnds", "expire end"),
         ]),
     ];
-    // Profile items, on instances that have them, sit between Servers and Announcement.
-    if items_here {
+    // Featured agents, on instances with agent discovery, come after Servers.
+    if agents_here {
         manage.insert(
             2,
+            Section::new(
+                Page::Agents,
+                "bot",
+                t("desktop.agents.adminNav"),
+                t("desktop.agents.adminNavAbout"),
+                "agents bots featured browse public discover",
+            ),
+        );
+    }
+    // Profile items, on instances that have them, sit between Servers (and Agents) and Announcement.
+    if items_here {
+        manage.insert(
+            if agents_here { 3 } else { 2 },
             Section::new(
                 Page::ProfileItems,
                 "sparkles",
@@ -350,7 +363,12 @@ impl InstanceSettingsView {
     /// Enter in the search: the first thing it found.
     pub(super) fn pick_first(&mut self, cx: &mut Context<Self>) {
         let query = self.query.read(cx).value().to_string();
-        let groups = groups(&self.name(), self.instance_has("profile-items"), self.instance_has("link-previews"));
+        let groups = groups(
+            &self.name(),
+            self.instance_has("profile-items"),
+            self.instance_has("link-previews"),
+            self.instance_has("agent-discovery"),
+        );
         let first = search(&groups, &query)
             .and_then(|results| results.first().map(|(s, settings)| (s.page, settings.first().map(|x| x.0))));
         if let Some((page, setting)) = first {

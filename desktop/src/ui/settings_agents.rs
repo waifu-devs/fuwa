@@ -1,7 +1,8 @@
 //! Your agents on the instance on screen, as the web's
 //! `settings/account/Agents.tsx`: accounts your programs drive. Make one
 //! (its token shows once), rename it, write its about, make it public, add
-//! it to a server you manage, give it a new token, or delete it.
+//! it to a server you manage, copy its invite link (where the instance has
+//! `agent-discovery`), give it a new token, or delete it.
 
 use std::time::Duration;
 
@@ -35,6 +36,8 @@ pub(crate) struct AgentsForm {
     fresh: Option<(String, String)>,
     token_shown: bool,
     copied: bool,
+    /// The agent whose invite link was just copied, for its check.
+    link_copied: Option<String>,
     name: Option<Entity<InputState>>,
     username: Option<Entity<InputState>>,
     edited_username: bool,
@@ -922,6 +925,38 @@ impl SettingsView {
             p,
             cx,
         );
+        // Its invite link (`<instance>/agent/<username>`), at the instance's public address.
+        let has_links = self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("agent-discovery")));
+        let link = has_links.then(|| {
+            let copied = self.agents.link_copied.as_deref() == Some(user.id.as_str());
+            let (url, id) =
+                (crate::core::invites::agent_link(&self.core.public_base(key), &user.username), user.id.clone());
+            button(
+                SharedString::from(format!("agent-link-{}", user.id)),
+                if copied { t("accountsettings.shared.copied") } else { t("desktop.agents.copyLink") },
+                Some(if copied { "check" } else { "link" }),
+                Look::Ghost,
+                true,
+                p,
+            )
+            .rounded(radius_xl())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                this.agents.link_copied = Some(id.clone());
+                let id = id.clone();
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(1400)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.agents.link_copied.as_deref() == Some(id.as_str()) {
+                            this.agents.link_copied = None;
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+                cx.notify();
+            }))
+        });
         let created = crate::ui::text::ms_of(a.created_at.as_ref());
         let danger: AnyElement = match self.agents.confirm {
             Some(which) => {
@@ -1061,7 +1096,7 @@ impl SettingsView {
                 .into_any_element(),
         };
         body.child(
-            div().flex().flex_wrap().items_center().gap(px(8.0)).child(add).child(danger).child(
+            div().flex().flex_wrap().items_center().gap(px(8.0)).child(add).children(link).child(danger).child(
                 div()
                     .ml_auto()
                     .text_xs()

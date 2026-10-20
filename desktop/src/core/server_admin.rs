@@ -619,10 +619,36 @@ impl Core {
         let api = self.api(key).ok_or_else(missing)?;
         let res = rpc!(
             api.agents(),
-            add_agent(pb::AddAgentRequest { server_id: server_id.into(), username: username.into() })
+            add_agent(pb::AddAgentRequest {
+                server_id: server_id.into(),
+                username: username.into(),
+                ..Default::default()
+            })
         )
         .await?;
         let member = res.member.unwrap_or_default();
+        self.agent_added(key, server_id, &member);
+        Ok(member)
+    }
+
+    /// Adds an agent to a server with roles it joins with (Manage Roles, and
+    /// only roles below your highest), so it can do its job from the start.
+    pub async fn add_agent_with_roles(
+        &self,
+        key: &str,
+        server_id: &str,
+        username: &str,
+        role_ids: Vec<String>,
+    ) -> Result<pb::Member, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let req = pb::AddAgentRequest { server_id: server_id.into(), username: username.into(), role_ids };
+        let member = rpc!(api.agents(), add_agent(req)).await?.member.unwrap_or_default();
+        self.agent_added(key, server_id, &member);
+        Ok(member)
+    }
+
+    /// An agent just added: in the server's members here, and counted.
+    fn agent_added(&self, key: &str, server_id: &str, member: &pb::Member) {
         self.shared.instance(key, |i| {
             let Some(user) = member.user.clone() else { return };
             let list = i.members.entry(server_id.to_owned()).or_default();
@@ -635,7 +661,6 @@ impl Core {
                 server.member_count += 1;
             }
         });
-        Ok(member)
     }
 
     /// The welcome screen as its editor sees it: every channel it names.

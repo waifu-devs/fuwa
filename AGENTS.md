@@ -100,7 +100,11 @@
     public ones, those admins feature first (node.db's `featured_agents`,
     `AdminService.SetFeaturedAgents`), then the most servers first. Web:
     `components/agents/` (the picker of servers you manage, Browse's cards)
-    and `settings/instance/FeaturedAgents.tsx`.
+    and `settings/instance/FeaturedAgents.tsx`. Desktop: `ui/add_agent.rs`
+    (the add dialog, Browse's agents, the profile card's lookup) and
+    `ui/instance_settings/agents.rs`. `AddAgentRequest.role_ids` lets
+    whoever adds one give it roles as it joins (Manage Roles, below their
+    highest).
     An agent may have an endpoint instead of a stream (`api/endpoints.rs`,
     docs/agent-endpoints.md): node.db's `agent_endpoints` (URL, events,
     secret, an `epoch` each time it's set), checked with a challenge before

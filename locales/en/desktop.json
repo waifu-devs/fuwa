@@ -743,5 +743,31 @@
   "media.unmute": "Unmute",
   "media.cantPlay": "This kind of file can't play in the app. Save it to play it.",
   "media.broken": "This file couldn't be read.",
-  "media.noSpeakers": "Couldn't open the speakers."
+  "media.noSpeakers": "Couldn't open the speakers.",
+  "agents.title": "Agents",
+  "agents.about": "Bots anyone who manages a server can add.",
+  "agents.showAll": {
+    "one": "Show {count} more agent",
+    "other": "Show all {count} agents"
+  },
+  "agents.madeBy": "Made by {name}",
+  "agents.private": "Private: only you can add it.",
+  "agents.add": "Add",
+  "agents.alreadyIn": "Already here",
+  "agents.addedTo": "Added {agent} to {server}",
+  "agents.missing": "Agent not found",
+  "agents.missingAbout": "There's no agent by that name here, or it's private.",
+  "agents.signInFirst": "Sign in to {host} to add its agents.",
+  "agents.copyLink": "Copy invite link",
+  "agents.adminNav": "Agents",
+  "agents.adminNavAbout": "Feature public agents in Browse",
+  "agents.adminAbout": "Public agents show in Browse for everyone here. The ones you feature come first, and big, in the order you put them.",
+  "agents.adminCount": {
+    "one": "{count} public agent",
+    "other": "{count} public agents"
+  },
+  "agents.adminNone": "No public agents yet. An agent shows here once its owner makes it public.",
+  "agents.featuredNow": "Featuring {agent} in Browse",
+  "agents.unfeaturedNow": "Stopped featuring {agent}",
+  "agents.withRoles": "Join with roles:"
 }
