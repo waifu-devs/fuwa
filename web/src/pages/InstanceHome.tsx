@@ -23,6 +23,9 @@ import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseInvite } from "@/lib/invites";
+import { parseAgentLink } from "@/lib/agent-links";
+import { instanceKey as keyOf, normalizeUrl } from "@/fuwa/saved";
+import { BrowseAgents } from "@/components/agents/BrowseAgents";
 import { HostedBadge } from "@/components/HostedBadge";
 import { T, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -129,6 +132,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
       </div>
 
       <BrowseResults instanceKey={instanceKey} loaded={found !== null} error={error} searching={!!q} featured={shownFeatured} shown={shown} />
+      <BrowseAgents instanceKey={instanceKey} query={query} />
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={instanceKey} />
     </div>
   );
@@ -268,6 +272,18 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
   const privateField = usePrivateField();
   function submit(e: FormEvent) {
     e.preventDefault();
+    // An agent's link opens its page, where it's added to a server you manage.
+    const agent = parseAgentLink(text);
+    if (agent) {
+      let instance = instanceKey;
+      try {
+        if (agent.address) instance = keyOf(normalizeUrl(agent.address));
+      } catch {
+        setBad(true);
+        return setShake((n) => n + 1);
+      }
+      return navigate({ to: "/$instance/agent/$username", params: { instance, username: agent.username } });
+    }
     const found = parseInvite(text, instanceKey);
     if (!found) {
       setBad(true);

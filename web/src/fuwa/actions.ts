@@ -1968,6 +1968,32 @@ export const addAgent = (key: string, serverId: string, username: string) =>
   );
 
 /**
+ * An agent as someone about to add it sees it, from its instance, signed in
+ * or not (an invite link opened before signing in). Private agents are found
+ * only by their owner.
+ */
+export const lookUpAgent = (address: string, username: string) =>
+  Effect.gen(function* () {
+    const { url, node } = yield* probe(address);
+    const found = yield* call((signal) => makeApi(url, () => null).agents.lookUpAgent({ username }, { signal }));
+    return { url, node, agent: found.agent! };
+  });
+
+/** An agent, by id or username, on an instance you're signed in to: your private ones too. */
+export const lookUpAgentHere = (key: string, which: { agentId?: string; username?: string }) =>
+  call((signal) => api(key).agents.lookUpAgent(which, { signal })).pipe(Effect.map((r) => r.agent!));
+
+/** The instance's public agents: featured first, in their order, then the most servers first. */
+export const discoverAgents = (key: string) =>
+  call((signal) => api(key).agents.discoverAgents({}, { signal })).pipe(
+    Effect.map((r) => ({ agents: r.agents, featured: r.featuredAgentIds })),
+  );
+
+/** Instance admins: the agents Browse features, in order. */
+export const setFeaturedAgents = (key: string, agentIds: string[]) =>
+  call((signal) => api(key).admin.setFeaturedAgents({ agentIds }, { signal })).pipe(Effect.map((r) => r.featuredAgentIds));
+
+/**
  * An agent's endpoint (docs/agent-endpoints.md): the URL the instance posts
  * its events to. Made, with its signing secret, the first time it's asked for.
  */

@@ -4,7 +4,7 @@ import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, LockKeyholeIc
 import { AnimatePresence, m as motion, useIsPresent } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
-import { loadProfile, run } from "@/fuwa/actions";
+import { loadProfile, lookUpAgentHere, run } from "@/fuwa/actions";
 import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
 import { byId } from "@/fuwa/hooks";
@@ -14,6 +14,8 @@ import { ProfileCard } from "@/components/ProfileCard";
 import { ProfileGive } from "@/components/economy/ProfileGive";
 import { ProfileReport } from "@/components/modview/ProfileReport";
 import { FriendActions } from "@/components/friends/FriendActions";
+import { AddAgentMenu, useManagedServers } from "@/components/agents/AddAgent";
+import { instanceHas } from "@/lib/compat";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -166,6 +168,7 @@ function ProfileContent({
             className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
           />
           {canMessage && <MessageButton instanceKey={instanceKey} user={user} onOpened={onClose} />}
+          {isAgent(user) && <AgentAdd instanceKey={instanceKey} user={user} />}
           {canFriend && (
             <motion.div
               initial={{ opacity: 0, y: -6 }}
@@ -242,6 +245,40 @@ function MessageButton({ instanceKey, user, onOpened }: { instanceKey: string; u
           className="size-3.5 opacity-80 transition-transform duration-300 group-hover:translate-x-0.5"
         />
       </motion.button>
+    </motion.div>
+  );
+}
+
+/**
+ * "Add to server" on an agent's card, for someone who manages a server here
+ * and may add it (it's public, or theirs): the instance says which.
+ */
+function AgentAdd({ instanceKey, user }: { instanceKey: string; user: User }) {
+  const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "agent-discovery"));
+  const managed = useManagedServers(instanceKey).length > 0;
+  const [addable, setAddable] = useState(false);
+
+  useEffect(() => {
+    if (!here || !managed) return;
+    let cancelled = false;
+    run(lookUpAgentHere(instanceKey, { agentId: user.id })).then(
+      () => !cancelled && setAddable(true),
+      () => !cancelled && setAddable(false),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [here, managed, instanceKey, user.id]);
+
+  if (!here || !managed || !addable) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.05 }}
+      className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
+    >
+      <AddAgentMenu instanceKey={instanceKey} agent={user} className="h-9 w-full" />
     </motion.div>
   );
 }

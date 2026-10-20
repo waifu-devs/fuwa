@@ -93,6 +93,14 @@
     `App::find_agent`, the cluster call `FindAgent`), and it skips rules
     (never `pending`). Deleting a person deletes their agents
     (`erase_account`). Who may make agents is the `agent_creation` setting.
+    `LookUpAgent` (by id or username, signed in or not) is what an agent's
+    invite link (`<instance>/agent/<username>`, web `pages/AgentPage.tsx`)
+    and the profile card's Add to server show: public agents for anyone,
+    private ones only for their owner. `DiscoverAgents` is Browse's agents:
+    public ones, those admins feature first (node.db's `featured_agents`,
+    `AdminService.SetFeaturedAgents`), then the most servers first. Web:
+    `components/agents/` (the picker of servers you manage, Browse's cards)
+    and `settings/instance/FeaturedAgents.tsx`.
     An agent may have an endpoint instead of a stream (`api/endpoints.rs`,
     docs/agent-endpoints.md): node.db's `agent_endpoints` (URL, events,
     secret, an `epoch` each time it's set), checked with a challenge before

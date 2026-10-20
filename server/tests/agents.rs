@@ -366,7 +366,15 @@ async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_brows
     assert_eq!(err.code(), Code::NotFound);
     let mine = agents.look_up_agent(authed(&w.owner, by_name("@helper"))).await.unwrap().into_inner().agent.unwrap();
     assert!(!mine.public);
-    assert!(agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner().agents.is_empty());
+    assert!(
+        agents
+            .discover_agents(authed(&ana, pb::DiscoverAgentsRequest {}))
+            .await
+            .unwrap()
+            .into_inner()
+            .agents
+            .is_empty()
+    );
     let err = admin
         .set_featured_agents(authed(&w.owner, pb::SetFeaturedAgentsRequest { agent_ids: vec![w.agent_id.clone()] }))
         .await
@@ -394,7 +402,10 @@ async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_brows
 
     // Browse: the most servers first, until an admin features another.
     let other = agents
-        .create_agent(authed(&w.owner, pb::CreateAgentRequest { username: "other".into(), display_name: "Other".into() }))
+        .create_agent(authed(
+            &w.owner,
+            pb::CreateAgentRequest { username: "other".into(), display_name: "Other".into() },
+        ))
         .await
         .unwrap()
         .into_inner()
