@@ -1,11 +1,13 @@
 //! Sending email: the codes people sign in with (`api/email.rs`,
 //! docs/email-sign-in.md). Each way of sending is a [`Sender`]: SMTP
-//! (`smtp.rs`), Amazon SES's v2 API (`ses.rs`) and Resend's API
-//! (`resend.rs`); FUWA_MAIL_PROVIDER picks one, and a new provider is one
+//! (`smtp.rs`), Amazon SES's v2 API (`ses.rs`), Resend's API (`resend.rs`)
+//! and Cloudflare Email Service's API (`cloudflare.rs`); FUWA_MAIL_PROVIDER
+//! picks one, and a new provider is one
 //! more file and one more arm in [`Provider`]. Everything about it comes from
 //! the environment alone, so the credentials never reach node.db, the API,
 //! the logs or another part of a split instance.
 
+pub mod cloudflare;
 pub mod resend;
 pub mod ses;
 pub mod smtp;
@@ -38,6 +40,7 @@ pub enum Provider {
     Smtp(smtp::Config),
     Ses(ses::Config),
     Resend(resend::Config),
+    Cloudflare(cloudflare::Config),
 }
 
 /// How the instance sends email: FUWA_MAIL_PROVIDER, FUWA_MAIL_FROM and the
@@ -56,7 +59,7 @@ impl std::fmt::Debug for Config {
 }
 
 impl Config {
-    /// Reads FUWA_MAIL_PROVIDER (smtp, ses or resend; unset or `off` sends
+    /// Reads FUWA_MAIL_PROVIDER (smtp, ses, resend or cloudflare; unset or `off` sends
     /// nothing) and what that provider needs. A provider without what it
     /// needs is an error, so a typo doesn't quietly leave sign-ins broken.
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> std::result::Result<Option<Self>, String> {
@@ -65,7 +68,10 @@ impl Config {
             Some("smtp") => Provider::Smtp(smtp::Config::from_lookup(get)?),
             Some("ses") => Provider::Ses(ses::Config::from_lookup(get)?),
             Some("resend") => Provider::Resend(resend::Config::from_lookup(get)?),
-            Some(other) => return Err(format!("FUWA_MAIL_PROVIDER must be smtp, ses, resend or off, got {other:?}")),
+            Some("cloudflare") => Provider::Cloudflare(cloudflare::Config::from_lookup(get)?),
+            Some(other) => {
+                return Err(format!("FUWA_MAIL_PROVIDER must be smtp, ses, resend, cloudflare or off, got {other:?}"));
+            }
         };
         let from = get("FUWA_MAIL_FROM").map(|from| from.trim().to_string()).unwrap_or_default();
         if from.is_empty() {
@@ -83,6 +89,7 @@ impl Config {
             Provider::Smtp(_) => "smtp",
             Provider::Ses(_) => "ses",
             Provider::Resend(_) => "resend",
+            Provider::Cloudflare(_) => "cloudflare",
         }
     }
 }
@@ -100,6 +107,7 @@ impl Mailer {
             Provider::Smtp(smtp) => Arc::new(smtp::Smtp::new(smtp)?),
             Provider::Ses(ses) => Arc::new(ses::Ses::new(ses.clone())?),
             Provider::Resend(resend) => Arc::new(resend::Resend::new(resend.clone())?),
+            Provider::Cloudflare(cloudflare) => Arc::new(cloudflare::Cloudflare::new(cloudflare.clone())?),
         };
         Ok(Self { from: config.from.clone(), sender })
     }

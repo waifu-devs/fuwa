@@ -546,8 +546,9 @@ export type InstanceSettings = Message<"fuwa.v1.InstanceSettings"> & {
 
   /**
    * How the instance sends email, set in its environment alone
-   * (FUWA_MAIL_PROVIDER: "smtp", "ses" or "resend"), so its credentials are
-   * never in the database or sent anywhere. Empty when it can't. Read-only.
+   * (FUWA_MAIL_PROVIDER: "smtp", "ses", "resend" or "cloudflare"), so its
+   * credentials are never in the database or sent anywhere. Empty when it
+   * can't. Read-only.
    *
    * @generated from field: string mail_provider = 69;
    */

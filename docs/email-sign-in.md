@@ -11,7 +11,7 @@ Email codes need a way to send mail. Pick one with `FUWA_MAIL_PROVIDER` and
 say who mail comes from with `FUWA_MAIL_FROM`, then restart:
 
 ```sh
-FUWA_MAIL_PROVIDER=resend          # smtp, ses, resend or off
+FUWA_MAIL_PROVIDER=resend          # smtp, ses, resend, cloudflare or off
 FUWA_MAIL_FROM="Fuwa <no-reply@example.com>"
 FUWA_RESEND_API_KEY=re_...
 ```
@@ -39,6 +39,18 @@ With no mail provider, email codes stay off whatever the setting says.
 | `FUWA_RESEND_URL` | `https://api.resend.com` | The API's address, for a proxy or a test server |
 
 The `FUWA_MAIL_FROM` domain must be verified in Resend.
+
+### Cloudflare Email Service
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `FUWA_CLOUDFLARE_ACCOUNT_ID` | required | The Cloudflare account the sending domain is on |
+| `FUWA_CLOUDFLARE_API_TOKEN` | required | An API token with the "Email Sending: Edit" permission |
+| `FUWA_CLOUDFLARE_URL` | `https://api.cloudflare.com/client/v4` | The API's address, for a proxy or a test server |
+
+The `FUWA_MAIL_FROM` domain must use Cloudflare DNS and be onboarded to Email
+Sending (Compute & AI › Email Service in the dashboard). A mail Cloudflare
+reports as a permanent bounce counts as not sent.
 
 ### Amazon SES (v2 API)
 

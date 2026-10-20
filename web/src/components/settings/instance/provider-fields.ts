@@ -21,7 +21,7 @@ export const accountsOf = (s: InstanceSettings) => s.providerAccounts || Provide
 export const emailAccountsOf = (s: InstanceSettings) => s.emailAccounts || EmailAccounts.OPEN;
 
 /** What each mail provider is called, by `InstanceSettings.mailProvider`. */
-export const MAIL_PROVIDERS: Record<string, string> = { smtp: "SMTP", ses: "Amazon SES", resend: "Resend" };
+export const MAIL_PROVIDERS: Record<string, string> = { smtp: "SMTP", ses: "Amazon SES", resend: "Resend", cloudflare: "Cloudflare" };
 
 /** The instance settings the sign-in providers page reads. */
 export const SIGN_IN_PROVIDER_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [

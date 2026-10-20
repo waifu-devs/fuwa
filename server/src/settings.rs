@@ -95,7 +95,7 @@ pub struct Settings {
     pub sign_in_providers: Vec<crate::sso::providers::Setting>,
     /// Signing in with codes sent by email.
     pub email_accounts: Accounts,
-    /// How the instance sends email ("smtp", "ses", "resend"), or empty when
+    /// How the instance sends email ("smtp", "ses", "resend", "cloudflare"), or empty when
     /// it can't. From the environment alone (`Config::mail`); not a setting.
     pub mail_provider: String,
     pub server_creation: pb::ServerCreation,
