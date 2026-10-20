@@ -148,7 +148,7 @@ fn device_file(
             let key = SharedString::from(path.display().to_string());
             shown_picture(Tile::Path(path.clone()), key, Resource::Path(path), fit, blur, w, h, window, cx)
         }
-        Kind::Video => video(path, fit, window, cx),
+        Kind::Video => video(path, fit, blur, w, h, window, cx),
     }
 }
 
@@ -161,6 +161,8 @@ struct Playing {
     shown: Option<Arc<RenderImage>>,
     /// Frames replaced, to leave the window's atlas once they're painted over.
     retired: Vec<Arc<RenderImage>>,
+    /// A frame is being blurred off the main thread; frames that come meanwhile are skipped.
+    blurring: bool,
 }
 
 thread_local! {
@@ -170,11 +172,14 @@ thread_local! {
 /// A video of yours, looping without sound: it moves while the window is in
 /// front and nothing covers it, and holds still on its frame otherwise or with
 /// reduced motion, like the effects. Its frames come at most 30 a second.
-fn video(path: Arc<Path>, fit: Fit, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+/// Blurred, each frame is made smaller and blurred off the main thread, the
+/// same way as a picture, before it's shown.
+fn video(path: Arc<Path>, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let opened = VIDEO.with(|v| v.borrow().as_ref().is_some_and(|p| p.path == path));
     if !opened {
         VIDEO.with(|v| {
-            *v.borrow_mut() = Some(Playing { path: path.clone(), player: None, shown: None, retired: Vec::new() })
+            *v.borrow_mut() =
+                Some(Playing { path: path.clone(), player: None, shown: None, retired: Vec::new(), blurring: false })
         });
         let view = window.current_view();
         let read = cx.background_executor().spawn({
@@ -187,7 +192,9 @@ fn video(path: Arc<Path>, fit: Fit, window: &mut Window, cx: &mut App) -> Option
                 Some(player)
             }
         });
+        let opening = path.clone();
         cx.spawn(async move |cx| {
+            let path = opening;
             let player = read.await;
             VIDEO.with(|v| {
                 if let Some(playing) = v.borrow_mut().as_mut().filter(|p| p.path == path) {
@@ -199,6 +206,7 @@ fn video(path: Arc<Path>, fit: Fit, window: &mut Window, cx: &mut App) -> Option
         .detach();
     }
     let running = window.is_window_active() && !cx.reduce_motion() && !crate::ui::effects::held();
+    let mut to_blur = None;
     let (image, moving) = VIDEO
         .with(|v| {
             let mut v = v.borrow_mut();
@@ -214,7 +222,14 @@ fn video(path: Arc<Path>, fit: Fit, window: &mut Window, cx: &mut App) -> Option
             }
             if let Some(frame) = player.take_picture() {
                 let (width, height) = (frame.width, frame.height);
-                if let Some(buffer) = image::RgbaImage::from_raw(width, height, frame.bgra) {
+                if blur > 0 {
+                    if playing.blurring {
+                        player.give_back(frame.bgra);
+                    } else {
+                        playing.blurring = true;
+                        to_blur = Some(frame);
+                    }
+                } else if let Some(buffer) = image::RgbaImage::from_raw(width, height, frame.bgra) {
                     let image = Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
                     if let Some(old) = playing.shown.replace(image) {
                         playing.retired.push(old);
@@ -224,6 +239,40 @@ fn video(path: Arc<Path>, fit: Fit, window: &mut Window, cx: &mut App) -> Option
             Some((playing.shown.clone(), running))
         })
         .unwrap_or((None, false));
+    if let Some(frame) = to_blur {
+        let view = window.current_view();
+        let work = cx.background_executor().spawn(async move {
+            let (sw, sh) = (frame.width as usize, frame.height as usize);
+            let shrink = (sw.max(sh) as f32 / BLURRED_SIDE).max(1.0);
+            let (dw, dh) =
+                ((sw as f32 / shrink).round().max(1.0) as usize, (sh as f32 / shrink).round().max(1.0) as usize);
+            let shown = if fit == Fit::Contain {
+                (w / dw as f32).min(h / dh as f32)
+            } else {
+                (w / dw as f32).max(h / dh as f32)
+            };
+            let radius = (f32::from(blur) / shown.max(0.01)).round().clamp(1.0, 64.0) as usize;
+            let small = shrink_bgra(&frame.bgra, sw, sh, dw, dh);
+            (small.and_then(|small| blur_picture(&small, dw, dh, radius, false)), frame.bgra)
+        });
+        let path = path.clone();
+        cx.spawn(async move |cx| {
+            let (image, spare) = work.await;
+            VIDEO.with(|v| {
+                let mut v = v.borrow_mut();
+                let Some(playing) = v.as_mut().filter(|p| p.path == path) else { return };
+                playing.blurring = false;
+                if let Some(player) = &playing.player {
+                    player.give_back(spare);
+                }
+                if let Some(old) = image.and_then(|image| playing.shown.replace(image)) {
+                    playing.retired.push(old);
+                }
+            });
+            cx.update(|cx| cx.notify(view));
+        })
+        .detach();
+    }
     if moving {
         again(window, cx);
     }
@@ -423,7 +472,11 @@ fn blurred(
 fn shrink_picture(source: &RenderImage, dw: usize, dh: usize) -> Option<Vec<u8>> {
     let s = source.size(0);
     let (sw, sh) = (usize::try_from(i32::from(s.width)).ok()?, usize::try_from(i32::from(s.height)).ok()?);
-    let bytes = source.as_bytes(0)?;
+    shrink_bgra(source.as_bytes(0)?, sw, sh, dw, dh)
+}
+
+/// BGRA pixels, `sw` by `sh`, made `dw` by `dh` the same way.
+fn shrink_bgra(bytes: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Option<Vec<u8>> {
     if sw == 0 || sh == 0 || bytes.len() < sw * sh * 4 {
         return None;
     }
@@ -686,6 +739,18 @@ mod tests {
         let total: f32 = px.iter().step_by(4).sum();
         assert!((total - 255.0).abs() < 0.01, "{total}");
         assert!(px[(w - 1) * 4] > 0.0 && px[((h - 1) * w) * 4] > 0.0);
+    }
+
+    #[test]
+    fn video_frames_shrink_to_the_average_of_what_they_cover() {
+        // A 4 by 2 frame, left half black and right half white, made 2 by 1.
+        let mut frame = Vec::new();
+        for _ in 0..2 {
+            frame.extend([[0u8; 4], [0; 4], [255; 4], [255; 4]].concat());
+        }
+        assert_eq!(shrink_bgra(&frame, 4, 2, 2, 1).unwrap(), [[0u8; 4], [255; 4]].concat());
+        // A frame shorter than its size says is turned away, not read past.
+        assert!(shrink_bgra(&frame[..8], 4, 2, 2, 1).is_none());
     }
 
     #[test]

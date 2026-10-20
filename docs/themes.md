@@ -180,7 +180,8 @@ fetched to draw it. It's never uploaded, and its setting (`backdropFile`)
 isn't synced or written to theme files, so it stays on that device. Videos
 loop without sound and hold still whenever effects do (the app hidden or
 covered, reduced motion). `fit`, `dim` and `blur` apply to it, except that
-a video can't `tile`, and the desktop app doesn't blur videos.
+a video can't `tile`. The desktop app blurs a video a frame at a time,
+made small first like a blurred picture, off the main thread.
 
 **Effects** `aurora`, `petals`, `stars` and `waves` are fragment shaders
 (`web/src/lib/effects/shaders.ts`, WGSL; the web app runs them with
