@@ -14,6 +14,7 @@ export function Backgrounds({ instanceKey }: { instanceKey?: string }) {
   const { t } = useI18n();
   const theme = usePrefs(activeTheme);
   const backdrop = usePrefs((p) => p.backdrop);
+  const file = usePrefs((p) => p.backdropFile);
   const shown = usePrefs(activeBackdrop);
   const own = "backdrop" in theme && !!theme.backdrop;
   return (
@@ -29,8 +30,13 @@ export function Backgrounds({ instanceKey }: { instanceKey?: string }) {
           </button>
         </motion.div>
       )}
-      <PrefSetting id="backdrop" title={t("appsettings.backgrounds.title")} hint={t("appsettings.backgrounds.hint")} keys={["backdrop"]}>
-        <BackdropForm instanceKey={instanceKey} value={backdrop} onChange={(patch) => setPrefs((p) => ({ backdrop: { ...p.backdrop, ...patch } }))} />
+      <PrefSetting id="backdrop" title={t("appsettings.backgrounds.title")} hint={t("appsettings.backgrounds.hint")} keys={["backdrop", "backdropFile"]}>
+        <BackdropForm
+          instanceKey={instanceKey}
+          value={backdrop}
+          onChange={(patch) => setPrefs((p) => ({ backdrop: { ...p.backdrop, ...patch } }))}
+          device={{ value: file, onChange: (backdropFile) => setPrefs({ backdropFile }) }}
+        />
       </PrefSetting>
     </WithPreview>
   );

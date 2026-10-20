@@ -171,6 +171,17 @@ a picture only from an instance they're signed in to (or chose to open), never
 from anywhere else. The web app scales pictures to at most 2560 pixels on the
 long side and saves them as WebP (GIFs go as they are).
 
+**From the device.** The app's own backdrop (not a theme's) can show a
+video or picture from the device instead of `image`: MP4 or WebM videos,
+GIFs and other pictures, up to 100 MB. It's copied into the app's own
+storage (the web app's IndexedDB `fuwa-backdrops`, the desktop's
+`backdrops` folder beside its settings) and played from there, so nothing is
+fetched to draw it. It's never uploaded, and its setting (`backdropFile`)
+isn't synced or written to theme files, so it stays on that device. Videos
+loop without sound and hold still whenever effects do (the app hidden or
+covered, reduced motion). `fit`, `dim` and `blur` apply to it, except that
+a video can't `tile`, and the desktop app doesn't blur videos.
+
 **Effects** `aurora`, `petals`, `stars` and `waves` are fragment shaders
 (`web/src/lib/effects/shaders.ts`, WGSL; the web app runs them with
 [vgpu](https://vgpu.sh) on WebGPU, bundled in the app). They take the

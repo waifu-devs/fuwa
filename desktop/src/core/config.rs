@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::core::accessibility::ColorVision;
+use crate::core::backdrop_files::BackdropFile;
 use crate::core::keybinds;
 use crate::core::omarchy;
 use crate::core::secrets::Secrets;
@@ -62,6 +63,11 @@ impl Paths {
     /// Font files picked for the app's text (`core::fonts::import`).
     pub fn fonts(&self) -> PathBuf {
         self.config.join("fonts")
+    }
+
+    /// The video or picture picked for behind the app (`core::backdrop_files::import`).
+    pub fn backdrops(&self) -> PathBuf {
+        self.config.join("backdrops")
     }
 }
 
@@ -401,6 +407,9 @@ pub struct Prefs {
     pub custom_themes: Vec<Theme>,
     /// The picture and effect behind the app, under themes that don't bring their own.
     pub backdrop: Backdrop,
+    /// A video or picture of yours behind the app instead of the backdrop's
+    /// picture (`core::backdrop_files`); it stays on this computer.
+    pub backdrop_file: Option<BackdropFile>,
     /// Custom shaders whose first frames were being tried, by id: one still
     /// here at startup stopped the app, so it isn't run again (`core::effects::status`).
     pub shaders_trying: Vec<String>,
@@ -583,6 +592,7 @@ impl Default for Prefs {
             dark_theme: "yoru".into(),
             custom_themes: Vec::new(),
             backdrop: Backdrop::default(),
+            backdrop_file: None,
             shaders_trying: Vec::new(),
             motion: MotionChoice::System,
             density: Density::Cozy,
@@ -714,6 +724,9 @@ impl Prefs {
             _ => {}
         }
         self.custom_themes = themes::sanitize_custom(std::mem::take(&mut self.custom_themes));
+        if self.backdrop_file.as_ref().is_some_and(|f| !crate::core::fonts::valid_file_name(&f.file)) {
+            self.backdrop_file = None;
+        }
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
@@ -819,8 +832,12 @@ impl Prefs {
 
     /// What's behind the app: the theme's own backdrop, or the app's.
     /// The theme's own backdrop or the app's; under solid panels in high contrast.
+    /// The app's comes with this computer's video or picture, when one is picked.
     pub fn active_backdrop(&self, theme: &Theme) -> Backdrop {
-        let mut backdrop = theme.backdrop.clone().unwrap_or_else(|| self.backdrop.clone());
+        let mut backdrop = match &theme.backdrop {
+            Some(own) => own.clone(),
+            None => Backdrop { file: self.backdrop_file.clone(), ..self.backdrop.clone() },
+        };
         if self.high_contrast {
             backdrop.panels = 100;
         }

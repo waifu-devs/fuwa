@@ -1,4 +1,4 @@
-import { CheckIcon, CodeXmlIcon, Grid2x2Icon, ImageOffIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, Trash2Icon } from "lucide-react";
+import { CheckIcon, CodeXmlIcon, FilmIcon, Grid2x2Icon, ImageOffIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -10,6 +10,8 @@ import { ShaderEditor } from "@/components/settings/app/ShaderEditor";
 import { useI18n } from "@/i18n/react";
 import { CUSTOM, EFFECT_INFO, EFFECTS, isShader, LIMITS, moves, type Backdrop, type Effect } from "@/lib/backdrop";
 import { DEFAULT_SHADER } from "@/lib/effects/custom";
+import { backdropFileUrl, importBackdropFile } from "@/lib/backdrop-files";
+import { BACKDROP_FILE_ACCEPT, backdropFileKind, MOST_BACKDROP_FILE_BYTES, type BackdropFile } from "@/lib/device-backdrop";
 import { backgroundPicture, PICTURE_TYPES } from "@/lib/pictures";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
@@ -17,19 +19,25 @@ import { cn } from "@/lib/utils";
 /** Whether this browser can draw effects on the GPU. */
 const hasWebGpu = () => typeof navigator !== "undefined" && "gpu" in navigator;
 
+/** A video or picture from this device instead of the backdrop's picture: only the app's own backdrop has one. */
+export type DeviceFilePick = { value: BackdropFile | null; onChange: (file: BackdropFile | null) => void };
+
 /**
  * Everything about a backdrop: the picture (from your backgrounds on this
- * instance), how it sits, and the effect over it. Used for the app's
- * backdrop and for a custom theme's own.
+ * instance, or for the app's own, a video or picture from this device), how
+ * it sits, and the effect over it. Used for the app's backdrop and for a
+ * custom theme's own.
  */
 export function BackdropForm({
   instanceKey,
   value,
   onChange,
+  device,
 }: {
   instanceKey?: string;
   value: Backdrop;
   onChange: (patch: Partial<Backdrop>) => void;
+  device?: DeviceFilePick;
 }) {
   const { t, number } = useI18n();
   const percent = (n: number) => number(n / 100, { style: "percent" });
@@ -38,9 +46,9 @@ export function BackdropForm({
   return (
     <div className="flex flex-col gap-6">
       <Block title={t("appsettings.backdrop.picture")} hint={t("appsettings.backdrop.pictureHint")}>
-        <PictureLibrary instanceKey={instanceKey} value={value.image} onChange={(image) => onChange({ image })} />
+        <PictureLibrary instanceKey={instanceKey} value={value.image} onChange={(image) => onChange({ image })} device={device} />
         <AnimatePresence initial={false}>
-          {value.image && (
+          {(value.image || device?.value) && (
             <motion.div
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
@@ -54,7 +62,10 @@ export function BackdropForm({
                 options={[
                   { value: "cover", label: t("appsettings.backdrop.fill"), hint: t("appsettings.backdrop.fillHint"), icon: <Maximize2Icon className="size-4" /> },
                   { value: "contain", label: t("appsettings.backdrop.fit"), hint: t("appsettings.backdrop.fitHint"), icon: <Minimize2Icon className="size-4" /> },
-                  { value: "tile", label: t("appsettings.backdrop.tile"), hint: t("appsettings.backdrop.tileHint"), icon: <Grid2x2Icon className="size-4" /> },
+                  // A video can't repeat.
+                  ...(device?.value?.kind === "video"
+                    ? []
+                    : [{ value: "tile" as const, label: t("appsettings.backdrop.tile"), hint: t("appsettings.backdrop.tileHint"), icon: <Grid2x2Icon className="size-4" /> }]),
                 ]}
               />
               <Labeled label={t("appsettings.backdrop.dim")} shown={percent(value.dim)}><Slider label={t("appsettings.backdrop.dim")} value={value.dim} min={LIMITS.dim[0]} max={LIMITS.dim[1]} format={percent} onChange={(dim) => onChange({ dim })} className="pt-6" /></Labeled>
@@ -177,15 +188,37 @@ function EffectGrid({ value, custom, onChange }: { value: Effect; custom: string
 
 type Uploading = { preview: string; sent: number };
 
-/** Your backgrounds on this instance, a tile to add one (click or drop), and None. */
-function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string; value: string; onChange: (url: string) => void }) {
+/**
+ * Your backgrounds on this instance, a tile to add one (click or drop), and
+ * None; with `device`, also a tile for a video or picture from this device,
+ * which is kept here and never uploaded (a dropped video goes there too).
+ */
+function PictureLibrary({
+  instanceKey,
+  value,
+  onChange,
+  device,
+}: {
+  instanceKey?: string;
+  value: string;
+  onChange: (url: string) => void;
+  device?: DeviceFilePick;
+}) {
   const { t, number } = useI18n();
   const [pictures, setPictures] = useState<string[] | null>(null);
   const [uploading, setUploading] = useState<Uploading | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [keeping, setKeeping] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const deviceInput = useRef<HTMLInputElement>(null);
+  const local = device?.value ?? null;
+  // Picking a picture on an instance (or None) lets go of this device's file.
+  const pick = (url: string) => {
+    onChange(url);
+    device?.onChange(null);
+  };
 
   useEffect(() => {
     if (!instanceKey) return;
@@ -202,7 +235,26 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
   const kept = new Set(pictures);
   const shown = [...(value && !kept.has(value) ? [value] : []), ...(pictures ?? [])];
 
+  async function keep(file: File | undefined) {
+    if (!file || !device || keeping) return;
+    setError(null);
+    setKeeping(true);
+    try {
+      const kept = await importBackdropFile(file);
+      if ("error" in kept) {
+        const size = `${number(MOST_BACKDROP_FILE_BYTES / 1024 / 1024)} MB`;
+        return setError(
+          kept.error === "tooBig" ? t("appsettings.backdrop.deviceTooBig", { size }) : kept.error === "cantSave" ? t("appsettings.backdrop.deviceCantSave") : t("appsettings.backdrop.deviceNotMedia"),
+        );
+      }
+      device.onChange(kept);
+    } finally {
+      setKeeping(false);
+    }
+  }
+
   async function add(file: File | undefined) {
+    if (file && device && (backdropFileKind(file) === "video" || !instanceKey)) return keep(file);
     if (!file || !instanceKey || uploading) return;
     setError(null);
     if (!PICTURE_TYPES.includes(file.type)) return setError(t("appsettings.backdrop.pickType"));
@@ -237,7 +289,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
 
   const drop = {
     onDragOver: (e: DragEvent) => {
-      if (!instanceKey || !e.dataTransfer.types.includes("Files")) return;
+      if ((!instanceKey && !device) || !e.dataTransfer.types.includes("Files")) return;
       e.preventDefault();
       setDragging(true);
     },
@@ -252,7 +304,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
   return (
     <div className="flex flex-col gap-2" {...drop}>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-        <Tile active={!value} onClick={() => onChange("")} label={t("appsettings.backdrop.noPicture")}>
+        <Tile active={!value && !local} onClick={() => pick("")} label={t("appsettings.backdrop.noPicture")}>
           <span className="grid size-full place-items-center bg-muted text-muted-foreground">
             <ImageOffIcon className="size-5" />
           </span>
@@ -289,12 +341,44 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
             )}
           </motion.button>
         )}
+        {device && (
+          <motion.button
+            type="button"
+            onClick={() => deviceInput.current?.click()}
+            disabled={keeping}
+            title={t("appsettings.backdrop.deviceHint")}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.95 }}
+            transition={SPRING}
+            className="relative grid aspect-video place-items-center overflow-hidden rounded-xl border-2 border-dashed text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
+          >
+            <span className="flex flex-col items-center gap-1 px-1 text-center text-[0.65rem] font-extrabold tracking-wide uppercase">
+              {keeping ? <Loader2Icon className="size-5 animate-spin" /> : <FilmIcon className="size-5" />}
+              {t("appsettings.backdrop.fromDevice")}
+            </span>
+          </motion.button>
+        )}
+        {local && (
+          <motion.div key={local.id} initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={SPRING} className="group relative">
+            <Tile active onClick={() => {}} label={local.name || t("appsettings.backdrop.fromDevice")}>
+              <DeviceThumb file={local} />
+            </Tile>
+            <button
+              type="button"
+              onClick={() => device?.onChange(null)}
+              title={t("appsettings.backdrop.deviceRemove")}
+              className="absolute top-1 right-1 flex items-center gap-1 rounded-full bg-background/90 px-1.5 py-1 text-[0.65rem] font-bold text-destructive opacity-0 shadow transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+            >
+              <Trash2Icon className="size-3" />
+            </button>
+          </motion.div>
+        )}
         <AnimatePresence initial={false}>
           {shown.map((url) => {
             const src = shownPicture(url);
             return (
               <motion.div key={url} layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={SPRING} className="group relative">
-                <Tile active={value === url} onClick={() => onChange(url)} label={t("appsettings.backdrop.usePicture")}>
+                <Tile active={!local && value === url} onClick={() => pick(url)} label={t("appsettings.backdrop.usePicture")}>
                   {src ? (
                     <img src={src} alt="" loading="lazy" draggable={false} className="size-full object-cover transition-transform duration-500 group-hover:scale-105" />
                   ) : (
@@ -321,6 +405,7 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
           })}
         </AnimatePresence>
       </div>
+      {local && <p className="truncate text-xs text-muted-foreground">{t("appsettings.backdrop.deviceInUse", { name: local.name || "…" })}</p>}
       {!instanceKey && <p className="text-xs text-muted-foreground">{t("appsettings.backdrop.needInstance")}</p>}
       <AnimatePresence>
         {error && (
@@ -330,7 +415,26 @@ function PictureLibrary({ instanceKey, value, onChange }: { instanceKey?: string
         )}
       </AnimatePresence>
       <input ref={input} type="file" accept={PICTURE_TYPES.join(",")} hidden onChange={(e) => (void add(e.target.files?.[0]), (e.target.value = ""))} />
+      {device && <input ref={deviceInput} type="file" accept={BACKDROP_FILE_ACCEPT} hidden onChange={(e) => (void keep(e.target.files?.[0]), (e.target.value = ""))} />}
     </div>
+  );
+}
+
+/** A device file's first frame (or the picture itself), drawn from this browser's copy. */
+function DeviceThumb({ file }: { file: BackdropFile }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void backdropFileUrl(file.id).then((u) => live && setUrl(u));
+    return () => {
+      live = false;
+    };
+  }, [file.id]);
+  if (!url) return <span className="grid size-full place-items-center bg-muted text-muted-foreground"><FilmIcon className="size-5" /></span>;
+  return file.kind === "video" ? (
+    <video src={url} muted playsInline preload="metadata" className="size-full object-cover" />
+  ) : (
+    <img src={url} alt="" draggable={false} className="size-full object-cover" />
   );
 }
 

@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import { COLOR_VISIONS, colorVisionMatrix, feColorMatrix, highContrastTokens, sealColors, type ColorVision } from "@/lib/accessibility";
 import { FRAME_RATES, HEIGHTS } from "@/lib/camera-quality";
 import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
+import { sanitizeBackdropFile, type BackdropFile } from "@/lib/device-backdrop";
+import { sweepBackdropFiles } from "@/lib/backdrop-files";
 import { loadFontFile, sweepFontFiles } from "@/lib/font-files";
 import { DEFAULT_FONT, fontStack, sanitizeFont, type FontPick } from "@/lib/fonts";
 import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
@@ -45,6 +47,8 @@ export type Prefs = {
   customThemes: CustomTheme[];
   /** The picture and effect behind the app, under themes that don't bring their own. */
   backdrop: Backdrop;
+  /** A video or picture from this device behind the app instead of the backdrop's picture; it stays on this device. */
+  backdropFile: BackdropFile | null;
   density: Density;
   messageDisplay: MessageDisplay;
   /** Message text size, in pixels. */
@@ -145,6 +149,7 @@ export const DEFAULT_PREFS: Prefs = {
   darkTheme: "yoru",
   customThemes: [],
   backdrop: DEFAULT_BACKDROP,
+  backdropFile: null,
   density: "default",
   messageDisplay: "cozy",
   chatFontSize: 15,
@@ -245,6 +250,7 @@ function sanitize(p: Prefs): Prefs {
     ...p,
     customThemes,
     backdrop: sanitizeBackdrop(p.backdrop),
+    backdropFile: sanitizeBackdropFile(p.backdropFile),
     theme: themeId(p.theme, "sakura"),
     lightTheme: themeId(p.lightTheme, d.lightTheme),
     darkTheme: themeId(p.darkTheme, d.darkTheme),
@@ -384,6 +390,7 @@ function store(changes: Partial<Prefs>) {
   }
   applyPrefs();
   emit();
+  if ("backdropFile" in changes) void sweepBackdropFiles(prefs.backdropFile ? [prefs.backdropFile.id] : []);
   if ("font" in changes || "codeFont" in changes) void sweepFontFiles([prefs.font, prefs.codeFont].flatMap((f) => (f.kind === "file" ? [f.id] : [])));
 }
 
@@ -415,6 +422,8 @@ export function activeTheme(p: Prefs = prefs): Theme | CustomTheme {
  */
 let contrasted: { from: ThemeTokens; to: ThemeTokens } | null = null;
 let solid: { from: Backdrop; to: Backdrop } | null = null;
+/** The app's backdrop with this device's file in it, made again only when either changes. */
+let withFile: { from: Backdrop; file: BackdropFile; to: Backdrop } | null = null;
 
 /** The theme as it's painted: the active one, in high contrast when that's on. */
 export function shownTheme(p: Prefs = prefs): Theme | CustomTheme {
@@ -425,10 +434,19 @@ export function shownTheme(p: Prefs = prefs): Theme | CustomTheme {
   return { ...theme, variant: { ...theme.variant, tokens: contrasted.to } };
 }
 
-/** What's behind the app now: the theme's own backdrop, or the app's; under solid panels in high contrast. */
+/**
+ * What's behind the app now: the theme's own backdrop, or the app's (with
+ * this device's video or picture, when one is picked); under solid panels in
+ * high contrast.
+ */
 export function activeBackdrop(p: Prefs = prefs): Backdrop {
   const theme = activeTheme(p);
-  const backdrop = ("backdrop" in theme && theme.backdrop) || p.backdrop;
+  const own = "backdrop" in theme && theme.backdrop;
+  let backdrop = own || p.backdrop;
+  if (!own && p.backdropFile) {
+    if (withFile?.from !== backdrop || withFile.file !== p.backdropFile) withFile = { from: backdrop, file: p.backdropFile, to: { ...backdrop, file: p.backdropFile } };
+    backdrop = withFile.to;
+  }
   if (!p.highContrast) return backdrop;
   if (solid?.from !== backdrop) solid = { from: backdrop, to: { ...backdrop, panels: 100 } };
   return solid.to;
