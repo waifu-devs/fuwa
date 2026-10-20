@@ -6,6 +6,7 @@ import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import { isMessage, lineText, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
+import { PartnerDot } from "@/components/Presence";
 import { useLayout } from "@/components/Shell";
 import { Count } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
@@ -155,9 +156,10 @@ const DmLink = memo(function DmLink({ instanceKey, conversation, enter }: { inst
       >
         <span className="relative shrink-0">
           <UserAvatar user={other} className="size-8 text-xs transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3" />
-          <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full bg-card text-seal-icon ring-2 ring-card">
+          <span className="absolute -bottom-0.5 -left-0.5 grid size-3.5 place-items-center rounded-full bg-card text-seal-icon ring-2 ring-card">
             <LockKeyholeIcon className="size-2.5 transition-transform duration-300 group-hover:scale-125" />
           </span>
+          <PartnerDot instanceKey={instanceKey} userId={other?.id} className="absolute -right-0.5 -bottom-0.5" />
         </span>
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate font-bold transition-transform duration-300 group-hover:translate-x-0.5", unread > 0 && "text-foreground")}>

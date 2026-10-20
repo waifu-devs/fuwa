@@ -75,6 +75,7 @@ import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
 import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
 import { UserAvatar } from "@/components/Icons";
+import { PartnerDot } from "@/components/Presence";
 import { SwapText } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
@@ -144,7 +145,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             <ChevronLeftIcon className="size-5" />
           </button>
         )}
-        <PartnerName partner={partner} />
+        <PartnerName instanceKey={instanceKey} partner={partner} />
         <span className="flex-1" />
         {conversation && status === "ready" && pinsHere && (
           <DmPinsButton
@@ -181,7 +182,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
 }
 
 /** Who the conversation is with, in the header; it slides over when that changes. */
-function PartnerName({ partner }: { partner: User | undefined }) {
+function PartnerName({ instanceKey, partner }: { instanceKey: string; partner: User | undefined }) {
   const { t } = useI18n();
   return (
     <AnimatePresence mode="popLayout" initial={false}>
@@ -193,7 +194,10 @@ function PartnerName({ partner }: { partner: User | undefined }) {
         transition={SPRING}
         className="flex min-w-0 shrink items-center gap-2.5"
       >
-        <UserAvatar user={partner} className="size-8 text-xs" />
+        <span className="relative shrink-0">
+          <UserAvatar user={partner} className="size-8 text-xs" />
+          <PartnerDot instanceKey={instanceKey} userId={partner?.id} className="absolute -right-0.5 -bottom-0.5" />
+        </span>
         <span className="min-w-0">
           <h1 className="truncate leading-tight font-extrabold">
             <SwapText className="truncate align-bottom">{partner ? displayName(partner) : t("dms-calls.dm.view.untitled")}</SwapText>

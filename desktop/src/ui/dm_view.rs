@@ -1082,6 +1082,9 @@ impl FuwaApp {
         let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
         let partner =
             conversation.as_ref().and_then(|c| c.users.iter().find(|u| u.id != me_id).or(c.users.first()).cloned());
+        let dot = partner.as_ref().and_then(|u| {
+            self.core.shared.read(|s| s.instance(key).and_then(|i| crate::ui::presence::partner_status(i, &u.id)))
+        });
         let ready = status == DmStatus::Ready;
         let header = div()
             .h(px(56.0))
@@ -1092,7 +1095,7 @@ impl FuwaApp {
             .px(px(16.0))
             .border_b_1()
             .border_color(p.border)
-            .child(partner_name(partner.as_ref(), &p, window, cx))
+            .child(partner_name(partner.as_ref(), dot, &p, window, cx))
             .child(div().flex_1())
             .when(conversation.is_some() && ready && pins_here, |el| {
                 let open = self.pins.is_some();
@@ -1251,11 +1254,22 @@ pub(crate) fn placed(el: AnyElement, start: bool, last: bool) -> AnyElement {
 }
 
 /// Who the conversation is with, in the header; it slides up when that changes.
-fn partner_name(partner: Option<&pb::User>, p: &Palette, window: &mut Window, cx: &mut gpui_kit::App) -> AnyElement {
+/// `dot`: their presence dot, while they show one.
+fn partner_name(
+    partner: Option<&pb::User>,
+    dot: Option<pb::PresenceStatus>,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> AnyElement {
     let key = partner.map_or_else(|| "none".to_owned(), |u| u.id.clone());
     let name = partner.map_or_else(|| t("dms-calls.dm.view.untitled"), user_name);
+    let face =
+        div().relative().flex_none().child(avatar(partner, 32.0, p)).when_some(dot, |el, status| {
+            el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, p.card.into(), p))
+        });
     motion::rise(
-        div().flex().min_w_0().flex_shrink(1.0).items_center().gap(px(10.0)).child(avatar(partner, 32.0, p)).child(
+        div().flex().min_w_0().flex_shrink(1.0).items_center().gap(px(10.0)).child(face).child(
             div()
                 .min_w_0()
                 .flex()

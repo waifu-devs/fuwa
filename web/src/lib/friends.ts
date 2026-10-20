@@ -68,6 +68,10 @@ export function applyFriendEvent(list: Friend[], event: FriendEvent): Friend[] {
   }
 }
 
+/** Whether someone is a friend who has a fuwa app open, as friends are told (never for someone who hides it). */
+export const friendOnline = (list: Friend[], userId: string | undefined) =>
+  !!userId && list.some((f) => f.user?.id === userId && f.state === FRIEND && f.online);
+
 /** Who goes under each tab, filtered by a search. */
 export function inTab(list: Friend[], tab: FriendsTab, query = "", now = Date.now()): Friend[] {
   const q = query.trim().toLocaleLowerCase().replace(/^@/, "");

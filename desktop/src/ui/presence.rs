@@ -27,6 +27,23 @@ pub fn shown(presence: Option<&pb::Presence>) -> pb::PresenceStatus {
     }
 }
 
+/// The dot of someone you have a conversation with (the web's `PartnerDot`):
+/// their presence, or online while friends say so, since a friend who shares
+/// no server with you never sends you their presence. None while they're
+/// offline, or on an instance that tells neither.
+pub fn partner_status(i: &crate::core::store::InstanceState, user_id: &str) -> Option<pb::PresenceStatus> {
+    let friend =
+        i.friends.list.iter().any(|f| {
+            f.state() == pb::FriendState::Friend && f.online && f.user.as_ref().is_some_and(|u| u.id == user_id)
+        });
+    let status = i.people.as_ref().map_or(pb::PresenceStatus::Offline, |people| shown(people.get(user_id)));
+    match status {
+        pb::PresenceStatus::Offline if friend => Some(pb::PresenceStatus::Online),
+        pb::PresenceStatus::Offline => None,
+        status => Some(status),
+    }
+}
+
 fn kind(activity: &pb::Activity) -> pb::ActivityKind {
     match activity.kind() {
         pb::ActivityKind::Unspecified => pb::ActivityKind::Playing,
@@ -381,7 +398,40 @@ pub fn custom_status(user: &pb::User, now: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    #[test]
+    fn partners_show_their_presence_or_online_as_friends() {
+        let mut i = crate::core::store::InstanceState::new("k", "https://k");
+        let friend = |id: &str, state: pb::FriendState, online: bool| pb::Friend {
+            user: Some(pb::User { id: id.into(), ..Default::default() }),
+            state: state as i32,
+            online,
+            ..Default::default()
+        };
+        i.friends.list = vec![
+            friend("ann", pb::FriendState::Friend, true),
+            friend("bo", pb::FriendState::Friend, false),
+            friend("cy", pb::FriendState::Incoming, true),
+        ];
+        // An instance without presence: friends alone say who's online.
+        assert_eq!(partner_status(&i, "ann"), Some(pb::PresenceStatus::Online));
+        assert_eq!(partner_status(&i, "bo"), None);
+        assert_eq!(partner_status(&i, "cy"), None);
+        let here = |id: &str, status: pb::PresenceStatus| {
+            (id.to_owned(), pb::Presence { user_id: id.into(), status: status as i32, ..Default::default() })
+        };
+        i.people =
+            Some(HashMap::from([here("ann", pb::PresenceStatus::DoNotDisturb), here("dee", pb::PresenceStatus::Idle)]));
+        assert_eq!(partner_status(&i, "ann"), Some(pb::PresenceStatus::DoNotDisturb));
+        assert_eq!(partner_status(&i, "dee"), Some(pb::PresenceStatus::Idle));
+        assert_eq!(partner_status(&i, "bo"), None);
+        // A friend whose presence doesn't reach you (no server in common).
+        i.people = Some(HashMap::new());
+        assert_eq!(partner_status(&i, "ann"), Some(pb::PresenceStatus::Online));
+    }
 
     #[test]
     fn clocks_read_like_the_web() {

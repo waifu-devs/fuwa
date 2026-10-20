@@ -63,11 +63,12 @@ fn plain_id(id: &str) -> bool {
 /// What's on screen on one instance: the channel open (a thread open beside
 /// it comes with it), the member list's rows in sight and the authors of
 /// the messages loaded there, newest first. In a conversation, the people in
-/// it. You aren't named: your own presence isn't news. The people are picked
-/// in that order (up to the most the instance takes) and sent sorted.
+/// it. Then the people in the sidebar's conversations in sight. You aren't
+/// named: your own presence isn't news. The people are picked in that order
+/// (up to the most the instance takes) and sent sorted.
 pub fn choose_focus(store: &Store, key: &str) -> pb::Focus {
     let mut focus = pb::Focus::default();
-    let (Some(f), Some(i)) = (store.focus.as_ref().filter(|f| f.instance == key), store.instance(key)) else {
+    let Some(i) = store.instance(key) else {
         return focus;
     };
     let me = i.me.as_ref().map(|m| m.id.as_str());
@@ -77,9 +78,11 @@ pub fn choose_focus(store: &Store, key: &str) -> pb::Focus {
             focus.user_ids.push(id.to_owned());
         }
     };
-    let server = i.channels.iter().find(|(_, list)| list.iter().any(|c| c.id == f.channel)).map(|(sid, _)| sid);
-    match server {
-        Some(sid) => {
+    let open = store.focus.as_ref().filter(|f| f.instance == key);
+    let server = open.and_then(|f| i.channels.iter().find(|(_, list)| list.iter().any(|c| c.id == f.channel)));
+    match (open, server.map(|(sid, _)| sid)) {
+        (None, _) => {}
+        (Some(f), Some(sid)) => {
             if let Some(view) = store.in_view.as_ref().filter(|v| v.instance == key && v.server == *sid) {
                 for id in &view.people {
                     add(id);
@@ -95,13 +98,16 @@ pub fn choose_focus(store: &Store, key: &str) -> pb::Focus {
                 focus.channel_ids.push(f.channel.clone());
             }
         }
-        None => {
+        (Some(f), None) => {
             if let Some(c) = i.dms.conversations.iter().find(|c| c.id == f.channel) {
                 for user in &c.users {
                     add(&user.id);
                 }
             }
         }
+    }
+    for (_, id) in store.dms_in_view.iter().filter(|(k, _)| k == key) {
+        add(id);
     }
     focus.channel_ids.truncate(MAX_CHANNELS);
     // In a steady order, so someone already named writing again isn't a new focus.
@@ -617,6 +623,29 @@ mod tests {
         let crowd = (0..MAX_PEOPLE + 50).map(|n| format!("u{n}")).collect();
         store.in_view = Some(InView { instance: "k".into(), server: "s".into(), people: crowd });
         assert_eq!(choose_focus(&store, "k").user_ids.len(), MAX_PEOPLE);
+    }
+
+    #[test]
+    fn people_in_the_conversations_in_sight_come_last() {
+        let mut store = Store::default();
+        store.instances.insert("k".into(), instance());
+        // Conversations in the sidebar with nothing open: their people.
+        store.dms_in_view = vec![
+            ("k".into(), "zed".into()),
+            ("other".into(), "ann".into()),
+            ("k".into(), "me".into()),
+            ("k".into(), "bo".into()),
+        ];
+        assert_eq!(choose_focus(&store, "k").user_ids, ["bo", "zed"]);
+        // After what's open, and never past the most the instance takes.
+        let mut i = instance();
+        let crowd: Vec<_> = (0..MAX_PEOPLE).map(|n| message(&format!("{n:03}"), &format!("u{n:03}"))).collect();
+        i.messages.insert("c1".into(), ChannelMessages { items: crowd, ..Default::default() });
+        store.instances.insert("k".into(), i);
+        store.focus = Some(Focus { instance: "k".into(), channel: "c1".into(), thread: None });
+        let focus = choose_focus(&store, "k");
+        assert_eq!(focus.user_ids.len(), MAX_PEOPLE);
+        assert!(!focus.user_ids.contains(&"zed".to_owned()));
     }
 
     #[test]
