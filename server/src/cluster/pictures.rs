@@ -639,6 +639,7 @@ pub async fn finish_upload(
 fn kinds(purpose: pb::MediaPurpose) -> &'static [&'static str] {
     match purpose {
         pb::MediaPurpose::Attachment => crate::media::ATTACHMENT_TYPES,
+        pb::MediaPurpose::Sound => &[crate::media::OGG_OPUS],
         _ => crate::media::PICTURE_TYPES,
     }
 }
