@@ -744,7 +744,6 @@
   "media.cantPlay": "O app não consegue reproduzir esse tipo de arquivo. Salve-o para reproduzir.",
   "media.broken": "Não foi possível ler este arquivo.",
   "media.noSpeakers": "Não foi possível abrir os alto-falantes.",
-  "agents.title": "Agentes",
   "agents.about": "Bots que qualquer pessoa que gerencia um servidor pode adicionar.",
   "agents.showAll": {
     "one": "Mostrar mais {count} agente",

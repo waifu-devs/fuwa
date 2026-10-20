@@ -722,7 +722,6 @@
   "media.cantPlay": "這類檔案無法在 App 中播放。請儲存後再播放。",
   "media.broken": "無法讀取這個檔案。",
   "media.noSpeakers": "無法開啟喇叭。",
-  "agents.title": "代理",
   "agents.about": "任何管理伺服器的人都能加入的機器人。",
   "agents.showAll": {
     "other": "顯示全部 {count} 個代理"

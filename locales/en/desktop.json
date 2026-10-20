@@ -744,7 +744,6 @@
   "media.cantPlay": "This kind of file can't play in the app. Save it to play it.",
   "media.broken": "This file couldn't be read.",
   "media.noSpeakers": "Couldn't open the speakers.",
-  "agents.title": "Agents",
   "agents.about": "Bots anyone who manages a server can add.",
   "agents.showAll": {
     "one": "Show {count} more agent",

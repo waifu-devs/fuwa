@@ -744,7 +744,6 @@
   "media.cantPlay": "Diese Art von Datei kann die App nicht abspielen. Speichere sie, um sie abzuspielen.",
   "media.broken": "Diese Datei konnte nicht gelesen werden.",
   "media.noSpeakers": "Die Lautsprecher konnten nicht geöffnet werden.",
-  "agents.title": "Agenten",
   "agents.about": "Bots, die alle hinzufügen können, die einen Server verwalten.",
   "agents.showAll": {
     "one": "{count} weiteren Agenten zeigen",

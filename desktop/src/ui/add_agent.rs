@@ -22,7 +22,7 @@ use crate::core::join::{self, DiscoveredAgents};
 use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav};
-use crate::ui::instance_home::{capitalized, filled_button, inline_markdown, outline_button, shake, spinner};
+use crate::ui::instance_home::{capitalized, filled_button, inline_markdown, outline_button, shake, shimmer, spinner};
 use crate::ui::motion;
 use crate::ui::text::{TIGHT, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, radius_2xl, radius_3xl, radius_xl};
@@ -40,6 +40,8 @@ pub struct Agents {
     browse: HashMap<String, Result<DiscoveredAgents, String>>,
     /// Instances whose Browse shows every agent, not just the first rows.
     all: HashSet<String>,
+    /// Instances whose Browse is on its Agents tab rather than Servers.
+    pub(crate) tab: HashSet<String>,
     /// What profile cards learned by "key|agent": the agent when you may add
     /// it, None while it's asked or when you may not.
     listings: HashMap<String, Option<pb::AgentListing>>,
@@ -495,27 +497,57 @@ impl FuwaApp {
         width: f32,
         cols: u16,
         p: &Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let found = match self.home.agents.browse.get(key)? {
-            Ok(found) if !found.agents.is_empty() => found.clone(),
-            _ => return None,
+    ) -> AnyElement {
+        let found = match self.home.agents.browse.get(key) {
+            None => {
+                return div()
+                    .flex()
+                    .gap(px(16.0))
+                    .children(
+                        (0..usize::from(cols))
+                            .map(|n| div().flex_1().child(shimmer(176.0, radius_3xl(), p, window, n))),
+                    )
+                    .into_any_element();
+            }
+            Some(Err(error)) => {
+                return div().text_sm().text_color(p.muted_foreground).child(capitalized(error)).into_any_element();
+            }
+            Some(Ok(found)) => found.clone(),
         };
-        let (featured, rest) = join::agents_split(&found);
+        let query = self.home.search.read(cx).value().to_string();
+        let (featured, rest) = join::agents_split(&found, &query);
         let (featured, rest): (Vec<pb::AgentListing>, Vec<pb::AgentListing>) =
             (featured.into_iter().cloned().collect(), rest.into_iter().cloned().collect());
-        let label = div()
-            .mb(px(12.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(px(12.0))
-            .line_height(px(16.0))
-            .text_color(p.muted_foreground)
-            .child(icon("bot").size(px(14.0)).text_color(p.primary))
-            .child(div().font_weight(FontWeight::BOLD).child(tracked(t("desktop.agents.title").to_uppercase(), WIDE)))
-            .child(div().min_w_0().truncate().child(format!("· {}", t("desktop.agents.about"))));
-        let mut section = div().mt(px(32.0)).flex().flex_col().child(label);
+        if featured.is_empty() && rest.is_empty() {
+            let none = found.agents.is_empty();
+            return div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .p(px(40.0))
+                .rounded(radius_3xl())
+                .border_1()
+                .border_dashed()
+                .border_color(p.border)
+                .text_center()
+                .when(none, |el| el.child(icon("bot").size(px(24.0)).mb(px(8.0)).text_color(p.primary)))
+                .child(div().font_weight(FontWeight::BOLD).child(if none {
+                    t("workspace.agents.noneTitle")
+                } else {
+                    t("workspace.home.noMatch")
+                }))
+                .child(div().mt(px(4.0)).text_sm().text_color(p.muted_foreground).child(if none {
+                    t("workspace.agents.none")
+                } else {
+                    t("workspace.home.tryAnother")
+                }))
+                .into_any_element();
+        }
+        let about = div().mb(px(16.0)).text_sm().text_color(p.muted_foreground).child(t("desktop.agents.about"));
+        let mut section = div().flex().flex_col().child(about);
         // The featured ones: two to a row where there's room.
         if !featured.is_empty() {
             let per_row = if cols >= 2 { 2 } else { 1 };
@@ -574,9 +606,7 @@ impl FuwaApp {
                 );
             }
         }
-        Some(
-            motion::rise(section, SharedString::from(format!("agents|{key}")), Duration::ZERO, 12.0).into_any_element(),
-        )
+        motion::rise(section, SharedString::from(format!("agents|{key}")), Duration::ZERO, 12.0).into_any_element()
     }
 
     /// An agent in Browse: a featured one bigger, with more of what it's

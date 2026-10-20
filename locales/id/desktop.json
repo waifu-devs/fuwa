@@ -722,7 +722,6 @@
   "media.cantPlay": "Jenis file ini tidak bisa diputar di aplikasi. Simpan untuk memutarnya.",
   "media.broken": "File ini tidak dapat dibaca.",
   "media.noSpeakers": "Tidak dapat membuka speaker.",
-  "agents.title": "Agen",
   "agents.about": "Bot yang bisa ditambahkan oleh siapa pun yang mengelola server.",
   "agents.showAll": {
     "other": "Tampilkan semua {count} agen"

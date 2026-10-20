@@ -18,23 +18,42 @@ import { cn } from "@/lib/utils";
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 /**
- * Browse's agents: the instance's public ones, those its admins feature
- * first and big, then the rest, in the most servers first. Each adds to a
- * server you manage in a tap. Hidden where the instance has none.
+ * Browse's Agents tab: the instance's public agents, those its admins
+ * feature first and big, then the rest, in the most servers first. Each adds
+ * to a server you manage in a tap.
  */
 export function BrowseAgents({ instanceKey, query }: { instanceKey: string; query: string }) {
   const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const here = instanceHas(inst?.node?.versions, "agent-discovery");
   const [found, setFound] = useState<{ agents: AgentListing[]; featured: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const managed = useManagedServers(instanceKey).length > 0;
 
   useEffect(() => {
     if (!here || !inst?.me) return;
-    run(discoverAgents(instanceKey)).then(setFound, () => setFound(null));
+    run(discoverAgents(instanceKey)).then(setFound, (e) => setError(e.message));
   }, [instanceKey, here, inst?.me]);
 
-  if (!found?.agents.length) return null;
+  if (error) return <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>;
+  if (!found)
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((n) => (
+          <div key={n} className="shimmer h-44 rounded-3xl" />
+        ))}
+      </div>
+    );
+  if (!found.agents.length)
+    return (
+      <div className="flex flex-col items-center gap-2 rounded-3xl border border-dashed p-10 text-center">
+        <span className="grid size-12 place-items-center rounded-2xl bg-violet-500/15 text-violet-500">
+          <BotIcon className="size-6" />
+        </span>
+        <p className="font-extrabold">{t("workspace.agents.noneTitle")}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">{t("workspace.agents.none")}</p>
+      </div>
+    );
   const q = query.trim().toLowerCase().replace(/^@/, "");
   const matching = found.agents.filter((a) => {
     const user = a.user!;
@@ -45,20 +64,8 @@ export function BrowseAgents({ instanceKey, query }: { instanceKey: string; quer
   const shown = matching.filter((a) => !featured.has(a.user!.id));
 
   return (
-    <section className="mt-12">
-      <div className="mb-4 flex items-center gap-2">
-        <motion.span
-          animate={{ rotate: [0, -10, 10, 0] }}
-          transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 3 }}
-          className="grid size-8 place-items-center rounded-xl bg-violet-500/15 text-violet-500"
-        >
-          <BotIcon className="size-4" />
-        </motion.span>
-        <div>
-          <h2 className="text-lg font-extrabold">{t("workspace.agents.browse")}</h2>
-          <p className="text-sm text-muted-foreground">{managed ? t("workspace.agents.browseAbout") : t("workspace.agents.browseAboutNoServers")}</p>
-        </div>
-      </div>
+    <section>
+      <p className="mb-4 text-sm text-muted-foreground">{managed ? t("workspace.agents.browseAbout") : t("workspace.agents.browseAboutNoServers")}</p>
       {matching.length === 0 && <p className="rounded-3xl border border-dashed p-6 text-center text-sm text-muted-foreground">{t("workspace.home.noMatch")}</p>}
       <AnimatePresence initial={false}>
         {shownFeatured.length > 0 && (

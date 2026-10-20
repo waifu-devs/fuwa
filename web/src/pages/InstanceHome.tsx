@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, ChevronLeftIcon, PlusIcon, SearchIcon, SparklesIcon, StarIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, BotIcon, ChevronLeftIcon, PlusIcon, SearchIcon, SparklesIcon, StarIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -16,6 +16,8 @@ import { JoinButton } from "@/components/join/JoinButton";
 import { ServerBanner } from "@/components/join/Banner";
 import { ServerDoor } from "@/components/join/ServerDoor";
 import { accentVars } from "@/lib/banner";
+import { instanceHas } from "@/lib/compat";
+import { SPRING } from "@/lib/motion";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SwapText, Tilt } from "@/components/motion";
 import { Private, useAddress, usePrivateField } from "@/components/Private";
@@ -104,6 +106,10 @@ function Browse({ instanceKey }: { instanceKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  // Agents get their own tab where the instance lists them; servers come first.
+  const agentsHere = instanceHas(inst.node?.versions, "agent-discovery");
+  const [tab, setTab] = useState<"servers" | "agents">("servers");
+  const showing = agentsHere ? tab : "servers";
 
   useEffect(() => {
     if (!inst.me) return;
@@ -124,16 +130,56 @@ function Browse({ instanceKey }: { instanceKey: string }) {
       <HaveInvite instanceKey={instanceKey} />
 
       <div className="mt-8 mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-extrabold">{t("workspace.home.browse")}</h2>
+        {agentsHere ? (
+          <BrowseTabs instanceKey={instanceKey} tab={showing} onTab={setTab} />
+        ) : (
+          <h2 className="text-lg font-extrabold">{t("workspace.home.browse")}</h2>
+        )}
         <div className="relative sm:w-72">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("workspace.home.search")} className="h-10 rounded-xl pl-9" />
         </div>
       </div>
 
-      <BrowseResults instanceKey={instanceKey} loaded={found !== null} error={error} searching={!!q} featured={shownFeatured} shown={shown} />
-      <BrowseAgents instanceKey={instanceKey} query={query} />
+      {showing === "servers" ? (
+        <BrowseResults instanceKey={instanceKey} loaded={found !== null} error={error} searching={!!q} featured={shownFeatured} shown={shown} />
+      ) : (
+        <BrowseAgents instanceKey={instanceKey} query={query} />
+      )}
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={instanceKey} />
+    </div>
+  );
+}
+
+/** What Browse lists: the instance's servers, or its public agents. */
+function BrowseTabs({ instanceKey, tab, onTab }: { instanceKey: string; tab: "servers" | "agents"; onTab: (tab: "servers" | "agents") => void }) {
+  const { t } = useI18n();
+  const tabs = [
+    { id: "servers" as const, label: t("workspace.home.servers"), icon: <UsersIcon className="size-4" /> },
+    { id: "agents" as const, label: t("workspace.agents.tab"), icon: <BotIcon className="size-4" /> },
+  ];
+  return (
+    <div role="tablist" aria-label={t("workspace.home.browseTabs")} className="flex w-fit gap-1 rounded-2xl bg-muted/60 p-1">
+      {tabs.map((x) => {
+        const on = x.id === tab;
+        return (
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => onTab(x.id)}
+            className={cn(
+              "relative flex h-9 items-center gap-1.5 rounded-xl px-4 text-sm font-extrabold transition-colors active:scale-[0.97]",
+              on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {on && <motion.span layoutId={`browse-tab-${instanceKey}`} transition={SPRING} className="absolute inset-0 rounded-xl border bg-background shadow-sm" />}
+            <span className="relative">{x.icon}</span>
+            <span className="relative">{x.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
