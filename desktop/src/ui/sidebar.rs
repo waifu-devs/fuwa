@@ -48,7 +48,11 @@ impl FuwaApp {
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let (header, body) = match self.nav.clone() {
-            Nav::Server { key, server } => self.server_sidebar(&key, &server, window, cx),
+            Nav::Server { key, server } => {
+                // No conversations in sight.
+                self.core.set_dms_in_view(&[]);
+                self.server_sidebar(&key, &server, window, cx)
+            }
             // A conversation or Friends on an instance shows that instance's sidebar, as on the web.
             Nav::Home { dm: Some((key, _)) } | Nav::Friends { key } => self.instance_sidebar(&key, window, cx),
             Nav::Home { dm: None } => self.dm_sidebar(None, window, cx),
@@ -1038,6 +1042,7 @@ impl FuwaApp {
             other: Option<pb::User>,
             instance: String,
             unread: u32,
+            dot: Option<pb::PresenceStatus>,
         }
         type Status = (String, DmStatus, Option<String>);
         /// An instance's Friends row: its key, its name, and requests waiting.
@@ -1055,10 +1060,12 @@ impl FuwaApp {
                 let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
                 // Conversations with people you blocked stay out of sight until you unblock them.
                 for c in i.dms.conversations.iter().filter(|c| !friends::hidden(i, c)) {
+                    let other = c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned());
                     rows.push(Row {
                         key: i.key.clone(),
                         id: c.id.clone(),
-                        other: c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned()),
+                        dot: other.as_ref().and_then(|u| crate::ui::presence::partner_status(i, &u.id)),
+                        other,
                         instance: i.name(),
                         unread: i.dms.unread.get(&c.id).copied().unwrap_or(0),
                     });
@@ -1125,6 +1132,13 @@ impl FuwaApp {
         let keys: Vec<SharedString> = rows.iter().map(|r| format!("{}|{}", r.key, r.id).into()).collect();
         let plan = crate::ui::windowed::plan("sidebar-dms", &sidebar_scroll(), &keys, 0.0, 48.0);
         let mut built = Vec::new();
+        // The people in the conversations in sight are on screen (`live::choose_focus`).
+        let in_sight: Vec<(String, String)> = plan
+            .rows()
+            .into_iter()
+            .filter_map(|n| Some((rows[n].key.clone(), rows[n].other.as_ref()?.id.clone())))
+            .collect();
+        self.core.set_dms_in_view(&in_sight);
         for n in plan.rows() {
             let row = &rows[n];
             let active = open.as_ref().is_some_and(|(k, id)| *k == row.key && *id == row.id);
@@ -1160,7 +1174,12 @@ impl FuwaApp {
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover))
                         .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
-                        .child(avatar(row.other.as_ref(), 32.0, &p))
+                        .child(div().relative().flex_none().child(avatar(row.other.as_ref(), 32.0, &p)).when_some(
+                            row.dot,
+                            |el, status| {
+                                el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, p.card.into(), &p))
+                            },
+                        ))
                         .child(
                             div()
                                 .flex_1()
@@ -1259,6 +1278,7 @@ impl FuwaApp {
             line: String,
             unread: u32,
             calling: bool,
+            dot: Option<pb::PresenceStatus>,
         }
         let (name, url, connection, servers, admin, friends_on, waiting, dms, dm_status) =
             self.core.shared.read(|s| match s.instance(key) {
@@ -1269,9 +1289,15 @@ impl FuwaApp {
                         .conversations
                         .iter()
                         .filter(|c| !friends::hidden(i, c))
-                        .map(|c| Dm {
+                        .map(|c| {
+                            let other =
+                                c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned());
+                            (c, other)
+                        })
+                        .map(|(c, other)| Dm {
                             id: c.id.clone(),
-                            other: c.users.iter().find(|u| u.id != me).cloned().or_else(|| c.users.first().cloned()),
+                            dot: other.as_ref().and_then(|u| crate::ui::presence::partner_status(i, &u.id)),
+                            other,
                             line: preview(i.dms.items.get(&c.id).map(|v| v.as_slice()), &me),
                             unread: i.dms.unread.get(&c.id).copied().unwrap_or(0),
                             calling: i.dms.calls.get(&c.id).is_some_and(|call| !call.participants.is_empty()),
@@ -1548,6 +1574,10 @@ impl FuwaApp {
             Nav::Home { dm: Some((k, id)) } if k == key => Some(id.clone()),
             _ => None,
         };
+        // The people in its conversations are on screen (`live::choose_focus`).
+        let in_sight: Vec<(String, String)> =
+            dms.iter().filter_map(|dm| Some((key.to_owned(), dm.other.as_ref()?.id.clone()))).collect();
+        self.core.set_dms_in_view(&in_sight);
         for (n, dm) in dms.iter().enumerate() {
             let active = open.as_deref() == Some(dm.id.as_str());
             let who = dm.other.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| t("common.someone"));
@@ -1618,7 +1648,7 @@ impl FuwaApp {
                             .child(
                                 div()
                                     .absolute()
-                                    .right(px(-2.0))
+                                    .left(px(-2.0))
                                     .bottom(px(-2.0))
                                     .size(px(14.0))
                                     .flex()
@@ -1633,7 +1663,10 @@ impl FuwaApp {
                                             .group_hover(group.clone(), |s| s.scale(1.25))
                                             .child(icon("lock-keyhole").size(px(10.0))),
                                     ),
-                            ),
+                            )
+                            .when_some(dm.dot, |el, status| {
+                                el.child(crate::ui::presence::avatar_dot(status, 11.2, 3.0, p.card.into(), &p))
+                            }),
                     )
                     .child(
                         div()

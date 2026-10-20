@@ -295,6 +295,9 @@ pub struct Store {
     pub focus: Option<Focus>,
     /// The member list's rows in sight, while it shows.
     pub in_view: Option<InView>,
+    /// The people in the conversations in sight in the sidebar, by instance
+    /// key and user id, for their presence dots.
+    pub dms_in_view: Vec<(String, String)>,
 }
 
 impl Store {

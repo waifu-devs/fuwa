@@ -4,9 +4,11 @@ import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { ActivityKind, type Activity } from "@/gen/fuwa/v1/presence_pb";
 import { usePresence } from "@/fuwa/presence";
+import { useFuwa } from "@/fuwa/store";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { i18n, type Key } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
+import { friendOnline } from "@/lib/friends";
 import { shownPicture } from "@/lib/shown";
 import { reportUsage } from "@/lib/reports";
 import { STATUS_LABEL, shownOf, type Shown } from "@/components/presence-status";
@@ -55,6 +57,20 @@ export function PresenceDot({
   const status = shownOf(presence);
   if (hideOffline && status === "offline") return null;
   return <StatusDot status={status} className={cn("ring-[3px] ring-card", className)} />;
+}
+
+/**
+ * The dot of someone you have a conversation with, for placing on their
+ * avatar: their presence, or online while friends say so (a friend who
+ * shares no server with you never sends you their presence). Nothing while
+ * they're offline.
+ */
+export function PartnerDot({ instanceKey, userId, className }: { instanceKey: string; userId: string | undefined; className?: string }) {
+  const presence = usePresence(instanceKey, userId);
+  const friend = useFuwa((s) => friendOnline(s.instances[instanceKey]?.friends.list ?? [], userId));
+  const status = shownOf(presence);
+  if (status === "offline" && !friend) return null;
+  return <StatusDot status={status === "offline" ? "online" : status} className={cn("ring-[3px] ring-card", className)} />;
 }
 
 /** "Playing {name}", "Listening to {name}"… by kind. */

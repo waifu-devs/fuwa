@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { Friend, FriendEvent } from "@/gen/fuwa/v1/friend_pb";
 import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
 import type { I18n } from "../i18n/i18n.ts";
-import { applyFriendEvent, BLOCKED, cleanUsername, FRIEND, inTab, INCOMING, OUTGOING, pendingLine, stateWith, waitingForYou } from "./friends.ts";
+import { applyFriendEvent, BLOCKED, cleanUsername, FRIEND, friendOnline, inTab, INCOMING, OUTGOING, pendingLine, stateWith, waitingForYou } from "./friends.ts";
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
 
@@ -63,4 +63,13 @@ test("tabs sort people out, and a search narrows them", () => {
 test("usernames are read as typed", () => {
   assert.equal(cleanUsername("  @Mika "), "mika");
   assert.equal(cleanUsername("@@rin"), "rin");
+});
+
+test("only friends with an app open count as online", () => {
+  const list = [friend("a", "ami", FRIEND, { online: true }), friend("b", "bea", FRIEND), friend("c", "cy", INCOMING, { online: true })];
+  assert.equal(friendOnline(list, "a"), true);
+  assert.equal(friendOnline(list, "b"), false);
+  assert.equal(friendOnline(list, "c"), false);
+  assert.equal(friendOnline(list, "nobody"), false);
+  assert.equal(friendOnline(list, undefined), false);
 });

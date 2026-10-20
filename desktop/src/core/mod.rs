@@ -1077,6 +1077,14 @@ impl Core {
         }
     }
 
+    /// The people in the conversations in sight in the sidebar (instance
+    /// key, user id), so their presence comes on live connections.
+    pub fn set_dms_in_view(&self, people: &[(String, String)]) {
+        if self.shared.read(|s| s.dms_in_view != people) {
+            self.shared.update(|s| s.dms_in_view = people.to_vec());
+        }
+    }
+
     /// Follows instances added from now on over their separate streams
     /// (events, direct messages, friends, presence), even where they have
     /// live connections: how apps from before those follow them, kept working
