@@ -1,33 +1,35 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { BuildingIcon, Flower2Icon, KeyRoundIcon, LinkIcon, LoaderCircleIcon, Unlink2Icon } from "lucide-react";
+import { BuildingIcon, Flower2Icon, KeyRoundIcon, LinkIcon, LoaderCircleIcon, MailIcon, MailPlusIcon, Unlink2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { ListSignInMethodsResponse } from "@/gen/fuwa/v1/account_pb";
 import type { SignInMethod } from "@/gen/fuwa/v1/types_pb";
-import { listSignInMethods, run, startProviderLink, unlinkProvider } from "@/fuwa/actions";
+import { finishEmailLink, listSignInMethods, run, startEmailLink, startProviderLink, unlinkProvider } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { SPRING } from "@/lib/motion";
-import { Private } from "@/components/Private";
+import { CodeInput } from "@/components/CodeInput";
+import { Private, usePrivateField } from "@/components/Private";
 import { ProviderMark } from "@/components/ProviderMarks";
 import { PASSWORD_MAX } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const day = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
-/** What a change to how you sign in is waiting on: linking a provider, or unlinking one. */
-type Asking = { action: "link" | "unlink"; id: string; name: string };
+/** What a change to how you sign in is waiting on: linking a provider, adding an address, or unlinking one. */
+type Asking = { action: "link" | "unlink" | "email"; id: string; name: string };
 
 function MethodIcon({ kind }: { kind: string }) {
   const className = "size-5";
   if (kind === "password") return <KeyRoundIcon className={className} />;
   if (kind === "waifu") return <Flower2Icon className={className} />;
   if (kind === "sso") return <BuildingIcon className={className} />;
+  if (kind === "email") return <MailIcon className={className} />;
   return <ProviderMark id={kind} className="size-[18px]" />;
 }
 
@@ -57,7 +59,8 @@ export function SignInMethods({ instanceKey }: { instanceKey: string }) {
   if (!listed) return <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />;
 
   const working = listed.methods.filter((m) => m.works);
-  const name = (m: SignInMethod) => (m.kind === "password" ? t("accountsettings.signIn.password") : m.name);
+  const name = (m: SignInMethod) =>
+    m.kind === "password" ? t("accountsettings.signIn.password") : m.kind === "email" ? t("accountsettings.signIn.email") : m.name;
 
   return (
     <div className="flex flex-col gap-6" data-testid="sign-in-methods">
@@ -103,7 +106,7 @@ export function SignInMethods({ instanceKey }: { instanceKey: string }) {
                       size="sm"
                       disabled={only}
                       title={only ? t("accountsettings.signIn.onlyWay") : undefined}
-                      onClick={() => setAsking({ action: "unlink", id: m.kind, name: m.name })}
+                      onClick={() => setAsking({ action: "unlink", id: m.kind, name: name(m) })}
                       className="rounded-xl font-bold text-destructive hover:text-destructive"
                     >
                       <Unlink2Icon className="size-4" /> {t("accountsettings.signIn.unlink")}
@@ -119,11 +122,25 @@ export function SignInMethods({ instanceKey }: { instanceKey: string }) {
         )}
       </section>
 
-      {listed.canLink && listed.available.length > 0 && (
+      {((listed.canLink && listed.available.length > 0) || listed.canAddEmail) && (
         <section data-setting="link-provider" className="flex flex-col gap-2.5">
           <h3 className="font-extrabold">{t("accountsettings.signIn.add")}</h3>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {listed.available.map((p) => (
+            {listed.canAddEmail && (
+              <motion.button
+                type="button"
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.97 }}
+                transition={SPRING}
+                onClick={() => setAsking({ action: "email", id: "email", name: t("accountsettings.signIn.email") })}
+                className="group flex items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 font-bold transition-colors hover:border-primary/60"
+                data-testid="add-email"
+              >
+                <MailPlusIcon className="size-4 transition-transform group-hover:scale-110" />
+                {t("accountsettings.signIn.addEmail")}
+              </motion.button>
+            )}
+            {(listed.canLink ? listed.available : []).map((p) => (
               <motion.button
                 key={p.id}
                 type="button"
@@ -157,6 +174,11 @@ export function SignInMethods({ instanceKey }: { instanceKey: string }) {
               setAsking(null);
               load();
             }}
+            onAdded={(address) => {
+              toast(t("accountsettings.signIn.emailAdded", { address }));
+              setAsking(null);
+              load();
+            }}
           />
         )}
       </AnimatePresence>
@@ -171,31 +193,48 @@ function Proof({
   listed,
   onCancel,
   onUnlinked,
+  onAdded,
 }: {
   instanceKey: string;
   asking: Asking;
   listed: ListSignInMethodsResponse;
   onCancel: () => void;
   onUnlinked: () => void;
+  onAdded: (address: string) => void;
 }) {
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [email, setEmail] = useState("");
   const link = useAction(startProviderLink);
   const unlink = useAction(unlinkProvider);
-  const busy = link.pending || unlink.pending;
-  const linking = asking.action === "link";
-  const ready = (!listed.needsPassword || password.length > 0) && (!listed.needsCode || code.trim().length > 0);
+  const sendEmail = useAction(startEmailLink);
+  const busy = link.pending || unlink.pending || sendEmail.pending;
+  const linking = asking.action !== "unlink";
+  const adding = asking.action === "email";
+  const [ticket, setTicket] = useState<string | null>(null);
+  const privateField = usePrivateField();
+  const ready =
+    (!listed.needsPassword || password.length > 0) && (!listed.needsCode || code.trim().length > 0) && (!adding || email.trim().length > 0);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     const proof = { password, code: code.trim() };
+    if (adding) {
+      const res = await sendEmail.go(instanceKey, email.trim(), proof);
+      if (res) setTicket(res.ticket);
+      return;
+    }
     if (linking) {
       // On success the browser is already on its way to the provider.
       await link.go(instanceKey, asking.id, proof, window.location.pathname);
       return;
     }
     if (await unlink.go(instanceKey, asking.id, proof)) onUnlinked();
+  }
+
+  if (ticket) {
+    return <EmailCode instanceKey={instanceKey} ticket={ticket} email={email.trim()} onCancel={onCancel} onAdded={onAdded} />;
   }
 
   return (
@@ -208,8 +247,26 @@ function Proof({
       className="flex flex-col gap-3 rounded-2xl border bg-muted/40 p-4"
       data-testid="sign-in-proof"
     >
-      <p className="font-extrabold">{t(linking ? "accountsettings.signIn.linkTitle" : "accountsettings.signIn.unlinkTitle", { name: asking.name })}</p>
+      <p className="font-extrabold">
+        {adding ? t("accountsettings.signIn.addEmail") : t(linking ? "accountsettings.signIn.linkTitle" : "accountsettings.signIn.unlinkTitle", { name: asking.name })}
+      </p>
       {!linking && listed.needsFreshSignIn && <p className="text-sm text-muted-foreground">{t("accountsettings.signIn.freshNote")}</p>}
+      {adding && (
+        <ProofField id="sign-in-proof-email" label={t("accountsettings.signIn.emailLabel")}>
+          <Input
+            id="sign-in-proof-email"
+            type="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={254}
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={cn("h-11 rounded-xl", privateField)}
+          />
+        </ProofField>
+      )}
       {listed.needsPassword && (
         <ProofField id="sign-in-proof-password" label={t("accountsettings.signIn.passwordLabel")}>
           <Input
@@ -235,21 +292,73 @@ function Proof({
           />
         </ProofField>
       )}
-      <Problem text={link.error ?? unlink.error} />
+      <Problem text={link.error ?? unlink.error ?? sendEmail.error} />
       <div className="flex flex-col gap-2 sm:flex-row-reverse">
         <Button
           type="submit"
           disabled={busy || !ready}
           className={cn("btn h-10 rounded-xl font-bold", !linking && "bg-destructive text-white hover:bg-destructive/90")}
         >
-          <ProofIcon busy={busy} linking={linking} />
-          {linking ? t("accountsettings.signIn.continueTo", { name: asking.name }) : t("accountsettings.signIn.unlink")}
+          <ProofIcon busy={busy} linking={linking} adding={adding} />
+          {adding
+            ? t("accountsettings.signIn.sendCode")
+            : linking
+              ? t("accountsettings.signIn.continueTo", { name: asking.name })
+              : t("accountsettings.signIn.unlink")}
         </Button>
         <Button type="button" variant="ghost" className="h-10 rounded-xl font-bold" onClick={onCancel}>
           {t("common.cancel")}
         </Button>
       </div>
     </motion.form>
+  );
+}
+
+/** The six digits from the mail sent to the address being added. */
+function EmailCode({
+  instanceKey,
+  ticket,
+  email,
+  onCancel,
+  onAdded,
+}: {
+  instanceKey: string;
+  ticket: string;
+  email: string;
+  onCancel: () => void;
+  onAdded: (address: string) => void;
+}) {
+  const { t } = useI18n();
+  const finish = useAction(finishEmailLink);
+  const [shake, setShake] = useState(0);
+
+  async function send(code: string) {
+    const res = await finish.go(instanceKey, ticket, code);
+    if (!res) return setShake((n) => n + 1);
+    onAdded(res.method?.accountName || email);
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+      transition={SPRING}
+      className="flex flex-col gap-3 rounded-2xl border bg-muted/40 p-4"
+      data-testid="sign-in-email-code"
+    >
+      <p className="font-extrabold">{t("accountsettings.signIn.checkEmail")}</p>
+      <p className="text-sm text-muted-foreground">
+        <T k="accountsettings.signIn.checkEmailNote" values={{ address: <Private text={email} /> }} />
+      </p>
+      <div className="flex justify-center py-1">
+        <CodeInput id="sign-in-email-code" label={t("accountsettings.signIn.codeFromEmail")} onComplete={(code) => void send(code)} disabled={finish.pending} shake={shake} />
+      </div>
+      <Problem text={finish.error} />
+      <Button type="button" variant="ghost" className="h-10 self-end rounded-xl font-bold" onClick={onCancel}>
+        {t("common.cancel")}
+      </Button>
+    </motion.div>
   );
 }
 
@@ -264,8 +373,9 @@ function ProofField({ id, label, children }: { id: string; label: string; childr
   );
 }
 
-function ProofIcon({ busy, linking }: { busy: boolean; linking: boolean }) {
+function ProofIcon({ busy, linking, adding }: { busy: boolean; linking: boolean; adding: boolean }) {
   if (busy) return <LoaderCircleIcon className="animate-spin" />;
+  if (adding) return <MailIcon />;
   return linking ? <LinkIcon /> : <Unlink2Icon />;
 }
 

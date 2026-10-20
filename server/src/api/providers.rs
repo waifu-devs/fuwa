@@ -8,6 +8,7 @@
 use axum::body::Body;
 
 use super::Api;
+use super::email::{EMAIL, EMAIL_NAME};
 use crate::auth::{self, Caller};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -42,10 +43,21 @@ fn unknown(id: &str) -> Error {
     })
 }
 
-fn method(linked: &LinkedProvider, works: bool) -> pb::SignInMethod {
+/// What a kind of `account_providers` row is called: a provider's name, or
+/// "Email" for an address.
+fn provider_name(id: &str) -> Option<&'static str> {
+    if id == EMAIL { Some(EMAIL_NAME) } else { providers::spec(id).map(|spec| spec.name) }
+}
+
+/// Whether a way in kept in `account_providers` signs in right now.
+fn provider_works(settings: &crate::settings::Settings, id: &str) -> bool {
+    if id == EMAIL { settings.email_sign_in() } else { settings.sign_in_provider(id).is_some() }
+}
+
+pub(super) fn method(linked: &LinkedProvider, works: bool) -> pb::SignInMethod {
     pb::SignInMethod {
         kind: linked.provider.clone(),
-        name: providers::spec(&linked.provider).map(|spec| spec.name.to_string()).unwrap_or_default(),
+        name: provider_name(&linked.provider).map(str::to_string).unwrap_or_default(),
         account_name: linked.name.clone(),
         linked_at: Some(timestamp(linked.linked_at)),
         works,
@@ -77,7 +89,7 @@ impl Api {
             methods.push(pb::SignInMethod { kind: kind.into(), name, works, ..Default::default() });
         }
         for linked in node.account_providers(&account.id).await? {
-            let works = settings.sign_in_provider(&linked.provider).is_some();
+            let works = provider_works(&settings, &linked.provider);
             methods.push(method(&linked, works));
         }
         Ok(methods)
@@ -85,7 +97,7 @@ impl Api {
 
     /// Whether an account may link providers: its organization decides how
     /// single sign-on accounts sign in, and agents use their token.
-    fn can_link(account: &Account) -> bool {
+    pub(super) fn can_link(account: &Account) -> bool {
         matches!(account.kind, pb::AccountKind::Local | pb::AccountKind::Linked | pb::AccountKind::Provider)
     }
 
@@ -94,7 +106,7 @@ impl Api {
     /// code where the account has them; otherwise, when `fresh` asks for it,
     /// a session from the last ten minutes. Linking doesn't: the provider's
     /// own sign-in stands in for it, and only the new way in is at stake.
-    async fn confirm_owner(&self, caller: &Caller, password: &str, code: &str, fresh: bool) -> Result<()> {
+    pub(super) async fn confirm_owner(&self, caller: &Caller, password: &str, code: &str, fresh: bool) -> Result<()> {
         let account = &caller.account;
         if account.has_password() {
             self.confirm_password(account, password).await?;
@@ -117,6 +129,8 @@ impl Api {
     pub(super) async fn list_methods(&self, caller: Caller) -> Result<pb::ListSignInMethodsResponse> {
         let account = &caller.account;
         let methods = self.sign_in_methods(account).await?;
+        let can_add_email =
+            Self::can_link(account) && self.app.settings().email_sign_in() && !methods.iter().any(|m| m.kind == EMAIL);
         let can_link = Self::can_link(account) && self.app.settings().provider_accounts.sign_in();
         let available = if can_link {
             self.app
@@ -135,6 +149,7 @@ impl Api {
             needs_password: account.has_password(),
             needs_code: account.two_factor,
             needs_fresh_sign_in: !account.has_password() && !account.two_factor,
+            can_add_email,
         })
     }
 
@@ -213,20 +228,19 @@ impl Api {
 
     pub(super) async fn unlink(&self, caller: Caller, req: pb::UnlinkProviderRequest) -> Result<()> {
         let id = req.provider.trim();
-        let spec = providers::spec(id).ok_or_else(|| unknown(id))?;
+        let name = provider_name(id).ok_or_else(|| unknown(id))?;
         let methods = self.sign_in_methods(&caller.account).await?;
         if !methods.iter().any(|m| m.kind == id) {
             return Err(Error::NotFound("linked provider"));
         }
         if !methods.iter().any(|m| m.kind != id && m.works) {
             return Err(Error::FailedPrecondition(format!(
-                "{} is the only way you can sign in right now; add another first",
-                spec.name
+                "{name} is the only way you can sign in right now; add another first"
             )));
         }
         self.confirm_owner(&caller, &req.password, &req.code, true).await?;
         // Checked again as it's written, so two unlinks at once can't both go.
-        let others_work = methods.iter().any(|m| m.works && providers::spec(&m.kind).is_none());
+        let others_work = methods.iter().any(|m| m.works && provider_name(&m.kind).is_none());
         let working: Vec<&str> = methods.iter().filter(|m| m.works && m.kind != id).map(|m| m.kind.as_str()).collect();
         if !self.app.node()?.unlink_provider(&caller.account.id, id, others_work, &working).await? {
             return Err(Error::NotFound("linked provider"));
@@ -247,7 +261,7 @@ impl Api {
             .iter()
             // Not the provider the account was made with, linked as it was made.
             .filter(|linked| linked.linked_at >= since && linked.linked_at != account.created_at)
-            .map(|linked| method(linked, settings.sign_in_provider(&linked.provider).is_some()))
+            .map(|linked| method(linked, provider_works(&settings, &linked.provider)))
             .collect();
         recent.reverse();
         Ok(recent)

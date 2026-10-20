@@ -617,6 +617,21 @@ impl AuthService for Api {
         respond(self.finish_provider(request.into_inner(), &user_agent).await)
     }
 
+    async fn start_email_sign_in(
+        &self,
+        request: Request<pb::StartEmailSignInRequest>,
+    ) -> Result<Response<pb::StartEmailSignInResponse>, Status> {
+        respond(self.start_email(request.into_inner()).await)
+    }
+
+    async fn finish_email_sign_in(
+        &self,
+        request: Request<pb::FinishEmailSignInRequest>,
+    ) -> Result<Response<pb::FinishEmailSignInResponse>, Status> {
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.finish_email(request.into_inner(), &user_agent).await)
+    }
+
     async fn change_password(
         &self,
         request: Request<pb::ChangePasswordRequest>,
@@ -631,7 +646,7 @@ impl AuthService for Api {
                 let current = self.app.node()?.password_hash(&account.id).await?;
                 if current.is_none() {
                     return Err(Error::FailedPrecondition(
-                        "this account signs in through waifu.dev or single sign-on, not with a password".into(),
+                        "this account signs in through waifu.dev, single sign-on, a provider or email codes, not with a password".into(),
                     ));
                 }
                 let guesses = format!("password:{}", account.id);

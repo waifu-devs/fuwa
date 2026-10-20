@@ -6,6 +6,7 @@ import {
   Flower2Icon,
   KeyRoundIcon,
   LoaderCircleIcon,
+  MailIcon,
   ServerIcon as ServerGlyph,
   ShieldCheckIcon,
   SparklesIcon,
@@ -23,6 +24,7 @@ import { BuildLabel } from "@/components/BuildLabel";
 import { MotionButton } from "@/components/motion-button";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { CodeInput } from "@/components/CodeInput";
+import { EmailSignIn } from "@/components/EmailSignIn";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -210,13 +212,15 @@ export function Account({
   const canSignIn = !!methods?.localSignIn;
   const linked = !!methods?.linkedSignIn;
   const sso = !!methods?.ssoSignIn;
-  const others = linked || sso || (methods?.providers.length ?? 0) > 0;
+  const email = !!methods?.emailSignIn;
+  const others = linked || sso || email || (methods?.providers.length ?? 0) > 0;
   const [tab, setTab] = useState(canSignIn ? "sign-in" : "sign-up");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [shake, setShake] = useState(0);
   const [ticket, setTicket] = useState<string | null>(null);
+  const [emailing, setEmailing] = useState(false);
   const inAction = useAction(signIn);
   const upAction = useAction(signUp);
   const action = tab === "sign-in" ? inAction : upAction;
@@ -242,6 +246,8 @@ export function Account({
     finish(key);
   }
 
+  if (emailing) return <EmailSignIn url={url} onBack={() => setEmailing(false)} onDone={finish} />;
+
   if (ticket) {
     return (
       <TwoFactorStep
@@ -262,7 +268,7 @@ export function Account({
         <Header url={url} node={node} onBack={onBack} />
         {others ? (
           <>
-            <ProviderButtons url={url} node={node} returnTo={returnTo} />
+            <ProviderButtons url={url} node={node} returnTo={returnTo} onEmail={() => setEmailing(true)} />
             <LegalAgreement url={url} />
           </>
         ) : (
@@ -279,7 +285,7 @@ export function Account({
       <Header url={url} node={node} onBack={onBack} />
       {others && (
         <>
-          <ProviderButtons url={url} node={node} returnTo={returnTo} />
+          <ProviderButtons url={url} node={node} returnTo={returnTo} onEmail={() => setEmailing(true)} />
           <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
             <span className="h-px flex-1 bg-border" /> {t("connect.account.orPassword")} <span className="h-px flex-1 bg-border" />
           </div>
@@ -353,14 +359,34 @@ export function Account({
   );
 }
 
-/** The other ways to sign in this instance offers: single sign-on, then waifu.dev. */
-function ProviderButtons({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
+/** The other ways to sign in this instance offers: single sign-on, waifu.dev, the providers, then an email code. */
+function ProviderButtons({ url, node, returnTo, onEmail }: { url: string; node: Node; returnTo?: string; onEmail: () => void }) {
   return (
     <>
       {node.auth?.ssoSignIn && <SsoButton url={url} node={node} returnTo={returnTo} />}
       {node.auth?.linkedSignIn && <LinkedButton url={url} node={node} returnTo={returnTo} />}
       <SocialButtons url={url} node={node} returnTo={returnTo} />
+      {node.auth?.emailSignIn && <EmailButton node={node} onEmail={onEmail} />}
     </>
+  );
+}
+
+/** "Continue with email": a code sent to your address, without leaving the page. */
+function EmailButton({ node, onEmail }: { node: Node; onEmail: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-col gap-2">
+      <ProviderButton
+        name={t("connect.email.continue")}
+        label={t("connect.email.continue")}
+        icon={<MailIcon className="size-5 transition-transform duration-500 group-hover:-rotate-12 group-hover:scale-110" />}
+        onGo={async () => onEmail()}
+        stays
+        error={null}
+        testId="email-sign-in"
+      />
+      {!node.auth?.emailSignUp && <p className="text-center text-xs text-muted-foreground">{t("connect.email.closed")}</p>}
+    </div>
   );
 }
 
@@ -657,6 +683,7 @@ export function ProviderButton({
   closed,
   testId,
   label,
+  stays,
 }: {
   name: string;
   icon: ReactNode;
@@ -665,11 +692,14 @@ export function ProviderButton({
   closed?: boolean;
   testId?: string;
   label?: string;
+  /** It goes on in this page (an email code) rather than leaving for another site. */
+  stays?: boolean;
 }) {
   const [leaving, setLeaving] = useState(false);
   const { t } = useI18n();
 
   async function go() {
+    if (stays) return void (await onGo());
     setLeaving(true);
     // On success the browser is already on its way out.
     if (!(await onGo())) setLeaving(false);

@@ -64,6 +64,8 @@ pub struct App {
     pub servers: Servers,
     pub hub: Arc<Hub>,
     pub limiter: SignInLimiter,
+    /// What sends email (sign-in codes), when the instance can (`Config::mail`).
+    pub mailer: Option<crate::mail::Mailer>,
     /// Live event streams held open, per account and in all.
     pub streams: Arc<crate::streams::Streams>,
     pub started: Instant,
@@ -229,6 +231,7 @@ impl App {
 
         let large_server_members = config.large_server_members.unwrap_or(0);
         let on_screen_members = config.on_screen_members.unwrap_or(usize::MAX);
+        let mailer = config.mail.as_ref().map(crate::mail::Mailer::new).transpose()?;
         let app = Arc::new(Self {
             config,
             settings: watch::Sender::new(Arc::new(settings)),
@@ -244,6 +247,7 @@ impl App {
             servers,
             hub,
             limiter: SignInLimiter::default(),
+            mailer,
             streams,
             started: Instant::now(),
             shutdown,
@@ -627,6 +631,8 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             sso_host: if settings.sso_sign_in() { settings.sso_provider.host() } else { String::new() },
             linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
             providers: settings.sign_in_provider_options(),
+            email_sign_in: settings.email_sign_in(),
+            email_sign_up: settings.email_sign_up(),
         }),
         server_creation: settings.server_creation as i32,
         agent_creation: settings.agent_creation as i32,
@@ -929,6 +935,9 @@ fn spawn_housekeeping(app: Arc<App>) {
                     }
                     if async { app.node()?.sweep_sso_sign_ins(crate::id::now_ms()).await }.await.is_err() {
                         tracing::warn!("couldn't sweep sign-ins that ran out");
+                    }
+                    if async { app.node()?.sweep_email_codes(crate::id::now_ms()).await }.await.is_err() {
+                        tracing::warn!("couldn't sweep email codes that ran out");
                     }
                 }
             }

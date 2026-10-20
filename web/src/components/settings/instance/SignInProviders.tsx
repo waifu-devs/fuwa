@@ -1,7 +1,7 @@
 import { clone } from "@bufbuild/protobuf";
-import { DoorClosedIcon, DoorOpenIcon, ExternalLinkIcon, KeyRoundIcon, PowerOffIcon } from "lucide-react";
+import { DoorClosedIcon, DoorOpenIcon, ExternalLinkIcon, KeyRoundIcon, MailWarningIcon, PowerOffIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
-import { ProviderAccounts, SignInProviderSettingSchema, type InstanceSettings, type SignInProviderSetting } from "@/gen/fuwa/v1/admin_pb";
+import { EmailAccounts, ProviderAccounts, SignInProviderSettingSchema, type InstanceSettings, type SignInProviderSetting } from "@/gen/fuwa/v1/admin_pb";
 import { usePrivateField } from "@/components/Private";
 import { ProviderMark } from "@/components/ProviderMarks";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { type I18n, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Choice, Setting, SPRING, Toggle } from "../controls";
 import { CopyRow } from "../IdentityProviderForm";
-import { accountsOf, PROVIDERS, settingOf, type ProviderInfo } from "./provider-fields";
+import { accountsOf, emailAccountsOf, MAIL_PROVIDERS, PROVIDERS, settingOf, type ProviderInfo } from "./provider-fields";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 
@@ -88,6 +88,48 @@ export function SignInProviderSettings({
           reset={resetter("sign_in_providers")}
         />
       ))}
+      <Setting
+        id="email-accounts"
+        title={t("instancesettings.nav.emailAccounts")}
+        hint={
+          saved.mailProvider
+            ? t("instancesettings.email.hint", { provider: MAIL_PROVIDERS[saved.mailProvider] ?? saved.mailProvider })
+            : t("instancesettings.email.hintNoMail")
+        }
+        defaultLabel={accountsLabel(t, emailAccountsOf(defaults))}
+        {...resetter("email_accounts")}
+      >
+        {!saved.mailProvider && (
+          <p className="flex items-start gap-2 rounded-2xl bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+            <MailWarningIcon className="mt-0.5 size-4 shrink-0" />
+            {t("instancesettings.email.noMail")}
+          </p>
+        )}
+        <Choice
+          value={emailAccountsOf(draft)}
+          onChange={(v) => patch((d) => (d.emailAccounts = v))}
+          options={[
+            {
+              value: EmailAccounts.OPEN,
+              label: accountsLabel(t, ProviderAccounts.OPEN),
+              hint: t("instancesettings.email.openHint"),
+              icon: <DoorOpenIcon className="size-4" />,
+            },
+            {
+              value: EmailAccounts.CLOSED,
+              label: accountsLabel(t, ProviderAccounts.CLOSED),
+              hint: t("instancesettings.email.closedHint"),
+              icon: <DoorClosedIcon className="size-4" />,
+            },
+            {
+              value: EmailAccounts.OFF,
+              label: accountsLabel(t, ProviderAccounts.OFF),
+              hint: t("instancesettings.email.offHint"),
+              icon: <PowerOffIcon className="size-4" />,
+            },
+          ]}
+        />
+      </Setting>
     </>
   );
 }
@@ -246,7 +288,8 @@ function SecretField({
   );
 }
 
-function accountsLabel(t: I18n["t"], v: ProviderAccounts) {
+/** Open, closed or off, the same for sign-in providers and email codes (their values match). */
+function accountsLabel(t: I18n["t"], v: ProviderAccounts | EmailAccounts) {
   if (v === ProviderAccounts.CLOSED) return t("instancesettings.providers.closed");
   if (v === ProviderAccounts.OFF) return t("serversettings.shared.off");
   return t("instancesettings.providers.open");

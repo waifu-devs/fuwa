@@ -135,6 +135,9 @@ the log filter are read only from the environment.
 | `FUWA_LINKED_ACCOUNTS` | `open` | Signing in with waifu.dev: `open` (anyone with a waifu.dev account gets one here), `closed` (existing linked accounts only), `off` |
 | `FUWA_LINKED_ISSUER` | `https://api.waifu.dev` | The OpenAuth issuer linked accounts sign in with |
 | `FUWA_SSO_ACCOUNTS` | `off` | Single sign-on through the identity provider set up in instance settings: `open`, `closed` (existing SSO accounts only), `off` |
+| `FUWA_EMAIL_ACCOUNTS` | `open` | Signing in with a code sent by email ([docs/email-sign-in.md](docs/email-sign-in.md)): `open`, `closed` (existing addresses only), `off`; needs a mail provider |
+| `FUWA_MAIL_PROVIDER` | `off` | How the instance sends mail: `smtp`, `ses` (Amazon SES v2 API), `resend`, `cloudflare` (Cloudflare Email Service) or `off`; each has its own variables ([docs/email-sign-in.md](docs/email-sign-in.md#providers)) |
+| `FUWA_MAIL_FROM` | unset | Who mail comes from, like `Fuwa <no-reply@example.com>`; required with a provider |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_AGENT_ENDPOINTS` | `public` | Where agents' endpoints may point: `public` (https at public addresses), `any` (this machine and its network too), `off` |

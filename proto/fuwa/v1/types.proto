@@ -207,6 +207,10 @@ message AuthMethods {
   string sso_host = 9;
   // Google, X or Twitch, for each an admin turned on.
   repeated SignInProviderOption providers = 10;
+  // Signing in with a code sent by email (AuthService.StartEmailSignIn).
+  bool email_sign_in = 11;
+  // Whether someone new can sign in that way and get an account.
+  bool email_sign_up = 12;
 }
 
 // A provider people can sign in with: "Continue with <name>".
@@ -1850,11 +1854,13 @@ message RoleDeleted {
 // One way an account signs in.
 message SignInMethod {
   // "password", "waifu" (waifu.dev), "sso" (the instance's identity
-  // provider), or a provider's id: "google", "x", "twitch".
+  // provider), "email" (codes sent to an address), or a provider's id:
+  // "google", "x", "twitch".
   string kind = 1;
   // What to call it: the provider's name.
   string name = 2;
-  // The person's name there, only ever shown to them. Empty for a password.
+  // The person's name there (for "email", the address), only ever shown to
+  // them. Empty for a password.
   string account_name = 3;
   google.protobuf.Timestamp linked_at = 4;
   // Whether it signs in right now: false while the instance has it off.

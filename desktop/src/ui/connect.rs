@@ -19,6 +19,7 @@ use gpui_kit::{
 
 use crate::core::api::instance_key;
 use crate::core::config::SavedAccount;
+use crate::core::email::EmailAnswer;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::providers::{PendingProvider, ProviderAnswer};
 use crate::core::{Core, SignIn};
@@ -65,6 +66,18 @@ enum Step {
         pending: PendingProvider,
         account: pb::NewProviderAccount,
     },
+    /// Signing in with an emailed code: the address first.
+    EmailAddress,
+    /// The six digits from the mail sent to `email`.
+    EmailCode {
+        ticket: String,
+        email: String,
+    },
+    /// Someone new after an email code: their username, then the same code again.
+    EmailNew {
+        ticket: String,
+        code: String,
+    },
 }
 
 /// What the form is for, which decides its frame and title.
@@ -89,8 +102,12 @@ pub struct ConnectView {
     display_name: Entity<InputState>,
     code: Entity<InputState>,
     backup: Entity<InputState>,
-    /// A new account's username, after a provider sign-in.
+    /// A new account's username, after a provider sign-in or an email code.
     new_username: Entity<InputState>,
+    /// The address an email code goes to.
+    email: Entity<InputState>,
+    /// A new code was sent to the same address, to say so.
+    resent: bool,
     /// Bring the provider's name and picture into the new account.
     use_profile: bool,
     url: String,
@@ -120,8 +137,9 @@ impl ConnectView {
         let code = cx.new(|cx| InputState::new(window, cx));
         let backup = cx.new(|cx| InputState::new(window, cx).placeholder("abcd-efgh"));
         let new_username = cx.new(|cx| InputState::new(window, cx).placeholder(t("connect.account.usernameHint")));
+        let email = cx.new(|cx| InputState::new(window, cx).placeholder("you@example.com"));
         let mut subs = Vec::new();
-        for input in [&address, &username, &password, &display_name, &backup, &new_username] {
+        for input in [&address, &username, &password, &display_name, &backup, &new_username, &email] {
             subs.push(cx.subscribe_in(input, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = event {
                     this.submit(window, cx);
@@ -167,6 +185,8 @@ impl ConnectView {
             code,
             backup,
             new_username,
+            email,
+            resent: false,
             use_profile: true,
             url: String::new(),
             node: None,
@@ -204,7 +224,93 @@ impl ConnectView {
             Step::TwoFactor { ticket, backup } => self.verify(ticket, backup, window, cx),
             Step::Browser => {}
             Step::NewAccount { pending, .. } => self.create_account(pending, window, cx),
+            Step::EmailAddress => self.send_email_code(window, cx),
+            Step::EmailCode { ticket, .. } => {
+                let code = self.code.read(cx).value().to_string();
+                if code.len() == 6 {
+                    self.finish_email(ticket, code, None, window, cx);
+                }
+            }
+            Step::EmailNew { ticket, code } => {
+                let username = self.new_username.read(cx).value().trim().to_lowercase();
+                if !username.is_empty() {
+                    self.finish_email(ticket, code, Some(username), window, cx);
+                }
+            }
         }
+    }
+
+    /// Emails a code to the address typed (the web's `EmailSignIn`), again
+    /// when it's already been sent once.
+    fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let email = self.email.read(cx).value().trim().to_owned();
+        if email.is_empty() {
+            return;
+        }
+        let (core, url) = (self.core.clone(), self.url.clone());
+        let again = matches!(self.step, Step::EmailCode { .. });
+        let sent_to = email.clone();
+        self.start(
+            async move { core.start_email_sign_in(&url, &email).await },
+            window,
+            cx,
+            move |this, result, window, cx| match result {
+                Ok(ticket) => {
+                    this.resent = again;
+                    this.code.update(cx, |s, cx| {
+                        s.set_value(String::new(), window, cx);
+                        s.focus(window, cx);
+                    });
+                    this.step = Step::EmailCode { ticket, email: sent_to };
+                }
+                Err(err) => this.fail(err.message),
+            },
+        );
+    }
+
+    /// Signs in with the emailed code; `create` makes the account for someone new.
+    fn finish_email(
+        &mut self,
+        ticket: String,
+        code: String,
+        create: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (core, url) = (self.core.clone(), self.url.clone());
+        let (kept_ticket, kept_code) = (ticket.clone(), code.clone());
+        self.start(
+            async move { core.finish_email_sign_in(&url, &ticket, &code, create).await },
+            window,
+            cx,
+            move |this, result, window, cx| match result {
+                Ok(EmailAnswer::Done { key }) => cx.emit(ConnectEvent::Done { key }),
+                Ok(EmailAnswer::TwoFactor { ticket }) => {
+                    this.code.update(cx, |s, cx| {
+                        s.set_value(String::new(), window, cx);
+                        s.focus(window, cx);
+                    });
+                    this.step = Step::TwoFactor { ticket, backup: false };
+                }
+                Ok(EmailAnswer::NewAccount { account }) => {
+                    let suggested = account.suggested_username.clone();
+                    this.new_username.update(cx, |s, cx| {
+                        if s.value().is_empty() {
+                            s.set_value(suggested, window, cx);
+                        }
+                        s.focus(window, cx);
+                    });
+                    this.step = Step::EmailNew { ticket: kept_ticket, code: kept_code };
+                }
+                Err(err) => {
+                    // A wrong code clears the boxes for another try.
+                    if matches!(this.step, Step::EmailCode { .. }) {
+                        this.code.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                    }
+                    this.fail(err.message);
+                }
+            },
+        );
     }
 
     /// Signs in with Google, X or Twitch in the browser (the web's `ProviderSignIn`).
@@ -414,9 +520,11 @@ impl ConnectView {
         self.task = None;
         self.busy = false;
         self.error = None;
+        self.resent = false;
         self.step = match self.step {
             Step::Address | Step::Account => Step::Address,
-            Step::TwoFactor { .. } | Step::Browser | Step::NewAccount { .. } => Step::Account,
+            Step::TwoFactor { .. } | Step::Browser | Step::NewAccount { .. } | Step::EmailAddress => Step::Account,
+            Step::EmailCode { .. } | Step::EmailNew { .. } => Step::EmailAddress,
         };
         cx.notify();
     }
@@ -513,7 +621,7 @@ impl ConnectView {
         let auth = self.node.as_ref().and_then(|n| n.auth.clone()).unwrap_or_default();
         let (can_in, can_up) = (auth.local_sign_in, auth.local_sign_up);
         let sso = auth.sso_sign_in;
-        let others = sso || auth.linked_sign_in || !auth.providers.is_empty();
+        let others = sso || auth.linked_sign_in || auth.email_sign_in || !auth.providers.is_empty();
         let mut body = div().flex().flex_col().gap(px(16.0)).child(self.header(cx, p));
         if plain_http(&self.url) {
             body = body.child(
@@ -946,6 +1054,31 @@ impl ConnectView {
             }
             col = col.child(social);
         }
+        // A code by email, without leaving the app.
+        if auth.email_sign_in {
+            let mut block = div().flex().flex_col().gap(px(8.0)).child(
+                provider_button("email", "mail", &t("connect.email.name"), p).on_click(cx.listener(
+                    |this, _, window, cx| {
+                        this.error = None;
+                        this.resent = false;
+                        this.step = Step::EmailAddress;
+                        this.email.update(cx, |s, cx| s.focus(window, cx));
+                        cx.notify();
+                    },
+                )),
+            );
+            if !auth.email_sign_up {
+                block = block.child(
+                    div()
+                        .text_center()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("connect.email.closed")),
+                );
+            }
+            col = col.child(block);
+        }
         col
     }
 
@@ -1006,75 +1139,7 @@ impl ConnectView {
             )
             .into_any_element()
         } else {
-            let typed: Vec<char> = self.code.read(cx).value().chars().collect();
-            let focused = self.code.read(cx).focus_handle(cx).is_focused(window);
-            let caret = typed.len().min(5);
-            let mut boxes = div().flex().gap(px(8.0));
-            for n in 0..6 {
-                let digit = typed.get(n).copied();
-                let here = focused && n == caret && !self.busy;
-                boxes = boxes.child(
-                    div()
-                        .relative()
-                        .when(n == 3, |el| el.ml(px(8.0)))
-                        .w(px(48.0))
-                        .h(px(56.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(radius_xl())
-                        .border_2()
-                        .border_color(if digit.is_some() { alpha(p.primary, 0.5) } else { p.border.into() })
-                        .bg(p.background)
-                        .text_size(px(24.0))
-                        .font_weight(FontWeight::EXTRA_BOLD)
-                        .when(self.busy, |el| el.opacity(0.6))
-                        .when(here, |el| {
-                            el.child(
-                                div()
-                                    .absolute()
-                                    .inset(px(-2.0))
-                                    .rounded(radius_xl())
-                                    .border_2()
-                                    .border_color(p.primary)
-                                    .shadow(vec![gpui_kit::BoxShadow {
-                                        color: alpha(p.primary, 0.2),
-                                        offset: gpui_kit::point(px(0.0), px(0.0)),
-                                        blur_radius: px(0.0),
-                                        spread_radius: px(4.0),
-                                        inset: false,
-                                    }]),
-                            )
-                        })
-                        .when_some(digit, |el, d| {
-                            el.child(motion::rise(
-                                div().child(d.to_string()),
-                                SharedString::from(format!("digit-{n}-{d}")),
-                                Duration::ZERO,
-                                8.0,
-                            ))
-                        })
-                        .when(digit.is_none() && here, |el| {
-                            el.child(div().w(px(2.0)).h(px(24.0)).rounded_full().bg(p.primary).with_animation(
-                                "caret",
-                                Animation::new(Duration::from_millis(1000)).repeat(),
-                                |el, t| el.opacity(if t < 0.5 { 1.0 } else { 0.0 }),
-                            ))
-                        }),
-                );
-            }
-            // The typing goes to a field nobody sees, under the boxes.
-            div()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .relative()
-                        .left(px(shake))
-                        .child(boxes)
-                        .child(div().absolute().inset_0().opacity(0.0).child(Input::new(&self.code).h_full())),
-                )
-                .into_any_element()
+            self.code_boxes(shake, window, cx, p)
         };
         let toggle = div()
             .id("toggle-backup")
@@ -1117,6 +1182,81 @@ impl ConnectView {
                 )
             })
             .child(toggle)
+            .into_any_element()
+    }
+
+    /// The six boxes a code is typed into, over the field that takes it
+    /// (`self.code`, which sends itself at six digits): two-step codes and
+    /// emailed ones alike, as the web's `CodeInput`.
+    fn code_boxes(&self, shake: f32, window: &mut Window, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
+        let typed: Vec<char> = self.code.read(cx).value().chars().collect();
+        let focused = self.code.read(cx).focus_handle(cx).is_focused(window);
+        let caret = typed.len().min(5);
+        let mut boxes = div().flex().gap(px(8.0));
+        for n in 0..6 {
+            let digit = typed.get(n).copied();
+            let here = focused && n == caret && !self.busy;
+            boxes = boxes.child(
+                div()
+                    .relative()
+                    .when(n == 3, |el| el.ml(px(8.0)))
+                    .w(px(48.0))
+                    .h(px(56.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(radius_xl())
+                    .border_2()
+                    .border_color(if digit.is_some() { alpha(p.primary, 0.5) } else { p.border.into() })
+                    .bg(p.background)
+                    .text_size(px(24.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .when(self.busy, |el| el.opacity(0.6))
+                    .when(here, |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .inset(px(-2.0))
+                                .rounded(radius_xl())
+                                .border_2()
+                                .border_color(p.primary)
+                                .shadow(vec![gpui_kit::BoxShadow {
+                                    color: alpha(p.primary, 0.2),
+                                    offset: gpui_kit::point(px(0.0), px(0.0)),
+                                    blur_radius: px(0.0),
+                                    spread_radius: px(4.0),
+                                    inset: false,
+                                }]),
+                        )
+                    })
+                    .when_some(digit, |el, d| {
+                        el.child(motion::rise(
+                            div().child(d.to_string()),
+                            SharedString::from(format!("digit-{n}-{d}")),
+                            Duration::ZERO,
+                            8.0,
+                        ))
+                    })
+                    .when(digit.is_none() && here, |el| {
+                        el.child(div().w(px(2.0)).h(px(24.0)).rounded_full().bg(p.primary).with_animation(
+                            "caret",
+                            Animation::new(Duration::from_millis(1000)).repeat(),
+                            |el, t| el.opacity(if t < 0.5 { 1.0 } else { 0.0 }),
+                        ))
+                    }),
+            );
+        }
+        // The typing goes to a field nobody sees, under the boxes.
+        div()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .relative()
+                    .left(px(shake))
+                    .child(boxes)
+                    .child(div().absolute().inset_0().opacity(0.0).child(Input::new(&self.code).h_full())),
+            )
             .into_any_element()
     }
 
@@ -1260,6 +1400,197 @@ impl ConnectView {
             .into_any_element()
     }
 
+    /// A step's head: back, its icon popping in, a title and a line under it (as the two-step one's).
+    fn step_head(
+        &self,
+        id: &'static str,
+        glyph: &str,
+        title: String,
+        hint: String,
+        cx: &mut Context<Self>,
+        p: &Palette,
+    ) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(round_button(id, "arrow-left", p).on_click(cx.listener(|this, _, _, cx| this.back(cx))))
+            .child(motion::pop(
+                div()
+                    .size(px(40.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(radius_2xl())
+                    .bg(alpha(p.primary, 0.15))
+                    .text_color(p.primary)
+                    .child(icon(glyph).size(px(20.0))),
+                SharedString::from(format!("{id}-pop")),
+                0.0,
+                -30.0,
+                Duration::from_millis(100),
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title))
+                    .child(div().text_size(px(12.0)).line_height(px(16.0)).text_color(p.muted_foreground).child(hint)),
+            )
+    }
+
+    /// The address an email code goes to (the web's `EmailSignIn`).
+    fn email_address_body(&mut self, window: &mut Window, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
+        let empty = self.email.read(cx).value().trim().is_empty();
+        let shake = self.shake();
+        if shake != 0.0 {
+            window.request_animation_frame();
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(self.step_head("back-email", "mail", t("connect.email.title"), t("connect.email.hint"), cx, p))
+            .child(
+                div()
+                    .relative()
+                    .left(px(shake))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(label(t("connect.email.address")))
+                    .child(field(&self.email, None, false, window, cx, p)),
+            )
+            .when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p)))
+            .child(
+                big_button("send-email-code", t("connect.email.send"), p)
+                    .child(if self.busy {
+                        spinner(p.primary_foreground).into_any_element()
+                    } else {
+                        icon("mail").size(px(16.0)).into_any_element()
+                    })
+                    .when(empty || self.busy, |el| el.opacity(0.5))
+                    .when(!empty && !self.busy, |el| {
+                        el.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
+                    }),
+            )
+            .children(self.agreement(p))
+            .into_any_element()
+    }
+
+    /// The six digits from the mail, and a new code when it didn't come.
+    fn email_code_body(&mut self, email: &str, window: &mut Window, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
+        let shake = self.shake();
+        if shake != 0.0 {
+            window.request_animation_frame();
+        }
+        let shown = if self.core.prefs_now().streamer_mode { "address hidden".to_owned() } else { email.to_owned() };
+        let hint = t_with("connect.email.checkHint", &[("email", Arg::Str(&shown))]);
+        let resend = div()
+            .id("resend-email-code")
+            .self_center()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(14.0))
+            .font_weight(FontWeight::BOLD)
+            .text_color(p.primary)
+            .when(self.busy, |el| el.opacity(0.5))
+            .when(!self.busy, |el| {
+                el.cursor_pointer()
+                    .hover(|s| s.underline())
+                    .on_click(cx.listener(|this, _, window, cx| this.send_email_code(window, cx)))
+            })
+            .child(icon("rotate-cw").size(px(14.0)))
+            .child(t("connect.email.resend"));
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(self.step_head("back-email-code", "mail-check", t("connect.email.checkTitle"), hint, cx, p))
+            .child(self.code_boxes(shake, window, cx, p))
+            .when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p)))
+            .when(self.resent && self.error.is_none(), |el| {
+                el.child(
+                    div()
+                        .text_center()
+                        .text_size(px(14.0))
+                        .line_height(px(20.0))
+                        .text_color(p.muted_foreground)
+                        .child(t("connect.email.resent")),
+                )
+            })
+            .child(resend)
+            .into_any_element()
+    }
+
+    /// Someone new after an email code: their username (the web's `EmailSignIn` new-account form).
+    fn email_new_body(&mut self, window: &mut Window, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
+        let empty = self.new_username.read(cx).value().trim().is_empty();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0))
+                    .text_center()
+                    .child(
+                        div()
+                            .size(px(64.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(radius_3xl())
+                            .bg(alpha(p.primary, 0.15))
+                            .text_color(p.primary)
+                            .child(icon("user-plus").size(px(28.0))),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(20.0))
+                            .line_height(px(28.0))
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(t("connect.providerDone.newTitle")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .line_height(px(20.0))
+                            .text_color(p.muted_foreground)
+                            .child(t("connect.email.newNote")),
+                    ),
+            )
+            .child(div().flex().flex_col().gap(px(8.0)).child(label(t("connect.account.username"))).child(field(
+                &self.new_username,
+                None,
+                false,
+                window,
+                cx,
+                p,
+            )))
+            .when_some(self.error.clone(), |el, e| el.child(error_text(e, true, p)))
+            .child(
+                big_button("create-email-account", t("connect.providerDone.create"), p)
+                    .child(if self.busy {
+                        spinner(p.primary_foreground).into_any_element()
+                    } else {
+                        icon("arrow-right").size(px(16.0)).into_any_element()
+                    })
+                    .when(empty || self.busy, |el| el.opacity(0.5))
+                    .when(!empty && !self.busy, |el| {
+                        el.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
+                    }),
+            )
+            .children(self.agreement(p))
+            .into_any_element()
+    }
+
     fn browser_body(&mut self, cx: &mut Context<Self>, p: &Palette) -> AnyElement {
         div()
             .flex()
@@ -1297,6 +1628,9 @@ impl ConnectView {
             Step::TwoFactor { backup, .. } => ("two-step", self.two_factor_body(backup, window, cx, p)),
             Step::Browser => ("browser", self.browser_body(cx, p)),
             Step::NewAccount { pending, account } => ("new", self.new_account_body(&pending, &account, window, cx, p)),
+            Step::EmailAddress => ("email", self.email_address_body(window, cx, p)),
+            Step::EmailCode { email, .. } => ("email-code", self.email_code_body(&email, window, cx, p)),
+            Step::EmailNew { .. } => ("email-new", self.email_new_body(window, cx, p)),
         };
         // Steps slide in from the side they come from.
         let from = if key == "where" { -24.0 } else { 24.0 };

@@ -262,6 +262,32 @@ impl AccountService for Api {
         )
     }
 
+    async fn start_email_link(
+        &self,
+        request: Request<pb::StartEmailLinkRequest>,
+    ) -> Result<Response<pb::StartEmailLinkResponse>, Status> {
+        respond(
+            async {
+                let caller = self.caller(request.metadata()).await?;
+                self.start_email_link(caller, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn finish_email_link(
+        &self,
+        request: Request<pb::FinishEmailLinkRequest>,
+    ) -> Result<Response<pb::FinishEmailLinkResponse>, Status> {
+        respond(
+            async {
+                let caller = self.caller(request.metadata()).await?;
+                self.finish_email_link(caller, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
     async fn list_sessions(
         &self,
         request: Request<pb::ListSessionsRequest>,
