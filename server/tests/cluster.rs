@@ -186,6 +186,7 @@ struct Clients {
     automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
     economy: pb::economy_service_client::EconomyServiceClient<Channel>,
     profile_items: pb::profile_item_service_client::ProfileItemServiceClient<Channel>,
+    soundboard: pb::soundboard_service_client::SoundboardServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -206,7 +207,8 @@ async fn clients(part: &Part) -> Clients {
         shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
         automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
         economy: pb::economy_service_client::EconomyServiceClient::new(channel.clone()),
-        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel),
+        profile_items: pb::profile_item_service_client::ProfileItemServiceClient::new(channel.clone()),
+        soundboard: pb::soundboard_service_client::SoundboardServiceClient::new(channel),
     }
 }
 
@@ -1591,6 +1593,67 @@ async fn share(
         .into_iter()
         .find(|ch| ch.shared.is_some())
         .unwrap()
+}
+
+#[tokio::test]
+async fn sounds_upload_to_the_shard_holding_their_server() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Sounds").await;
+    let ogg = ogg_opus(1500);
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Sound as i32,
+        content_type: "audio/ogg".into(),
+        size: ogg.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let reserved = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert!(reserved.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
+    let put = reqwest::Client::new().put(&reserved.upload_url).body(ogg).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    let request = pb::CreateSoundRequest {
+        server_id: server.id.clone(),
+        name: "Horn".into(),
+        url: reserved.media.unwrap().url,
+        duration_ms: 1500,
+        ..Default::default()
+    };
+    let sound = c.soundboard.create_sound(authed(&juan, request)).await.unwrap().into_inner().sound.unwrap();
+    assert_eq!(sound.name, "Horn");
+    let fetched = reqwest::get(&sound.url).await.unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.headers()["content-type"], "audio/ogg; codecs=opus");
+}
+
+/// An Ogg Opus file of `ms` milliseconds of silence (CRCs left out, which the
+/// instance doesn't read).
+fn ogg_opus(ms: u64) -> Vec<u8> {
+    fn page(out: &mut Vec<u8>, packets: &[&[u8]], granule: i64, sequence: u32, flags: u8) {
+        out.extend_from_slice(b"OggS\0");
+        out.push(flags);
+        out.extend_from_slice(&granule.to_le_bytes());
+        out.extend_from_slice(&7u32.to_le_bytes());
+        out.extend_from_slice(&sequence.to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        out.push(packets.len() as u8);
+        out.extend(packets.iter().map(|p| p.len() as u8));
+        for packet in packets {
+            out.extend_from_slice(packet);
+        }
+    }
+    let mut head = b"OpusHead".to_vec();
+    head.extend_from_slice(&[1, 1]);
+    head.extend_from_slice(&312u16.to_le_bytes());
+    head.extend_from_slice(&48_000u32.to_le_bytes());
+    head.extend_from_slice(&[0, 0, 0]);
+    let mut out = Vec::new();
+    page(&mut out, &[&head], 0, 0, 2);
+    page(&mut out, &[b"OpusTags\0\0\0\0\0\0\0\0"], 0, 1, 0);
+    let silence: &[u8] = &[0xf8, 0xff, 0xfe];
+    page(&mut out, &vec![silence; (ms / 20) as usize], (ms as i64) * 48 + 312, 2, 4);
+    out
 }
 
 /// Uploads `bytes` as a file for `server_id`; its link.
