@@ -722,7 +722,6 @@
   "media.cantPlay": "この種類のファイルはアプリで再生できません。保存して再生してください。",
   "media.broken": "このファイルを読み込めませんでした。",
   "media.noSpeakers": "スピーカーを開けませんでした。",
-  "agents.title": "エージェント",
   "agents.about": "サーバーを管理する人なら誰でも追加できるボットです。",
   "agents.showAll": {
     "other": "{count}個のエージェントをすべて表示"

@@ -265,12 +265,31 @@ fn listing_id(a: &pb::AgentListing) -> &str {
     a.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default()
 }
 
-/// The agents split into the featured ones, in the admins' order, and the
-/// rest, in Browse's order (the most servers first).
-pub fn agents_split(found: &DiscoveredAgents) -> (Vec<&pb::AgentListing>, Vec<&pb::AgentListing>) {
-    let featured =
-        found.featured.iter().filter_map(|id| found.agents.iter().find(|a| listing_id(a) == id.as_str())).collect();
-    let rest = found.agents.iter().filter(|a| !found.featured.iter().any(|f| f.as_str() == listing_id(a))).collect();
+/// The agents matching Browse's search (by name, username or bio), split
+/// into the featured ones, in the admins' order, and the rest, in Browse's
+/// order (the most servers first).
+pub fn agents_split<'a>(
+    found: &'a DiscoveredAgents,
+    query: &str,
+) -> (Vec<&'a pb::AgentListing>, Vec<&'a pb::AgentListing>) {
+    let q = query.trim().trim_start_matches('@').to_lowercase();
+    let matches = |a: &pb::AgentListing| {
+        let user = a.user.as_ref();
+        q.is_empty()
+            || user.is_some_and(|u| u.display_name.to_lowercase().contains(&q) || u.username.contains(&q))
+            || a.bio.to_lowercase().contains(&q)
+    };
+    let featured = found
+        .featured
+        .iter()
+        .filter_map(|id| found.agents.iter().find(|a| listing_id(a) == id.as_str()))
+        .filter(|a| matches(a))
+        .collect();
+    let rest = found
+        .agents
+        .iter()
+        .filter(|a| !found.featured.iter().any(|f| f.as_str() == listing_id(a)) && matches(a))
+        .collect();
     (featured, rest)
 }
 
@@ -632,7 +651,7 @@ mod tests {
     #[test]
     fn featured_agents_come_first() {
         let agent = |id: &str| pb::AgentListing {
-            user: Some(pb::User { id: id.into(), ..Default::default() }),
+            user: Some(pb::User { id: id.into(), username: format!("{id}_bot"), ..Default::default() }),
             ..Default::default()
         };
         let found = DiscoveredAgents {
@@ -640,9 +659,12 @@ mod tests {
             featured: vec!["b".into(), "gone".into()],
         };
         let ids = |v: Vec<&pb::AgentListing>| v.iter().map(|a| listing_id(a).to_owned()).collect::<Vec<_>>();
-        let (featured, rest) = agents_split(&found);
+        let (featured, rest) = agents_split(&found, "");
         assert_eq!(ids(featured), ["b"]);
         assert_eq!(ids(rest), ["a", "c"]);
+        let (featured, rest) = agents_split(&found, "@A_");
+        assert!(featured.is_empty());
+        assert_eq!(ids(rest), ["a"]);
     }
 
     #[test]

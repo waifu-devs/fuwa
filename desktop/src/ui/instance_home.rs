@@ -26,6 +26,7 @@ use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Nav};
 use crate::ui::motion;
+use crate::ui::settings_controls::segmented;
 use crate::ui::text::{TIGHT, Tracked, WIDE, tracked};
 use crate::ui::theme::{Palette, alpha, mix, radius_2xl, radius_3xl, radius_xl};
 use crate::ui::widgets::{icon, pal, server_icon};
@@ -435,9 +436,13 @@ impl FuwaApp {
             .flex_col()
             .child(self.hero(key, width, &p, window, cx))
             .child(self.have_invite(&p, window, cx))
-            .children(self.browse_agents(key, width, cols, &p, cx))
-            .child(self.browse_header(&p, window, cx))
-            .child(self.browse_results(key, width, cols, &p, window, cx));
+            .child(self.browse_header(key, &p, window, cx));
+        // Agents have their own tab where the instance lists them; servers come first.
+        let body = if self.browse_tab_agents(key) {
+            body.child(self.browse_agents(key, width, cols, &p, window, cx))
+        } else {
+            body.child(self.browse_results(key, width, cols, &p, window, cx))
+        };
         div()
             .id("instance-page")
             .size_full()
@@ -645,8 +650,42 @@ impl FuwaApp {
             .into_any_element()
     }
 
-    fn browse_header(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Whether Browse shows the instance's agents rather than its servers.
+    fn browse_tab_agents(&self, key: &str) -> bool {
+        self.home.agents.tab.contains(key)
+            && self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("agent-discovery")))
+    }
+
+    fn browse_header(&mut self, key: &str, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let focused = has_focus(&self.home.search, window, cx);
+        let agents_here = self.core.shared.read(|s| s.instance(key).is_some_and(|i| i.has("agent-discovery")));
+        let title = if agents_here {
+            let k = key.to_owned();
+            segmented(
+                "browse-tab",
+                vec![(t("workspace.home.servers"), Some("users")), (t("workspace.agents.tab"), Some("bot"))],
+                usize::from(self.browse_tab_agents(key)),
+                112.0,
+                p,
+                window,
+                cx,
+                move |this, n, cx| {
+                    if n == 1 {
+                        this.home.agents.tab.insert(k.clone());
+                    } else {
+                        this.home.agents.tab.remove(&k);
+                    }
+                    cx.notify();
+                },
+            )
+        } else {
+            div()
+                .text_size(px(18.0))
+                .line_height(px(28.0))
+                .font_weight(FontWeight::EXTRA_BOLD)
+                .child(t("workspace.home.browse"))
+                .into_any_element()
+        };
         div()
             .mt(px(32.0))
             .mb(px(16.0))
@@ -654,13 +693,7 @@ impl FuwaApp {
             .items_center()
             .justify_between()
             .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(18.0))
-                    .line_height(px(28.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .child(t("workspace.home.browse")),
-            )
+            .child(title)
             .child(focus_ring(
                 div()
                     .w(px(288.0))

@@ -722,7 +722,6 @@
   "media.cantPlay": "Loại tệp này không phát được trong ứng dụng. Hãy lưu về để phát.",
   "media.broken": "Không đọc được tệp này.",
   "media.noSpeakers": "Không mở được loa.",
-  "agents.title": "Tác tử",
   "agents.about": "Bot mà ai quản lý máy chủ cũng có thể thêm.",
   "agents.showAll": {
     "other": "Hiện tất cả {count} tác tử"

@@ -722,7 +722,6 @@
   "media.cantPlay": "应用内无法播放此类文件。请保存后播放。",
   "media.broken": "无法读取此文件。",
   "media.noSpeakers": "无法打开扬声器。",
-  "agents.title": "智能体",
   "agents.about": "任何管理服务器的人都可以添加的机器人。",
   "agents.showAll": {
     "other": "显示全部 {count} 个智能体"

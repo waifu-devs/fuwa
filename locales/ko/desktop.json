@@ -722,7 +722,6 @@
   "media.cantPlay": "이 형식의 파일은 앱에서 재생할 수 없어요. 저장한 뒤 재생하세요.",
   "media.broken": "이 파일을 읽을 수 없어요.",
   "media.noSpeakers": "스피커를 열 수 없어요.",
-  "agents.title": "에이전트",
   "agents.about": "서버를 관리하는 사람이면 누구나 추가할 수 있는 봇이에요.",
   "agents.showAll": {
     "other": "에이전트 {count}개 모두 보기"
