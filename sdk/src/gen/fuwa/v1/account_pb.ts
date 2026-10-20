@@ -871,8 +871,9 @@ export type ListSignInMethodsResponse = Message<"fuwa.v1.ListSignInMethodsRespon
   canLink: boolean;
 
   /**
-   * What linking or unlinking asks for: the password, a two-step code, or
-   * (without either) a session from the last ten minutes, so sign in again.
+   * What linking or unlinking asks for: the password and a two-step code.
+   * Without either, unlinking (not linking) asks for a session from the last
+   * ten minutes, so sign in again.
    *
    * @generated from field: bool needs_password = 4;
    */

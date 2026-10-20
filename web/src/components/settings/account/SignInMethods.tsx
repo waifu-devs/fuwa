@@ -209,7 +209,7 @@ function Proof({
       data-testid="sign-in-proof"
     >
       <p className="font-extrabold">{t(linking ? "accountsettings.signIn.linkTitle" : "accountsettings.signIn.unlinkTitle", { name: asking.name })}</p>
-      {listed.needsFreshSignIn && <p className="text-sm text-muted-foreground">{t("accountsettings.signIn.freshNote")}</p>}
+      {!linking && listed.needsFreshSignIn && <p className="text-sm text-muted-foreground">{t("accountsettings.signIn.freshNote")}</p>}
       {listed.needsPassword && (
         <ProofField id="sign-in-proof-password" label={t("accountsettings.signIn.passwordLabel")}>
           <Input
