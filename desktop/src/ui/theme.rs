@@ -423,6 +423,7 @@ pub fn backdrop(cx: &App) -> std::sync::Arc<Backdrop> {
 pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
     let theme = prefs.shown_theme(system_dark(appearance));
     let backdrop = prefs.active_backdrop(&theme);
+    crate::ui::backdrop::forget_video(backdrop.file.as_ref());
     let saturation = f32::from(prefs.saturation) / 100.0;
     let vision = accessibility::color_vision_matrix(prefs.color_vision, f32::from(prefs.color_vision_strength) / 100.0);
     *SHOWN.write() = Shown { saturation, vision };

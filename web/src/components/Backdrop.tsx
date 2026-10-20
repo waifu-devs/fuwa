@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePageVisible } from "@/hooks/use-page-visible";
 import { CUSTOM, hasBackdrop, isShader, type Backdrop, type Effect, type ShaderEffect } from "@/lib/backdrop";
+import { backdropFileUrl } from "@/lib/backdrop-files";
+import type { BackdropFile } from "@/lib/device-backdrop";
 import { shaderId, type CustomShader } from "@/lib/effects/custom";
 import type { Colors, Painter, Source } from "@/lib/effects/gpu";
 import { useShaderStatus } from "@/lib/effects/status";
@@ -61,13 +63,19 @@ export function BackdropLayers({
   still: boolean;
   className?: string;
 }) {
-  const picture = shownPicture(backdrop.image);
+  // This device's video or picture stands in for the instance's picture.
+  const file = backdrop.file;
+  const picture = file ? null : shownPicture(backdrop.image);
   return (
     <div aria-hidden className={cn("backdrop-layers", !running && "paused", className)}>
       <AnimatePresence initial={false}>
-        {picture && <Picture key={picture} url={picture} backdrop={backdrop} />}
+        {file ? (
+          <DeviceFile key={file.id} file={file} backdrop={backdrop} playing={running && !still} />
+        ) : (
+          picture && <Picture key={picture} url={picture} backdrop={backdrop} />
+        )}
       </AnimatePresence>
-      {picture && <div className="backdrop-dim" style={{ opacity: backdrop.dim / 100 }} />}
+      {(picture || file) && <div className="backdrop-dim" style={{ opacity: backdrop.dim / 100 }} />}
       <AnimatePresence initial={false}>
         {backdrop.effect !== "none" && (
           <motion.div
@@ -116,6 +124,62 @@ function Picture({ url, backdrop }: { url: string; backdrop: Backdrop }) {
         backgroundImage: `url("${url.replace(/["\\]/g, "")}")`,
         backgroundSize: tile ? "auto" : backdrop.fit,
         backgroundRepeat: tile ? "repeat" : "no-repeat",
+        filter: backdrop.blur ? `blur(${backdrop.blur}px)` : undefined,
+        inset: backdrop.blur ? `-${backdrop.blur * 2}px` : 0,
+      }}
+    />
+  );
+}
+
+/**
+ * A video or picture from this device, played from this browser's own copy
+ * (lib/backdrop-files.ts). A video loops without sound, and holds still
+ * while the backdrop isn't running (the window hidden, settings over it) or
+ * with reduced motion.
+ */
+function DeviceFile({ file, backdrop, playing }: { file: BackdropFile; backdrop: Backdrop; playing: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void backdropFileUrl(file.id).then((u) => live && setUrl(u));
+    return () => {
+      live = false;
+    };
+  }, [file.id]);
+  if (!url) return null;
+  if (file.kind === "image") return <Picture url={url} backdrop={backdrop} />;
+  return <Video url={url} backdrop={backdrop} playing={playing} />;
+}
+
+function Video({ url, backdrop, playing }: { url: string; backdrop: Backdrop; playing: boolean }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    const el = video.current;
+    if (!el) return;
+    if (playing) void el.play().catch(() => {});
+    else el.pause();
+  }, [playing, loaded]);
+  return (
+    <motion.video
+      ref={video}
+      src={url}
+      muted
+      loop
+      playsInline
+      disablePictureInPicture
+      disableRemotePlayback
+      preload="auto"
+      onLoadedData={() => setLoaded(true)}
+      className="backdrop-picture"
+      initial={{ opacity: 0, scale: 1.04 }}
+      animate={loaded ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 1.04 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+      style={{
+        width: backdrop.blur ? `calc(100% + ${backdrop.blur * 4}px)` : "100%",
+        height: backdrop.blur ? `calc(100% + ${backdrop.blur * 4}px)` : "100%",
+        objectFit: backdrop.fit === "contain" ? "contain" : "cover",
         filter: backdrop.blur ? `blur(${backdrop.blur}px)` : undefined,
         inset: backdrop.blur ? `-${backdrop.blur * 2}px` : 0,
       }}

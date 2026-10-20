@@ -16,6 +16,7 @@ use gpui_kit::{
     StyledImage as _, Window, div, px, rgb,
 };
 
+use crate::core::backdrop_files::BackdropFile;
 use crate::core::config::Prefs;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::themes::{self, Backdrop, Effect, Fit, Picture, SEEDS, TOKENS, Theme, Tokens};
@@ -55,6 +56,8 @@ pub(crate) struct ThemesForm {
     backgrounds: Option<(String, Vec<String>)>,
     loading: Option<String>,
     uploading: bool,
+    /// A video or picture of yours being copied in for behind the app.
+    keeping: bool,
     confirming: Option<String>,
     picture_error: Option<String>,
     /// Which tile of each grid has the check, and since when, while it glides there.
@@ -357,6 +360,9 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let b = self.backdrop_of(target);
+        // Only the app's own backdrop takes a file of yours; a theme's travels.
+        let file = if target == Target::App { self.core.prefs_now().backdrop_file.clone() } else { None };
+        let video = file.as_ref().is_some_and(|f| f.kind == crate::core::backdrop_files::Kind::Video);
         let ids = |name: &str| {
             crate::ui::settings_servers::leak_id(&format!(
                 "bd-{}-{name}",
@@ -381,36 +387,32 @@ impl SettingsView {
                 )
                 .child(body)
         };
-        let library = self.picture_library(target, &b, width, p, cx);
+        let library = self.picture_library(target, &b, file.as_ref(), width, p, cx);
         let mut picture = div().flex().flex_col().gap(px(8.0)).child(library);
-        if !b.image.is_empty() {
+        if !b.image.is_empty() || file.is_some() {
             let at = match b.fit {
                 Fit::Cover => 0,
                 Fit::Contain => 1,
+                // A video can't repeat: it fills instead.
+                Fit::Tile if video => 0,
                 Fit::Tile => 2,
             };
+            let mut fits = vec![
+                Opt::new(t("appsettings.backdrop.fill"), t("appsettings.backdrop.fillHint"), "maximize-2"),
+                Opt::new(t("appsettings.backdrop.fit"), t("appsettings.backdrop.fitHint"), "minimize-2"),
+            ];
+            if !video {
+                fits.push(Opt::new(t("appsettings.backdrop.tile"), t("appsettings.backdrop.tileHint"), "grid-2x2"));
+            }
             picture = picture.child(motion::rise(
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
-                    .child(choice(
-                        ids("fit"),
-                        Some(at),
-                        vec![
-                            Opt::new(t("appsettings.backdrop.fill"), t("appsettings.backdrop.fillHint"), "maximize-2"),
-                            Opt::new(t("appsettings.backdrop.fit"), t("appsettings.backdrop.fitHint"), "minimize-2"),
-                            Opt::new(t("appsettings.backdrop.tile"), t("appsettings.backdrop.tileHint"), "grid-2x2"),
-                        ],
-                        width,
-                        p,
-                        window,
-                        cx,
-                        move |this, n, cx| {
-                            let fit = [Fit::Cover, Fit::Contain, Fit::Tile][n];
-                            this.patch_backdrop(target, cx, |b| b.fit = fit)
-                        },
-                    ))
+                    .child(choice(ids("fit"), Some(at), fits, width, p, window, cx, move |this, n, cx| {
+                        let fit = [Fit::Cover, Fit::Contain, Fit::Tile][n];
+                        this.patch_backdrop(target, cx, |b| b.fit = fit)
+                    }))
                     .child(self.labeled_slider(
                         ids("dim"),
                         &t("appsettings.backdrop.dim"),
@@ -422,17 +424,19 @@ impl SettingsView {
                         window,
                         cx,
                     ))
-                    .child(self.labeled_slider(
-                        ids("blur"),
-                        &t("appsettings.backdrop.blur"),
-                        format!("{}px", b.blur),
-                        (f32::from(themes::BLUR.0), f32::from(themes::BLUR.1), 1.0),
-                        f32::from(b.blur),
-                        Self::backdrop_setter(target, |b, v| b.blur = v),
-                        p,
-                        window,
-                        cx,
-                    )),
+                    .when(!video, |el| {
+                        el.child(self.labeled_slider(
+                            ids("blur"),
+                            &t("appsettings.backdrop.blur"),
+                            format!("{}px", b.blur),
+                            (f32::from(themes::BLUR.0), f32::from(themes::BLUR.1), 1.0),
+                            f32::from(b.blur),
+                            Self::backdrop_setter(target, |b, v| b.blur = v),
+                            p,
+                            window,
+                            cx,
+                        ))
+                    }),
                 SharedString::from(format!("{}-in", ids("pic-opts"))),
                 Duration::ZERO,
                 -6.0,
@@ -626,11 +630,15 @@ impl SettingsView {
         self.account_me().map(|(k, _)| k)
     }
 
-    /// Your backgrounds on the instance, a tile to add one, and None.
+    /// Your backgrounds on the instance, a tile to add one, and None; for the
+    /// app's own backdrop, also a tile for a video or picture of yours, kept on
+    /// this computer and never uploaded (a video dropped on them goes there too).
+    #[allow(clippy::too_many_arguments)]
     fn picture_library(
         &mut self,
         target: Target,
         b: &Backdrop,
+        file: Option<&BackdropFile>,
         width: f32,
         p: &Palette,
         cx: &mut Context<Self>,
@@ -668,9 +676,15 @@ impl SettingsView {
         // The check glides to the picture picked (the web's `layoutId`): over the grid on its
         // way, then back in its tile, where it lifts with it. Tiles are None, Add (with an
         // instance), then the pictures; the check sits 4px in from the 2px border.
-        let first = if key.is_some() { 2 } else { 1 };
-        let picked =
-            if b.image.is_empty() { 0 } else { shown.iter().position(|u| *u == b.image).map_or(0, |n| n + first) };
+        let device = target == Target::App;
+        let first = 1 + usize::from(key.is_some()) + usize::from(device) + usize::from(file.is_some());
+        let picked = if file.is_some() {
+            first - 1
+        } else if b.image.is_empty() {
+            0
+        } else {
+            shown.iter().position(|u| *u == b.image).map_or(0, |n| n + first)
+        };
         let moving = self.check_moving(format!("bg-check-{}", target == Target::App), picked, cx);
         let (r, c) = (picked / cols, picked % cols);
         let gliding = glide_check(
@@ -703,8 +717,11 @@ impl SettingsView {
                 .active(|s| s.scale(0.95))
         };
         tiles.push(
-            tile(format!("bg-none-{}", target == Target::App), b.image.is_empty(), p)
-                .on_click(cx.listener(move |this, _, _, cx| this.patch_backdrop(target, cx, |b| b.image.clear())))
+            tile(format!("bg-none-{}", target == Target::App), b.image.is_empty() && file.is_none(), p)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.forget_backdrop_file(target, cx);
+                    this.patch_backdrop(target, cx, |b| b.image.clear())
+                }))
                 .child(
                     div()
                         .size_full()
@@ -715,7 +732,7 @@ impl SettingsView {
                         .justify_center()
                         .child(icon("image-off").size(px(20.0))),
                 )
-                .when(b.image.is_empty() && !moving, |el| el.child(check(p)))
+                .when(b.image.is_empty() && file.is_none() && !moving, |el| el.child(check(p)))
                 .into_any_element(),
         );
         if let Some(key) = key.clone() {
@@ -751,8 +768,90 @@ impl SettingsView {
                     .into_any_element(),
             );
         }
+        if device {
+            let keeping = self.themes.keeping;
+            let hover_fg = p.primary;
+            tiles.push(
+                div()
+                    .id("bg-device")
+                    .w(px(tile_w))
+                    .h(px(tile_h))
+                    .rounded(radius_xl())
+                    .border_2()
+                    .border_dashed()
+                    .border_color(p.border)
+                    .text_color(p.muted_foreground)
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(4.0))
+                    .text_size(px(10.4))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .cursor_pointer()
+                    .hover(move |s| s.border_color(alpha(hover_fg, 0.6)).text_color(hover_fg).translate_y(px(-2.0)))
+                    .active(|s| s.scale(0.95))
+                    .on_click(cx.listener(|this, _, _, cx| this.pick_backdrop_file(cx)))
+                    .child(icon(if keeping { "loader-circle" } else { "film" }).size(px(20.0)))
+                    .child(tracked(t("appsettings.backdrop.fromDevice").to_uppercase(), WIDE))
+                    .into_any_element(),
+            );
+        }
+        if let Some(file) = file {
+            let thumb = match (file.kind, file.path()) {
+                (crate::core::backdrop_files::Kind::Image, Some(path)) => {
+                    gpui_kit::img(path).size_full().object_fit(ObjectFit::Cover).into_any_element()
+                }
+                _ => div()
+                    .size_full()
+                    .bg(p.muted)
+                    .text_color(p.primary)
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(2.0))
+                    .child(icon("film").size(px(20.0)))
+                    .child(
+                        div()
+                            .max_w_full()
+                            .px(px(6.0))
+                            .truncate()
+                            .text_size(px(10.0))
+                            .text_color(p.muted_foreground)
+                            .child(file.name.clone()),
+                    )
+                    .into_any_element(),
+            };
+            tiles.push(
+                tile("bg-device-file".into(), true, p)
+                    .group("bgtile")
+                    .child(thumb)
+                    .when(!moving, |el| el.child(check(p)))
+                    .child(
+                        div()
+                            .id("bg-device-remove")
+                            .absolute()
+                            .top(px(4.0))
+                            .right(px(4.0))
+                            .rounded_full()
+                            .bg(alpha(p.background, 0.9))
+                            .px(px(6.0))
+                            .py(px(4.0))
+                            .text_color(p.destructive)
+                            .opacity(0.0)
+                            .group_hover("bgtile", |s| s.opacity(1.0))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.forget_backdrop_file(target, cx);
+                            }))
+                            .child(icon("trash").size(px(12.0))),
+                    )
+                    .into_any_element(),
+            );
+        }
         for url in shown {
-            let active = b.image == url;
+            let active = b.image == url && file.is_none();
             let is_kept = kept.contains(&url);
             let confirming = self.themes.confirming.as_deref() == Some(url.as_str());
             let (pick, gone) = (url.clone(), url.clone());
@@ -762,6 +861,7 @@ impl SettingsView {
                     .group("bgtile")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let pick = pick.clone();
+                        this.forget_backdrop_file(target, cx);
                         this.patch_backdrop(target, cx, move |b| b.image = pick)
                     }))
                     .child(crate::ui::widgets::picture(url.clone()).size_full().object_fit(ObjectFit::Cover))
@@ -816,11 +916,19 @@ impl SettingsView {
             grid = grid.child(row);
         }
         let grid = grid.when(moving, |el| el.child(gliding));
-        // A picture dropped anywhere on them is uploaded, as on the add tile (the web's BackdropForm).
-        let grid = grid.when_some(key.clone(), |el, key| {
+        // A picture dropped anywhere on them is uploaded, as on the add tile (the web's
+        // BackdropForm); a video, or anything without an instance, is kept on this computer.
+        let drop_key = key.clone();
+        let grid = grid.when(drop_key.is_some() || device, |el| {
             el.on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
-                if let Some(path) = paths.paths().first() {
-                    this.upload_background_from(key.clone(), target, path.clone(), cx);
+                let Some(path) = paths.paths().first().cloned() else { return };
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let video =
+                    crate::core::backdrop_files::kind_of(&name) == Some(crate::core::backdrop_files::Kind::Video);
+                match drop_key.clone() {
+                    Some(key) if !(device && video) => this.upload_background_from(key, target, path, cx),
+                    _ if device => this.keep_backdrop_file(path, cx),
+                    _ => {}
                 }
             }))
         });
@@ -829,6 +937,12 @@ impl SettingsView {
             .flex_col()
             .gap(px(8.0))
             .child(grid)
+            .when_some(file, |el, f| {
+                el.child(div().text_xs().text_color(p.muted_foreground).truncate().child(t_with(
+                    "appsettings.backdrop.deviceInUse",
+                    &[("name", Arg::Str(if f.name.is_empty() { "…" } else { &f.name }))],
+                )))
+            })
             .when(key.is_none(), |el| {
                 el.child(div().text_xs().text_color(p.muted_foreground).child(t("appsettings.backdrop.needInstance")))
             })
@@ -836,6 +950,64 @@ impl SettingsView {
                 el.child(div().text_xs().font_weight(FontWeight::BOLD).text_color(p.destructive).child(e))
             })
             .into_any_element()
+    }
+
+    /// Lets go of the app's video or picture of yours (picking anything else does).
+    fn forget_backdrop_file(&mut self, target: Target, cx: &mut Context<Self>) {
+        if target == Target::App && self.core.prefs_now().backdrop_file.is_some() {
+            self.set(cx, |pr| pr.backdrop_file = None);
+        }
+    }
+
+    fn pick_backdrop_file(&mut self, cx: &mut Context<Self>) {
+        if self.themes.keeping {
+            return;
+        }
+        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(t("appsettings.backdrop.fromDevice").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let Some(path) = paths.into_iter().next() else { return };
+            let _ = this.update(cx, |this, cx| this.keep_backdrop_file(path, cx));
+        })
+        .detach();
+    }
+
+    /// Copies a video or picture of yours in (picked, or dropped on the pictures) and puts it behind the app.
+    fn keep_backdrop_file(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        if self.themes.keeping {
+            return;
+        }
+        self.themes.keeping = true;
+        self.themes.picture_error = None;
+        cx.notify();
+        let core = self.core.clone();
+        cx.spawn(async move |this, cx| {
+            let dir = crate::core::backdrop_files::dir();
+            let rx = core.spawn(async move {
+                tokio::task::spawn_blocking(move || crate::core::backdrop_files::import(&dir, &path))
+                    .await
+                    .unwrap_or_else(|_| Err(t("appsettings.backdrop.deviceCantSave")))
+            });
+            let result = rx.await;
+            let _ = this.update(cx, |this, cx| {
+                this.themes.keeping = false;
+                match result {
+                    Ok(Ok(file)) => {
+                        crate::core::reports::used("backdrop.file");
+                        this.set(cx, |pr| pr.backdrop_file = Some(file));
+                    }
+                    Ok(Err(error)) => this.themes.picture_error = Some(error),
+                    Err(_) => {}
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn upload_background_to(&mut self, key: String, target: Target, cx: &mut Context<Self>) {

@@ -179,7 +179,8 @@ impl SettingsView {
     /// Saves the theme on screen as a file, with its background picture when it has one.
     pub(crate) fn export_theme_file(&mut self, theme: Theme, cx: &mut Context<Self>) {
         let prefs = self.core.prefs();
-        let backdrop = Some(prefs.active_backdrop(&theme)).filter(Backdrop::any);
+        // This computer's own video or picture never goes in a theme file.
+        let backdrop = Some(Backdrop { file: None, ..prefs.active_backdrop(&theme) }).filter(Backdrop::any);
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
         let path = cx.prompt_for_new_path(&dir, Some(&themes::file_name(&theme.name)));
         let core = self.core.clone();

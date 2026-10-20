@@ -5,11 +5,15 @@
  *
  * Pictures only ever come from fuwa instances: someone uploads one to an
  * instance they're signed in to (MediaService's backgrounds), and the link is
- * shown only while that instance is one the app trusts (lib/shown.ts).
+ * shown only while that instance is one the app trusts (lib/shown.ts). A
+ * video or picture from this device (`BackdropFile`) can stand in for the
+ * picture behind the app instead; it stays on the device
+ * (lib/device-backdrop.ts) and is never part of a theme or a synced setting.
  */
 
 import type { Key } from "@/i18n/i18n";
 import { sanitizeShader, type CustomShader } from "@/lib/effects/custom";
+import type { BackdropFile } from "@/lib/device-backdrop";
 
 /** Effects drawn on the GPU (with a CSS stand-in where WebGPU isn't available). */
 export const SHADER_EFFECTS = ["aurora", "petals", "stars", "waves"] as const;
@@ -58,6 +62,12 @@ export type Backdrop = {
   panels: number;
   /** The shader drawn when `effect` is "custom", kept even while another effect is picked. */
   shader: CustomShader | null;
+  /**
+   * A video or picture from this device drawn instead of `image`. Only ever
+   * put in by `activeBackdrop` from the device's own setting: never stored,
+   * synced or written to a theme.
+   */
+  file?: BackdropFile;
 };
 
 export const DEFAULT_BACKDROP: Backdrop = {
@@ -114,4 +124,4 @@ export function sanitizeBackdrop(value: unknown): Backdrop {
 }
 
 /** Whether there's anything behind the app at all. */
-export const hasBackdrop = (b: Backdrop) => !!b.image || b.effect !== "none";
+export const hasBackdrop = (b: Backdrop) => !!b.image || !!b.file || b.effect !== "none";

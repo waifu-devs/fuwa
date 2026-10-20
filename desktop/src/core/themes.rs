@@ -464,6 +464,11 @@ pub struct Backdrop {
     pub panels: u8,
     /// The shader drawn when `effect` is `Custom`, kept even while another effect is picked.
     pub shader: Option<CustomShader>,
+    /// A video or picture of yours drawn instead of `image`. Only ever put in
+    /// by `Prefs::active_backdrop` from this computer's own setting: never
+    /// saved with the backdrop, synced or written to a theme.
+    #[serde(skip)]
+    pub file: Option<crate::core::backdrop_files::BackdropFile>,
 }
 
 impl Default for Backdrop {
@@ -478,6 +483,7 @@ impl Default for Backdrop {
             speed: 100,
             panels: 35,
             shader: None,
+            file: None,
         }
     }
 }
@@ -534,12 +540,13 @@ impl Backdrop {
             speed: clamp(b.get("speed"), SPEED, d.speed),
             panels: clamp(b.get("panels"), PANELS, d.panels),
             shader,
+            file: None,
         }
     }
 
     /// Whether there's anything behind the app at all.
     pub fn any(&self) -> bool {
-        !self.image.is_empty() || self.effect != Effect::None
+        !self.image.is_empty() || self.file.is_some() || self.effect != Effect::None
     }
 }
 

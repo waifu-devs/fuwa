@@ -272,6 +272,11 @@ fn clock(running: bool, speed: u8) -> f32 {
 /// instead of drawing frames nobody sees.
 static HELD: AtomicBool = AtomicBool::new(false);
 
+/// Whether something opaque covers the whole window ([`hold`]).
+pub fn held() -> bool {
+    HELD.load(Ordering::Relaxed)
+}
+
 pub fn hold(covered: bool) {
     HELD.store(covered, Ordering::Relaxed);
 }

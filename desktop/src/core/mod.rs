@@ -17,6 +17,7 @@ pub mod api;
 pub mod app_settings;
 pub mod arrange;
 pub mod attachments;
+pub mod backdrop_files;
 pub mod backgrounds;
 pub mod backup;
 pub mod board;
@@ -487,6 +488,13 @@ impl Core {
         sounds::pick_devices(&prefs.input_device, &prefs.output_device);
         sounds::set_picks(&paths.sounds(), &prefs.sound_picks);
         fonts::set_dir(&paths.fonts());
+        backdrop_files::set_dir(&paths.backdrops());
+        {
+            let (dir, prefs) = (paths.backdrops(), prefs.clone());
+            let _ = std::thread::Builder::new()
+                .name("fuwa-backdrops-sweep".into())
+                .spawn(move || backdrop_files::sweep(&dir, &prefs));
+        }
         {
             let (dir, prefs) = (paths.fonts(), prefs.clone());
             let _ =
