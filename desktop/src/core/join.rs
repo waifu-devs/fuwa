@@ -3,7 +3,8 @@
 //! applications you're waiting on kept on this computer so they wait in the
 //! rail. A port of the web app's `discover`, `joinServer`, `applyToJoin`,
 //! `withdrawApplication`, `checkApplied` and `lookUpInvite` (fuwa/actions.ts),
-//! `lib/applied.ts` and `lib/invites.ts`.
+//! `lib/applied.ts` and `lib/invites.ts`; and the public agents in Browse
+//! and agents' invite links (`AgentService.DiscoverAgents`, `LookUpAgent`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -171,6 +172,33 @@ pub fn parse_invite(text: &str, here: &str) -> Option<(String, String)> {
     Some((instance_key(&url), code.to_owned()))
 }
 
+/// What someone pasted as an agent's invite: its link from any instance
+/// (`<instance>/agent/<username>`), or `@username` on the instance they're
+/// looking at (`here`). Gives the instance's key and the username.
+pub fn parse_agent_link(text: &str, here: &str) -> Option<(String, String)> {
+    let pasted = text.trim();
+    let pasted = pasted.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/');
+    // As usernames are made: 2 to 32 of a-z, 0-9, _ and . (any case pasted).
+    let name_ok = |u: &str| {
+        (2..=32).contains(&u.len())
+            && u.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+            && !u.starts_with(['_', '.'])
+    };
+    if let Some(name) = pasted.strip_prefix('@') {
+        return name_ok(name).then(|| (here.to_owned(), name.to_ascii_lowercase()));
+    }
+    let at = pasted.rfind("/agent/")?;
+    if at == 0 {
+        return None;
+    }
+    let name = pasted[at + "/agent/".len()..].trim_start_matches('@');
+    if !name_ok(name) {
+        return None;
+    }
+    let url = normalize_url(&pasted[..at]).ok()?;
+    Some((instance_key(&url), name.to_ascii_lowercase()))
+}
+
 /// An instance's address from its key ("chat.example.com~fuwa" is chat.example.com/fuwa).
 pub fn address_of(key: &str) -> String {
     key.replace('~', "/")
@@ -223,6 +251,62 @@ pub fn browse_split<'a>(found: &'a Discovered, query: &str) -> (Vec<&'a pb::Serv
         .collect();
     let rest = found.servers.iter().filter(|s| !found.featured.contains(&s.id) && matches(s)).collect();
     (featured, rest)
+}
+
+/// Browse's agents on an instance: its public ones, featured first in the
+/// order the admins put them, and the ids of those featured.
+#[derive(Debug, Clone, Default)]
+pub struct DiscoveredAgents {
+    pub agents: Vec<pb::AgentListing>,
+    pub featured: Vec<String>,
+}
+
+fn listing_id(a: &pb::AgentListing) -> &str {
+    a.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default()
+}
+
+/// The agents split into the featured ones, in the admins' order, and the
+/// rest, in Browse's order (the most servers first).
+pub fn agents_split(found: &DiscoveredAgents) -> (Vec<&pb::AgentListing>, Vec<&pb::AgentListing>) {
+    let featured =
+        found.featured.iter().filter_map(|id| found.agents.iter().find(|a| listing_id(a) == id.as_str())).collect();
+    let rest = found.agents.iter().filter(|a| !found.featured.iter().any(|f| f.as_str() == listing_id(a))).collect();
+    (featured, rest)
+}
+
+/// The servers you manage on an instance, where an agent could be added,
+/// and whether it's in each already (as far as the members here say).
+pub fn managed_servers(i: &InstanceState, agent_id: &str) -> Vec<(pb::Server, bool)> {
+    i.servers
+        .iter()
+        .filter(|s| i.access(&s.id).has(pb::Permission::ManageServer))
+        .map(|s| {
+            let here = i
+                .members
+                .get(&s.id)
+                .is_some_and(|m| m.iter().any(|m| m.user.as_ref().is_some_and(|u| u.id == agent_id)));
+            (s.clone(), here)
+        })
+        .collect()
+}
+
+/// The roles an agent could join a server with: with Manage Roles, those
+/// below your highest (never @everyone), highest first.
+pub fn assignable_roles(i: &InstanceState, server_id: &str) -> Vec<pb::Role> {
+    let access = i.access(server_id);
+    if !access.has(pb::Permission::ManageRoles) {
+        return Vec::new();
+    }
+    let mut roles: Vec<pb::Role> = i
+        .roles
+        .get(server_id)
+        .into_iter()
+        .flatten()
+        .filter(|r| r.id != server_id && access.above(r.position))
+        .cloned()
+        .collect();
+    roles.sort_by_key(|r| std::cmp::Reverse(r.position));
+    roles
 }
 
 /// What asking about your applications found.
@@ -292,6 +376,22 @@ impl Core {
         let api = self.api(key).ok_or_else(missing)?;
         let res = rpc!(api.servers(), discover_servers(pb::DiscoverServersRequest {})).await?;
         Ok(Discovered { servers: res.servers, featured: res.featured_server_ids })
+    }
+
+    /// The public agents in the instance's Browse, featured ones first, and which are featured.
+    pub async fn discover_agents(&self, key: &str) -> Result<DiscoveredAgents, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.agents(), discover_agents(pb::DiscoverAgentsRequest {})).await?;
+        Ok(DiscoveredAgents { agents: res.agents, featured: res.featured_agent_ids })
+    }
+
+    /// One agent you may add somewhere, by id or username: any public one,
+    /// or your own. Anyone else's private agent is NOT_FOUND.
+    pub async fn look_up_agent(&self, key: &str, agent_id: &str, username: &str) -> Result<pb::AgentListing, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let req = pb::LookUpAgentRequest { agent_id: agent_id.into(), username: username.into() };
+        let res = rpc!(api.agents(), look_up_agent(req)).await?;
+        res.agent.ok_or_else(|| Problem::new(tonic::Code::NotFound, "That agent isn't here."))
     }
 
     /// Makes a server, with all the web form's choices.
@@ -501,6 +601,48 @@ mod tests {
         assert_eq!(parse_invite("not an invite", "here"), None);
         assert_eq!(parse_invite("/invite/abc", "here"), None);
         assert_eq!(parse_invite("https://x.com/invite/a-b", "here"), None);
+    }
+
+    #[test]
+    fn agent_links_from_any_instance() {
+        assert_eq!(
+            parse_agent_link(" https://chat.example.com/agent/helper_bot/ ", "here"),
+            Some(("chat.example.com".into(), "helper_bot".into()))
+        );
+        assert_eq!(
+            parse_agent_link("http://127.0.0.1:18080/agent/Mr.Bot?ref=1", "here"),
+            Some(("127.0.0.1:18080".into(), "mr.bot".into()))
+        );
+        assert_eq!(
+            parse_agent_link("https://example.com/fuwa/agent/@bot", "here"),
+            Some(("example.com~fuwa".into(), "bot".into()))
+        );
+        assert_eq!(parse_agent_link("@helper_bot", "here"), Some(("here".into(), "helper_bot".into())));
+        assert_eq!(parse_agent_link("@x", "here"), None);
+        assert_eq!(parse_agent_link("https://chat.example.com/agent/", "here"), None);
+        assert_eq!(parse_agent_link("/agent/bot", "here"), None);
+        assert_eq!(parse_agent_link("https://x.com/agent/a-b", "here"), None);
+        assert_eq!(parse_agent_link("https://x.com/agent/_bot", "here"), None);
+        assert_eq!(parse_agent_link("https://chat.example.com/invite/abc", "here"), None);
+        // An invite isn't an agent, nor the other way round.
+        assert_eq!(parse_invite("https://chat.example.com/agent/bot", "here"), None);
+        assert_eq!(parse_agent_link("hTKzmak", "here"), None);
+    }
+
+    #[test]
+    fn featured_agents_come_first() {
+        let agent = |id: &str| pb::AgentListing {
+            user: Some(pb::User { id: id.into(), ..Default::default() }),
+            ..Default::default()
+        };
+        let found = DiscoveredAgents {
+            agents: vec![agent("b"), agent("a"), agent("c")],
+            featured: vec!["b".into(), "gone".into()],
+        };
+        let ids = |v: Vec<&pb::AgentListing>| v.iter().map(|a| listing_id(a).to_owned()).collect::<Vec<_>>();
+        let (featured, rest) = agents_split(&found);
+        assert_eq!(ids(featured), ["b"]);
+        assert_eq!(ids(rest), ["a", "c"]);
     }
 
     #[test]

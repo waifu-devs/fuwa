@@ -355,6 +355,7 @@ impl FuwaApp {
             | Dialog::CreateServer { .. }
             | Dialog::Apply { .. }
             | Dialog::Application { .. }
+            | Dialog::AddAgent { .. }
             | Dialog::Welcome { .. }
             | Dialog::Onboarding { .. }
             | Dialog::Secure { .. }
@@ -445,6 +446,7 @@ impl FuwaApp {
             Dialog::Picture { .. } => "picture",
             Dialog::Apply { .. } => "apply",
             Dialog::Application { .. } => "application",
+            Dialog::AddAgent { .. } => "add-agent",
             Dialog::ShareScreen => "share",
             Dialog::Leaving { .. } => "leaving",
             Dialog::Report { .. } => "report",

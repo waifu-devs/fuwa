@@ -30,7 +30,7 @@ npm install @waifu-devs/fuwa
 ## An agent in a few lines
 
 Make the agent in the app (Settings, Agents), copy its token, and add it to a
-server (Server settings, Integrations). Then:
+server (Server settings, Integrations, or its invite link). Then:
 
 ```ts
 import { Agent } from "@waifu-devs/fuwa";
@@ -43,6 +43,12 @@ agent.on("mention", (ctx) => ctx.reply("You called?"));
 
 await agent.start();
 ```
+
+Once it's public (Settings, Agents), anyone can add it to a server they
+manage from its invite link, `agent.inviteLink` once started
+(`<instance>/agent/<username>`; `agentInviteLink(url, username)` builds one
+without an agent), from Browse, or from its profile card. Whoever adds it can
+pick the roles it joins with (`AddAgentRequest.role_ids`).
 
 A whole example, with dice, help and saving where it left off, is
 [`sdk/examples/echo-agent.ts`](../sdk/examples/echo-agent.ts):

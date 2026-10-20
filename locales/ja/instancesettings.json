@@ -549,5 +549,13 @@
   "nav.profileDecorations": "アバターデコレーション",
   "nav.profileItemsAbout": "このインスタンスの全員が身につけられるエフェクトとアバターデコレーション。",
   "signUps.decorationsLabel": "アバターの周りにデコレーションを付けられるようにする",
-  "signUps.decorationsHint": "インスタンスやサーバーのプロフィールアイテムの画像です。オフにすると誰のデコレーションも表示されず、再びオンにすると各自の選択が戻ります。"
+  "signUps.decorationsHint": "インスタンスやサーバーのプロフィールアイテムの画像です。オフにすると誰のデコレーションも表示されず、再びオンにすると各自の選択が戻ります。",
+  "nav.featuredAgents": "おすすめのエージェント",
+  "nav.featuredAgentsAbout": "「見つける」で最初に表示される公開エージェント",
+  "featuredAgents.intro": "ここの公開エージェントはすべて「見つける」に表示され、参加サーバーが多い順に並びます。おすすめにしたものは、大きく、あなたが決めた順で先頭に表示されます。",
+  "featuredAgents.none": "公開エージェントはまだありません",
+  "featuredAgents.noneHint": "オーナーが公開すると、エージェントがここに表示されます。",
+  "featuredAgents.feature": "「見つける」でおすすめに表示",
+  "featuredAgents.featuredNow": "{agent}を「見つける」でおすすめに表示しました",
+  "featuredAgents.unfeaturedNow": "{agent}をおすすめから外しました"
 }

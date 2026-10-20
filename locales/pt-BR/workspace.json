@@ -445,5 +445,39 @@
   "calls.cantRecord": "Este navegador não consegue gravar.",
   "calls.noServerRecord": "Esta instância não grava canais de voz no servidor.",
   "calls.serverRecordStopped": "Parado. A gravação está nas gravações deste canal.",
-  "calls.fileName": "chamada fuwa {when}"
+  "calls.fileName": "chamada fuwa {when}",
+  "agents.addToServer": "Adicionar a um servidor",
+  "agents.addedTo": "Adicionado a {server}",
+  "agents.managed": "Servidores que você gerencia",
+  "agents.noManagedTitle": "Nenhum servidor para adicioná-lo",
+  "agents.noManaged": "Você precisa de Gerenciar servidor em um servidor para adicionar agentes lá.",
+  "agents.here": "Adicionado",
+  "agents.add": "Adicionar",
+  "agents.servers": {
+    "one": "em {count} servidor",
+    "other": "em {count} servidores"
+  },
+  "agents.madeBy": "Criado por {name}",
+  "agents.copyLink": "Copiar link de convite",
+  "agents.copied": "Copiado",
+  "agents.copyFailed": "Não foi possível copiar o link",
+  "agents.browse": "Explorar agentes",
+  "agents.browseAbout": "Agentes públicos neste servidor fuwa. Adicione um a um servidor que você gerencia.",
+  "agents.browseAboutNoServers": "Agentes públicos neste servidor fuwa. Quem gerencia um servidor pode adicioná-los lá.",
+  "agents.open": "Ver agente",
+  "agentPage.signIn": "Entre, ou crie uma conta neste servidor fuwa, para adicioná-lo a um servidor que você gerencia.",
+  "agentPage.private": "Privado: só você pode adicioná-lo",
+  "agentPage.gone": "Este agente não está aqui",
+  "agentPage.failed": "Não foi possível abrir este agente",
+  "agentPage.goneAbout": "Ele pode ter sido excluído ou tornado privado, ou o link tem um erro de digitação. Pergunte a quem o enviou.",
+  "agentPage.elsewhere.title": "Abrir este agente em outro fuwa?",
+  "agentPage.elsewhere.about": "Este agente fica em {host}, que você ainda não adicionou. Abri-lo conecta você a essa instância, que vai ver seu endereço IP. Só continue se confiar em quem enviou o link.",
+  "agents.rolesTitle": "Adicionar {agent} a {server}",
+  "agents.rolesAbout": "Escolha os cargos com que ele entra, para que possa fazer seu trabalho desde o início. Sem nenhum, ele tem só o que todos têm.",
+  "agents.cancel": "Cancelar",
+  "agents.addWithRoles": {
+    "one": "Adicionar com {count} cargo",
+    "other": "Adicionar com {count} cargos"
+  },
+  "agents.addWithoutRoles": "Adicionar sem cargos"
 }

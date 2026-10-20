@@ -721,5 +721,29 @@
   "media.unmute": "ミュート解除",
   "media.cantPlay": "この種類のファイルはアプリで再生できません。保存して再生してください。",
   "media.broken": "このファイルを読み込めませんでした。",
-  "media.noSpeakers": "スピーカーを開けませんでした。"
+  "media.noSpeakers": "スピーカーを開けませんでした。",
+  "agents.title": "エージェント",
+  "agents.about": "サーバーを管理する人なら誰でも追加できるボットです。",
+  "agents.showAll": {
+    "other": "{count}個のエージェントをすべて表示"
+  },
+  "agents.madeBy": "{name}が作成",
+  "agents.private": "非公開：あなただけが追加できます。",
+  "agents.add": "追加",
+  "agents.alreadyIn": "参加済み",
+  "agents.addedTo": "{agent}を{server}に追加しました",
+  "agents.missing": "エージェントが見つかりません",
+  "agents.missingAbout": "その名前のエージェントはここにいないか、非公開です。",
+  "agents.signInFirst": "{host}のエージェントを追加するには、{host}にログインしてください。",
+  "agents.copyLink": "招待リンクをコピー",
+  "agents.adminNav": "エージェント",
+  "agents.adminNavAbout": "公開エージェントを「見つける」でおすすめに表示",
+  "agents.adminAbout": "公開エージェントは、ここの全員の「見つける」に表示されます。おすすめにしたものは、大きく、あなたが並べた順で先頭に表示されます。",
+  "agents.adminCount": {
+    "other": "公開エージェント{count}個"
+  },
+  "agents.adminNone": "公開エージェントはまだありません。オーナーが公開すると、エージェントがここに表示されます。",
+  "agents.featuredNow": "{agent}を「見つける」でおすすめに表示しました",
+  "agents.unfeaturedNow": "{agent}をおすすめから外しました",
+  "agents.withRoles": "参加時のロール："
 }

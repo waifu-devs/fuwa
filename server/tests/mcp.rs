@@ -114,7 +114,10 @@ async fn world(instance: &Instance) -> World {
         .into_inner();
     let agent_id = made.agent.unwrap().user.unwrap().id;
     agents
-        .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &owner,
+            pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     World { channel, owner, owner_id, agent: made.token, agent_id, server_id: server.id, general_id }

@@ -743,5 +743,31 @@
   "media.unmute": "अनम्यूट करें",
   "media.cantPlay": "इस तरह की फ़ाइल ऐप में नहीं चल सकती। चलाने के लिए इसे सहेजें।",
   "media.broken": "यह फ़ाइल पढ़ी नहीं जा सकी।",
-  "media.noSpeakers": "स्पीकर नहीं खुल सके।"
+  "media.noSpeakers": "स्पीकर नहीं खुल सके।",
+  "agents.title": "एजेंट",
+  "agents.about": "ऐसे बॉट जिन्हें सर्वर मैनेज करने वाला कोई भी जोड़ सकता है।",
+  "agents.showAll": {
+    "one": "{count} और एजेंट दिखाएं",
+    "other": "सभी {count} एजेंट दिखाएं"
+  },
+  "agents.madeBy": "{name} ने बनाया",
+  "agents.private": "निजी: सिर्फ़ आप इसे जोड़ सकते हैं।",
+  "agents.add": "जोड़ें",
+  "agents.alreadyIn": "पहले से यहां है",
+  "agents.addedTo": "{agent} को {server} में जोड़ा गया",
+  "agents.missing": "एजेंट नहीं मिला",
+  "agents.missingAbout": "यहां उस नाम का कोई एजेंट नहीं है, या वह निजी है।",
+  "agents.signInFirst": "{host} के एजेंट जोड़ने के लिए वहां साइन इन करें।",
+  "agents.copyLink": "आमंत्रण लिंक कॉपी करें",
+  "agents.adminNav": "एजेंट",
+  "agents.adminNavAbout": "सार्वजनिक एजेंटों को ब्राउज़ में फ़ीचर करें",
+  "agents.adminAbout": "सार्वजनिक एजेंट यहां सबके लिए ब्राउज़ में दिखते हैं। जिन्हें आप फ़ीचर करते हैं, वे सबसे पहले, बड़े आकार में, आपके रखे क्रम में आते हैं।",
+  "agents.adminCount": {
+    "one": "{count} सार्वजनिक एजेंट",
+    "other": "{count} सार्वजनिक एजेंट"
+  },
+  "agents.adminNone": "अभी कोई सार्वजनिक एजेंट नहीं। कोई एजेंट यहां तब दिखता है जब उसका मालिक उसे सार्वजनिक कर देता है।",
+  "agents.featuredNow": "{agent} को ब्राउज़ में फ़ीचर किया जा रहा है",
+  "agents.unfeaturedNow": "{agent} को फ़ीचर करना बंद किया",
+  "agents.withRoles": "इन भूमिकाओं के साथ जुड़ें:"
 }

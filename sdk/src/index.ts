@@ -58,7 +58,7 @@ export {
 export { EventFollower, listEvents, type EventKind, type EventPayload, type FollowOptions, type FollowUpdate } from "./events.js";
 export { messagePages, messages, type MessagePagesOptions, type MessageWithAuthor } from "./pages.js";
 export { DEFAULT_RETRY, type RetryOptions } from "./retry.js";
-export { emoji, mentions, parseCommand, roleMention, type ParsedCommand } from "./text.js";
+export { agentInviteLink, emoji, mentions, parseCommand, roleMention, type ParsedCommand } from "./text.js";
 export { uploadPicture, type UploadOptions } from "./upload.js";
 export {
   Utterance,

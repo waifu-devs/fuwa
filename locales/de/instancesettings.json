@@ -563,5 +563,13 @@
   "nav.profileDecorations": "Avatar-Dekorationen",
   "nav.profileItemsAbout": "Effekte und Avatar-Dekorationen, die alle auf dieser Instanz tragen können.",
   "signUps.decorationsLabel": "Leute können eine Dekoration um ihren Avatar tragen",
-  "signUps.decorationsHint": "Bilder aus den Profil-Items der Instanz und der Server. Ausgeschaltet wird keine angezeigt, und die Auswahl aller kommt zurück, wenn es wieder an ist."
+  "signUps.decorationsHint": "Bilder aus den Profil-Items der Instanz und der Server. Ausgeschaltet wird keine angezeigt, und die Auswahl aller kommt zurück, wenn es wieder an ist.",
+  "nav.featuredAgents": "Empfohlene Agenten",
+  "nav.featuredAgentsAbout": "Öffentliche Agenten, die „Entdecken“ zuerst zeigt",
+  "featuredAgents.intro": "Jeder öffentliche Agent hier erscheint unter „Entdecken“, die in den meisten Servern zuerst. Die du empfiehlst, kommen ganz nach vorne, groß und in deiner Reihenfolge.",
+  "featuredAgents.none": "Noch keine öffentlichen Agenten",
+  "featuredAgents.noneHint": "Ein Agent erscheint hier, sobald sein Eigentümer ihn öffentlich macht.",
+  "featuredAgents.feature": "Unter „Entdecken“ empfehlen",
+  "featuredAgents.featuredNow": "{agent} wird unter „Entdecken“ empfohlen",
+  "featuredAgents.unfeaturedNow": "{agent} wird nicht mehr empfohlen"
 }

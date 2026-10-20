@@ -3,8 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, LockKeyholeIcon, MessageCircleIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, m as motion, useIsPresent } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { Member, User } from "@/gen/fuwa/v1/types_pb";
-import { loadProfile, run } from "@/fuwa/actions";
+import type { Member, Server, User } from "@/gen/fuwa/v1/types_pb";
+import { loadProfile, lookUpAgentHere, run } from "@/fuwa/actions";
 import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
 import { byId } from "@/fuwa/hooks";
@@ -14,6 +14,8 @@ import { ProfileCard } from "@/components/ProfileCard";
 import { ProfileGive } from "@/components/economy/ProfileGive";
 import { ProfileReport } from "@/components/modview/ProfileReport";
 import { FriendActions } from "@/components/friends/FriendActions";
+import { AddAgentMenu, AddAgentRoles, useManagedServers } from "@/components/agents/AddAgent";
+import { instanceHas } from "@/lib/compat";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -80,6 +82,8 @@ export function ProfilePopover({
   const [moderating, setModerating] = useState<ModAction | null>(null);
   // The dialog mounts the first time it's wanted and stays, so its closing animation plays.
   const [moderated, setModerated] = useState(false);
+  // Picking an agent's roles happens after the card closes, so the dialog outlives it.
+  const [agentTo, setAgentTo] = useState<Server | null>(null);
   if (!user) return <>{children}</>;
   return (
     <>
@@ -99,10 +103,15 @@ export function ProfilePopover({
               setModerated(true);
               setModerating(action);
             }}
+            onAddAgent={(server) => {
+              setOpen(false);
+              setAgentTo(server);
+            }}
           />
         )}
       </AnimatePresence>
     </Popover.Root>
+    {agentTo && <AddAgentRoles instanceKey={instanceKey} agent={user} server={agentTo} onDone={() => setAgentTo(null)} />}
     {member && moderated && (
       <ModerateDialog instanceKey={instanceKey} serverId={member.serverId} member={moderating ? member : null} action={moderating} onClose={() => setModerating(null)} />
     )}
@@ -118,6 +127,7 @@ function ProfileContent({
   side,
   onClose,
   onModerate,
+  onAddAgent,
 }: {
   instanceKey: string;
   user: User;
@@ -125,6 +135,7 @@ function ProfileContent({
   side: "right" | "left" | "top" | "bottom";
   onClose: () => void;
   onModerate: (action: ModAction) => void;
+  onAddAgent: (server: Server) => void;
 }) {
   // False once it's closing, so a load isn't started again on the way out.
   const present = useIsPresent();
@@ -166,6 +177,7 @@ function ProfileContent({
             className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
           />
           {canMessage && <MessageButton instanceKey={instanceKey} user={user} onOpened={onClose} />}
+          {isAgent(user) && <AgentAdd instanceKey={instanceKey} user={user} onAsk={onAddAgent} />}
           {canFriend && (
             <motion.div
               initial={{ opacity: 0, y: -6 }}
@@ -242,6 +254,40 @@ function MessageButton({ instanceKey, user, onOpened }: { instanceKey: string; u
           className="size-3.5 opacity-80 transition-transform duration-300 group-hover:translate-x-0.5"
         />
       </motion.button>
+    </motion.div>
+  );
+}
+
+/**
+ * "Add to server" on an agent's card, for someone who manages a server here
+ * and may add it (it's public, or theirs): the instance says which.
+ */
+function AgentAdd({ instanceKey, user, onAsk }: { instanceKey: string; user: User; onAsk: (server: Server) => void }) {
+  const here = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "agent-discovery"));
+  const managed = useManagedServers(instanceKey).length > 0;
+  const [addable, setAddable] = useState(false);
+
+  useEffect(() => {
+    if (!here || !managed) return;
+    let cancelled = false;
+    run(lookUpAgentHere(instanceKey, { agentId: user.id })).then(
+      () => !cancelled && setAddable(true),
+      () => !cancelled && setAddable(false),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [here, managed, instanceKey, user.id]);
+
+  if (!here || !managed || !addable) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.05 }}
+      className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
+    >
+      <AddAgentMenu instanceKey={instanceKey} agent={user} className="h-9 w-full" onAsk={onAsk} />
     </motion.div>
   );
 }

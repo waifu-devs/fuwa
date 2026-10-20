@@ -721,5 +721,29 @@
   "media.unmute": "เปิดเสียง",
   "media.cantPlay": "ไฟล์ประเภทนี้เล่นในแอปไม่ได้ บันทึกไฟล์เพื่อเล่น",
   "media.broken": "อ่านไฟล์นี้ไม่ได้",
-  "media.noSpeakers": "เปิดลำโพงไม่ได้"
+  "media.noSpeakers": "เปิดลำโพงไม่ได้",
+  "agents.title": "เอเจนต์",
+  "agents.about": "บอทที่ทุกคนที่จัดการเซิร์ฟเวอร์เพิ่มได้",
+  "agents.showAll": {
+    "other": "แสดงเอเจนต์ทั้งหมด {count} ตัว"
+  },
+  "agents.madeBy": "สร้างโดย {name}",
+  "agents.private": "ส่วนตัว: มีแค่คุณที่เพิ่มได้",
+  "agents.add": "เพิ่ม",
+  "agents.alreadyIn": "อยู่ที่นี่แล้ว",
+  "agents.addedTo": "เพิ่ม {agent} เข้า {server} แล้ว",
+  "agents.missing": "ไม่พบเอเจนต์",
+  "agents.missingAbout": "ไม่มีเอเจนต์ชื่อนั้นที่นี่ หรือเอเจนต์นั้นเป็นแบบส่วนตัว",
+  "agents.signInFirst": "เข้าสู่ระบบ {host} เพื่อเพิ่มเอเจนต์ของที่นั่น",
+  "agents.copyLink": "คัดลอกลิงก์คำเชิญ",
+  "agents.adminNav": "เอเจนต์",
+  "agents.adminNavAbout": "แนะนำเอเจนต์สาธารณะในหน้าเรียกดู",
+  "agents.adminAbout": "เอเจนต์สาธารณะจะแสดงในหน้าเรียกดูสำหรับทุกคนที่นี่ ตัวที่คุณแนะนำจะขึ้นก่อน แสดงขนาดใหญ่ ตามลำดับที่คุณจัดไว้",
+  "agents.adminCount": {
+    "other": "เอเจนต์สาธารณะ {count} ตัว"
+  },
+  "agents.adminNone": "ยังไม่มีเอเจนต์สาธารณะ เอเจนต์จะแสดงที่นี่เมื่อเจ้าของตั้งให้เป็นสาธารณะ",
+  "agents.featuredNow": "กำลังแนะนำ {agent} ในหน้าเรียกดู",
+  "agents.unfeaturedNow": "หยุดแนะนำ {agent} แล้ว",
+  "agents.withRoles": "เข้าร่วมพร้อมบทบาท:"
 }

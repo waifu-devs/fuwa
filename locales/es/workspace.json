@@ -445,5 +445,39 @@
   "calls.cantRecord": "Este navegador no puede grabar.",
   "calls.noServerRecord": "Esta instancia no graba los canales de voz en el servidor.",
   "calls.serverRecordStopped": "Se detuvo. La grabación está en las grabaciones de este canal.",
-  "calls.fileName": "llamada de fuwa {when}"
+  "calls.fileName": "llamada de fuwa {when}",
+  "agents.addToServer": "Agregar a un servidor",
+  "agents.addedTo": "Agregado a {server}",
+  "agents.managed": "Servidores que administras",
+  "agents.noManagedTitle": "No hay servidores donde agregarlo",
+  "agents.noManaged": "Necesitas el permiso Administrar servidor en un servidor para agregar agentes ahí.",
+  "agents.here": "Agregado",
+  "agents.add": "Agregar",
+  "agents.servers": {
+    "one": "en {count} servidor",
+    "other": "en {count} servidores"
+  },
+  "agents.madeBy": "Creado por {name}",
+  "agents.copyLink": "Copiar el enlace de invitación",
+  "agents.copied": "Copiado",
+  "agents.copyFailed": "No se pudo copiar el enlace",
+  "agents.browse": "Explorar agentes",
+  "agents.browseAbout": "Agentes públicos en este servidor de fuwa. Agrega uno a un servidor que administres.",
+  "agents.browseAboutNoServers": "Agentes públicos en este servidor de fuwa. Quien administre un servidor puede agregarlos ahí.",
+  "agents.open": "Ver agente",
+  "agentPage.signIn": "Inicia sesión, o crea una cuenta en este servidor de fuwa, para agregarlo a un servidor que administres.",
+  "agentPage.private": "Privado: solo tú puedes agregarlo",
+  "agentPage.gone": "Este agente no está aquí",
+  "agentPage.failed": "No se pudo abrir este agente",
+  "agentPage.goneAbout": "Puede que lo hayan eliminado o hecho privado, o que el enlace tenga un error. Pregúntale a quien te lo envió.",
+  "agentPage.elsewhere.title": "¿Abrir este agente en otro fuwa?",
+  "agentPage.elsewhere.about": "Este agente está en {host}, que todavía no agregaste. Abrirlo se conecta a esa instancia, así que verá tu dirección IP. Continúa solo si confías en quien te envió el enlace.",
+  "agents.rolesTitle": "Agregar a {agent} a {server}",
+  "agents.rolesAbout": "Elige los roles con los que entra, para que pueda hacer su trabajo desde el principio. Sin ninguno, solo tiene lo que tienen todos.",
+  "agents.cancel": "Cancelar",
+  "agents.addWithRoles": {
+    "one": "Agregar con {count} rol",
+    "other": "Agregar con {count} roles"
+  },
+  "agents.addWithoutRoles": "Agregar sin roles"
 }

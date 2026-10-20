@@ -26,12 +26,12 @@ fn audit_bits(bits: Bits) -> String {
 }
 
 /// A role by id, inside a write, refusing @everyone where it can't be used.
-async fn load_role(conn: &turso::Connection, server_id: &str, role_id: &str) -> Result<pb::Role> {
+pub(super) async fn load_role(conn: &turso::Connection, server_id: &str, role_id: &str) -> Result<pb::Role> {
     permissions::role(conn, server_id, &crate::id::parse_id("role_id", role_id)?).await?.ok_or(Error::NotFound("role"))
 }
 
 /// Refuses roles ranked at or above the caller's own.
-fn check_below(access: &Access, role: &pb::Role) -> Result<()> {
+pub(super) fn check_below(access: &Access, role: &pb::Role) -> Result<()> {
     if access.above(role.position.into()) {
         Ok(())
     } else {

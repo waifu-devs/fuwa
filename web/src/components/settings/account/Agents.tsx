@@ -6,6 +6,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   KeyRoundIcon,
+  LinkIcon,
   LoaderCircleIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -21,12 +22,15 @@ import type { Agent } from "@/gen/fuwa/v1/agent_pb";
 import { AgentCreation, type Server } from "@/gen/fuwa/v1/types_pb";
 import { addAgent, createAgent, deleteAgent, listAgents, resetAgentToken, run, updateAgent } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { getInstance, useInstance } from "@/fuwa/hooks";
+import { useInstance } from "@/fuwa/hooks";
 import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { AgentEndpointSection } from "@/components/settings/account/AgentEndpoint";
+import { managedServers } from "@/components/agents/AddAgent";
+import { agentLink } from "@/lib/agent-links";
+import { publicBase } from "@/lib/invites";
 import { Count } from "@/components/motion";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Toggle } from "@/components/settings/controls";
@@ -37,8 +41,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { T, useI18n } from "@/i18n/react";
 import { instanceHas } from "@/lib/compat";
 import { ago, displayName, toDate } from "@/lib/format";
-import { accessOf, has } from "@/lib/permissions";
-import { Permission } from "@/gen/fuwa/v1/types_pb";
 import { usePrefs } from "@/lib/prefs";
 import { hidesPersonal } from "@/lib/streamer";
 import { toast } from "@/lib/ui";
@@ -46,18 +48,6 @@ import { cn } from "@/lib/utils";
 
 const BIO_MAX = 2000;
 const USERNAME = /^[a-z0-9][a-z0-9_.]{1,31}$/;
-
-/** The servers you manage, where you can add an agent. */
-function managedServers(key: string): Server[] {
-  const inst = getInstance(key);
-  if (!inst?.me) return [];
-  const me = inst.me;
-  return inst.servers.filter((s) => {
-    const member = inst.members[s.id]?.find((m) => m.user?.id === me.id);
-    const access = accessOf(s.id, s.ownerId, inst.roles[s.id] ?? [], inst.channels[s.id] ?? [], me.id, member?.roleIds ?? []);
-    return has(access, Permission.MANAGE_SERVER);
-  });
-}
 
 /**
  * Your agents on this instance: accounts your programs drive (bots,
@@ -401,6 +391,8 @@ function AgentCard({
   const inst = useInstance(instanceKey);
   // Endpoints only where the instance has them (docs/agent-endpoints.md).
   const endpointsHere = instanceHas(inst?.node?.versions, "agent-endpoints");
+  // Invite links open a page that adds the agent (<instance>/agent/<username>).
+  const discoveryHere = instanceHas(inst?.node?.versions, "agent-discovery");
 
   async function save(change: { displayName?: string; avatarUrl?: string; bio?: string; public?: boolean }) {
     setBusy("save");
@@ -539,6 +531,7 @@ function AgentCard({
 
               <motion.div layout="position" transition={SPRING} className="flex flex-wrap items-center gap-2">
                 <AddToServer servers={servers} busy={busy} added={added} inServer={inServer} onAdd={(server) => void addTo(server)} />
+                {discoveryHere && <CopyAgentLink link={agentLink(publicBase(instanceKey), user.username)} />}
                 <DangerActions confirm={confirm} busy={busy} onConfirm={setConfirm} onReset={() => void reset()} onRemove={() => void remove()} />
                 <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(lang, toDate(a.createdAt)) })}</span>
               </motion.div>
@@ -640,6 +633,26 @@ function AddToServer({
         })}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Its invite link: anyone who opens it picks a server they manage to add it to (when it's public). */
+function CopyAgentLink({ link }: { link: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast(t("workspace.agents.copyFailed"));
+    }
+  }
+  return (
+    <Button type="button" size="sm" variant="ghost" className="rounded-xl font-bold" title={link} onClick={() => void copy()}>
+      {copied ? <CheckIcon strokeWidth={3} /> : <LinkIcon />} {copied ? t("workspace.agents.copied") : t("workspace.agents.copyLink")}
+    </Button>
   );
 }
 

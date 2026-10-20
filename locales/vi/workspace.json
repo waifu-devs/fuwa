@@ -434,5 +434,37 @@
   "calls.cantRecord": "Trình duyệt này không thể ghi.",
   "calls.noServerRecord": "Instance này không ghi kênh thoại trên máy chủ.",
   "calls.serverRecordStopped": "Đã dừng. Bản ghi nằm trong mục bản ghi của kênh này.",
-  "calls.fileName": "Cuộc gọi fuwa {when}"
+  "calls.fileName": "Cuộc gọi fuwa {when}",
+  "agents.addToServer": "Thêm vào máy chủ",
+  "agents.addedTo": "Đã thêm vào {server}",
+  "agents.managed": "Máy chủ bạn quản lý",
+  "agents.noManagedTitle": "Không có máy chủ nào để thêm",
+  "agents.noManaged": "Bạn cần quyền Quản lý máy chủ trong một máy chủ để thêm tác tử vào đó.",
+  "agents.here": "Đã thêm",
+  "agents.add": "Thêm",
+  "agents.servers": {
+    "other": "trong {count} máy chủ"
+  },
+  "agents.madeBy": "Tạo bởi {name}",
+  "agents.copyLink": "Sao chép liên kết mời",
+  "agents.copied": "Đã sao chép",
+  "agents.copyFailed": "Không thể sao chép liên kết",
+  "agents.browse": "Khám phá tác tử",
+  "agents.browseAbout": "Các tác tử công khai trên máy chủ fuwa này. Hãy thêm một tác tử vào máy chủ bạn quản lý.",
+  "agents.browseAboutNoServers": "Các tác tử công khai trên máy chủ fuwa này. Ai quản lý máy chủ cũng có thể thêm chúng vào đó.",
+  "agents.open": "Xem tác tử",
+  "agentPage.signIn": "Đăng nhập, hoặc tạo tài khoản trên máy chủ fuwa này, để thêm nó vào máy chủ bạn quản lý.",
+  "agentPage.private": "Riêng tư: chỉ bạn mới thêm được",
+  "agentPage.gone": "Tác tử này không có ở đây",
+  "agentPage.failed": "Không thể mở tác tử này",
+  "agentPage.goneAbout": "Có thể nó đã bị xóa hoặc chuyển sang riêng tư, hoặc liên kết bị gõ sai. Hãy hỏi người đã gửi.",
+  "agentPage.elsewhere.title": "Mở tác tử này trên fuwa khác?",
+  "agentPage.elsewhere.about": "Tác tử này ở trên {host}, nơi bạn chưa thêm. Mở nó sẽ kết nối tới instance đó, nên nó sẽ thấy địa chỉ IP của bạn. Chỉ tiếp tục nếu bạn tin người đã gửi liên kết.",
+  "agents.rolesTitle": "Thêm {agent} vào {server}",
+  "agents.rolesAbout": "Chọn các vai trò nó có khi tham gia, để nó làm được việc ngay từ đầu. Không có vai trò nào, nó chỉ có những gì mọi người đều có.",
+  "agents.cancel": "Hủy",
+  "agents.addWithRoles": {
+    "other": "Thêm với {count} vai trò"
+  },
+  "agents.addWithoutRoles": "Thêm không kèm vai trò"
 }

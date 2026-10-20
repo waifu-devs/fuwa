@@ -721,5 +721,29 @@
   "media.unmute": "取消靜音",
   "media.cantPlay": "這類檔案無法在 App 中播放。請儲存後再播放。",
   "media.broken": "無法讀取這個檔案。",
-  "media.noSpeakers": "無法開啟喇叭。"
+  "media.noSpeakers": "無法開啟喇叭。",
+  "agents.title": "代理",
+  "agents.about": "任何管理伺服器的人都能加入的機器人。",
+  "agents.showAll": {
+    "other": "顯示全部 {count} 個代理"
+  },
+  "agents.madeBy": "由 {name} 建立",
+  "agents.private": "私人：只有你可以加入它。",
+  "agents.add": "加入",
+  "agents.alreadyIn": "已在這裡",
+  "agents.addedTo": "已將 {agent} 加入 {server}",
+  "agents.missing": "找不到代理",
+  "agents.missingAbout": "這裡沒有這個名稱的代理，或它是私人的。",
+  "agents.signInFirst": "登入 {host} 以加入它的代理。",
+  "agents.copyLink": "複製邀請連結",
+  "agents.adminNav": "代理",
+  "agents.adminNavAbout": "在「探索」中精選公開代理",
+  "agents.adminAbout": "公開代理會在「探索」中向這裡的所有人顯示。你精選的代理會依你排列的順序以大卡片排在最前。",
+  "agents.adminCount": {
+    "other": "{count} 個公開代理"
+  },
+  "agents.adminNone": "還沒有公開代理。代理的擁有者將它設為公開後，它就會顯示在這裡。",
+  "agents.featuredNow": "已在「探索」中精選 {agent}",
+  "agents.unfeaturedNow": "已停止精選 {agent}",
+  "agents.withRoles": "加入時帶有的身分組："
 }

@@ -6,6 +6,7 @@ use tonic::{Request, Response, Status};
 
 use super::endpoints;
 use super::messages::post_join;
+use super::roles::{check_below, load_role};
 use super::{Api, respond, text};
 use crate::auth;
 use crate::error::{Error, Result};
@@ -16,6 +17,12 @@ use crate::servers::{self as store, Audit, Payload};
 
 /// Most agents one person may make.
 pub const MAX_AGENTS: i64 = 25;
+
+/// Most agents Browse lists.
+pub const MAX_DISCOVERED_AGENTS: usize = 500;
+
+/// Most roles an agent may join with.
+pub const MAX_JOIN_ROLES: usize = 25;
 
 /// Most agents a server may name in its MCP access.
 pub const MAX_MCP_AGENTS: usize = 100;
@@ -84,6 +91,59 @@ impl Api {
         }
     }
 
+    /// An agent as someone who may add it sees it, with its owner's name.
+    async fn agent_listing(&self, row: AgentRow) -> Result<pb::AgentListing> {
+        let owner = self.app.node()?.account(&row.owner_id).await?.map(|a| a.user());
+        let servers = self.app.index.joined_ids(&row.account.id).len();
+        Ok(pb::AgentListing {
+            user: Some(row.account.user()),
+            bio: row.bio,
+            owner,
+            servers: i32::try_from(servers).unwrap_or(i32::MAX),
+            public: row.public,
+            created_at: Some(timestamp(row.account.created_at)),
+        })
+    }
+
+    /// An agent the caller may add somewhere: any public one, or their own.
+    /// A private agent is as good as missing to everyone else, and to
+    /// someone not signed in (an invite link opened before signing in).
+    async fn look_up_agent(&self, caller: Option<&Account>, req: pb::LookUpAgentRequest) -> Result<pb::AgentListing> {
+        let node = self.app.node()?;
+        let row = if !req.agent_id.is_empty() {
+            node.agent(Some(&req.agent_id), None).await?
+        } else {
+            let username = req.username.trim().trim_start_matches('@');
+            if username.is_empty() {
+                return Err(Error::invalid("name an agent by id or username"));
+            }
+            node.agent(None, Some(&auth::validate_username(username)?)).await?
+        };
+        let row = row
+            .filter(|row| !row.account.disabled && (row.public || caller.is_some_and(|c| row.owner_id == c.id)))
+            .ok_or(Error::NotFound("agent"))?;
+        self.agent_listing(row).await
+    }
+
+    /// Public agents for Browse: featured first, in their order, then the
+    /// most servers first.
+    async fn discover_agents(&self) -> Result<pb::DiscoverAgentsResponse> {
+        let node = self.app.node()?;
+        let mut rows = node.public_agents().await?;
+        let featured: Vec<String> =
+            node.featured_agents().await?.into_iter().filter(|id| rows.iter().any(|r| &r.account.id == id)).collect();
+        let place = |id: &str| featured.iter().position(|f| f == id).unwrap_or(featured.len());
+        let servers = |id: &str| self.app.index.joined_ids(id).len();
+        // Stable, so agents in as many servers keep the newest first.
+        rows.sort_by_key(|r| (place(&r.account.id), std::cmp::Reverse(servers(&r.account.id))));
+        rows.truncate(MAX_DISCOVERED_AGENTS);
+        let mut agents = Vec::with_capacity(rows.len());
+        for row in rows {
+            agents.push(self.agent_listing(row).await?);
+        }
+        Ok(pb::DiscoverAgentsResponse { agents, featured_agent_ids: featured })
+    }
+
     async fn update_agent(&self, owner: &Account, req: pb::UpdateAgentRequest) -> Result<pb::Agent> {
         let agent = self.own_agent(owner, &req.agent_id).await?;
         // The owner uploads the picture; it becomes the agent's, so it goes
@@ -110,12 +170,18 @@ impl Api {
 
     async fn add_agent(&self, account: &Account, req: pb::AddAgentRequest) -> Result<pb::Member> {
         let seat = self.with(account, &req.server_id, Permission::ManageServer).await?;
+        if !req.role_ids.is_empty() {
+            seat.access.require(Permission::ManageRoles)?;
+        }
+        if req.role_ids.len() > MAX_JOIN_ROLES {
+            return Err(Error::invalid(format!("an agent joins with at most {MAX_JOIN_ROLES} roles")));
+        }
         let username = auth::validate_username(&req.username)?;
         let agent = self.app.find_agent(&username).await?.ok_or(Error::NotFound("agent"))?;
         if !agent.public && agent.owner_id != account.id {
             return Err(Error::denied("that agent is private: only the person who made it can add it to servers"));
         }
-        let sdb = seat.sdb;
+        let (sdb, access) = (seat.sdb, seat.access);
         let limits = sdb.limits(&self.app.settings().limits).await?;
         let user = agent.account.user();
         let now = now_ms();
@@ -139,7 +205,28 @@ impl Api {
                 }
                 let server = store::load_server(conn).await?;
                 // Agents don't agree to rules: whoever adds one answers for it.
-                let member = store::add_member(conn, &user, &sdb.id, now, false).await?;
+                let mut member = store::add_member(conn, &user, &sdb.id, now, false).await?;
+                if !req.role_ids.is_empty() {
+                    for role_id in &req.role_ids {
+                        let role = load_role(conn, &sdb.id, role_id).await?;
+                        if role.id == sdb.id {
+                            return Err(Error::invalid("everyone has @everyone"));
+                        }
+                        check_below(&access, &role)?;
+                        conn.execute(
+                            "INSERT INTO member_roles (user_id, role_id) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+                            (user.id.as_str(), role.id.as_str()),
+                        )
+                        .await?;
+                        let entry = Audit::new(pb::AuditAction::MemberRolesUpdate, &user.id).role(&role.name).change(
+                            "role",
+                            "",
+                            role.id.as_str(),
+                        );
+                        store::audit(conn, &account.id, entry).await?;
+                    }
+                    member = store::member(conn, &sdb.id, &user.id).await?.ok_or(Error::NotFound("member"))?;
+                }
                 events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member.clone()) }));
                 post_join(conn, &server, &user.id, now, events).await?;
                 store::audit(conn, &account.id, Audit::new(pb::AuditAction::AgentAdd, &user.id)).await?;
@@ -421,6 +508,37 @@ impl AgentService for Api {
                 let agent = self.own_agent(&owner, &request.get_ref().agent_id).await?;
                 self.erase_account(&agent.account).await?;
                 Ok(pb::DeleteAgentResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn look_up_agent(
+        &self,
+        request: Request<pb::LookUpAgentRequest>,
+    ) -> Result<Response<pb::LookUpAgentResponse>, Status> {
+        respond(
+            async {
+                // Signed in or not: an invite link shows the agent before you sign in.
+                let caller = match request.metadata().get("authorization") {
+                    Some(_) => Some(self.account(request.metadata()).await?),
+                    None => None,
+                };
+                let agent = Api::look_up_agent(self, caller.as_ref(), request.into_inner()).await?;
+                Ok(pb::LookUpAgentResponse { agent: Some(agent) })
+            }
+            .await,
+        )
+    }
+
+    async fn discover_agents(
+        &self,
+        request: Request<pb::DiscoverAgentsRequest>,
+    ) -> Result<Response<pb::DiscoverAgentsResponse>, Status> {
+        respond(
+            async {
+                self.account(request.metadata()).await?;
+                Api::discover_agents(self).await
             }
             .await,
         )

@@ -30,6 +30,7 @@ import {
   mentions,
   opusPacketDuration,
   parseCommand,
+  agentInviteLink,
   readOggOpus,
   retryAfterOf,
   toFuwaError,
@@ -73,6 +74,7 @@ test("instance URLs: https, or http only on this computer", () => {
 });
 
 test("commands: prefix or a mention of the agent", () => {
+  assert.equal(agentInviteLink("https://fuwa.chat/", "@helper"), "https://fuwa.chat/agent/helper");
   assert.deepEqual(parseCommand("/dice 2d6  +1", { prefix: "/" }), { name: "dice", args: ["2d6", "+1"], rest: "2d6  +1" });
   assert.deepEqual(parseCommand("/Echo", { prefix: "/" }), { name: "echo", args: [], rest: "" });
   assert.deepEqual(parseCommand("@helper dice d20", { prefix: "/", username: "helper" }), {

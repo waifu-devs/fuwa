@@ -743,5 +743,31 @@
   "media.unmute": "Ativar som",
   "media.cantPlay": "O app não consegue reproduzir esse tipo de arquivo. Salve-o para reproduzir.",
   "media.broken": "Não foi possível ler este arquivo.",
-  "media.noSpeakers": "Não foi possível abrir os alto-falantes."
+  "media.noSpeakers": "Não foi possível abrir os alto-falantes.",
+  "agents.title": "Agentes",
+  "agents.about": "Bots que qualquer pessoa que gerencia um servidor pode adicionar.",
+  "agents.showAll": {
+    "one": "Mostrar mais {count} agente",
+    "other": "Mostrar todos os {count} agentes"
+  },
+  "agents.madeBy": "Criado por {name}",
+  "agents.private": "Privado: só você pode adicioná-lo.",
+  "agents.add": "Adicionar",
+  "agents.alreadyIn": "Já está aqui",
+  "agents.addedTo": "{agent} adicionado a {server}",
+  "agents.missing": "Agente não encontrado",
+  "agents.missingAbout": "Não há nenhum agente com esse nome aqui, ou ele é privado.",
+  "agents.signInFirst": "Entre em {host} para adicionar os agentes de lá.",
+  "agents.copyLink": "Copiar link de convite",
+  "agents.adminNav": "Agentes",
+  "agents.adminNavAbout": "Destacar agentes públicos em Explorar",
+  "agents.adminAbout": "Os agentes públicos aparecem em Explorar para todos daqui. Os que você destacar vêm primeiro, em tamanho grande, na ordem que você definir.",
+  "agents.adminCount": {
+    "one": "{count} agente público",
+    "other": "{count} agentes públicos"
+  },
+  "agents.adminNone": "Nenhum agente público ainda. Um agente aparece aqui quando o dono o torna público.",
+  "agents.featuredNow": "{agent} em destaque em Explorar",
+  "agents.unfeaturedNow": "{agent} não está mais em destaque",
+  "agents.withRoles": "Entrar com os cargos:"
 }

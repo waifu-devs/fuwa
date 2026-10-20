@@ -6369,7 +6369,11 @@ async fn agents_are_made_by_people_and_added_by_managers() {
     assert_eq!(updated.bio, "I **help**.");
 
     // A private agent: only its owner adds it, and only where they manage.
-    let add = |server_id: &str| pb::AddAgentRequest { server_id: server_id.into(), username: "Helper".into() };
+    let add = |server_id: &str| pb::AddAgentRequest {
+        server_id: server_id.into(),
+        username: "Helper".into(),
+        ..Default::default()
+    };
     assert_eq!(
         c.agents.add_agent(authed(&other, add(&elsewhere.id))).await.unwrap_err().code(),
         Code::PermissionDenied
@@ -6790,7 +6794,10 @@ async fn servers_are_never_handed_to_agents() {
         .into_inner();
     let agent_id = made.agent.unwrap().user.unwrap().id;
     c.agents
-        .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &owner,
+            pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     let handed = c
@@ -11609,7 +11616,10 @@ async fn apps_keep_live_tiles_that_reach_only_who_can_see_them() {
         .into_inner();
     let (bot, bot_id) = (made.token, made.agent.unwrap().user.unwrap().id);
     c.agents
-        .add_agent(authed(&juan, pb::AddAgentRequest { server_id: sid.clone(), username: "scorebot".into() }))
+        .add_agent(authed(
+            &juan,
+            pb::AddAgentRequest { server_id: sid.clone(), username: "scorebot".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     // Staff is hidden from everyone but the agent.

@@ -178,6 +178,14 @@ impl Core {
         Ok(res.featured_server_ids)
     }
 
+    /// Replaces the agents featured in Browse with `ids` (public ones), in
+    /// that order; gives back the list now in force.
+    pub async fn set_featured_agents(&self, key: &str, ids: Vec<String>) -> Result<Vec<String>, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.admin(), set_featured_agents(pb::SetFeaturedAgentsRequest { agent_ids: ids })).await?;
+        Ok(res.featured_agent_ids)
+    }
+
     /// The instance's totals: default caps, and the pictures people keep here.
     pub async fn node_usage(&self, key: &str) -> Result<pb::GetNodeUsageResponse, Problem> {
         let api = self.api(key).ok_or_else(missing)?;

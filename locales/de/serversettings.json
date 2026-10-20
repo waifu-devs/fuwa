@@ -843,7 +843,7 @@
   "recordings.changedSound": "Eine laufende Aufnahme endet; die nächste, wenn jemand auf „Aufnehmen“ drückt, speichert nur Ton.",
   "recordings.preview": "Eine einstündige Aufnahme, für eine Person:",
   "agents.intro": "Konten, die Programme steuern. Sie schreiben wie Mitglieder, mit den Rollen, die du ihnen gibst.",
-  "agents.username": "Benutzername eines Agenten",
+  "agents.username": "Benutzername oder Link eines Agenten",
   "agents.yours": "Deine:",
   "agents.none": "Noch keine Agenten hier. Erstelle eigene unter {settings}.",
   "agents.settingsAgents": "Einstellungen > Agenten",

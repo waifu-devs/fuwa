@@ -434,5 +434,37 @@
   "calls.cantRecord": "このブラウザーでは録音できません。",
   "calls.noServerRecord": "このインスタンスはサーバーでボイスチャンネルを録音しません。",
   "calls.serverRecordStopped": "停止しました。録音はこのチャンネルの録音一覧にあります。",
-  "calls.fileName": "fuwa 通話 {when}"
+  "calls.fileName": "fuwa 通話 {when}",
+  "agents.addToServer": "サーバーに追加",
+  "agents.addedTo": "{server}に追加しました",
+  "agents.managed": "管理しているサーバー",
+  "agents.noManagedTitle": "追加できるサーバーがありません",
+  "agents.noManaged": "サーバーにエージェントを追加するには、そのサーバーで「サーバーの管理」権限が必要です。",
+  "agents.here": "追加済み",
+  "agents.add": "追加",
+  "agents.servers": {
+    "other": "{count}個のサーバーに参加"
+  },
+  "agents.madeBy": "{name}が作成",
+  "agents.copyLink": "招待リンクをコピー",
+  "agents.copied": "コピーしました",
+  "agents.copyFailed": "リンクをコピーできませんでした",
+  "agents.browse": "エージェントを見つける",
+  "agents.browseAbout": "この fuwa サーバーの公開エージェントです。管理しているサーバーに追加できます。",
+  "agents.browseAboutNoServers": "この fuwa サーバーの公開エージェントです。サーバーを管理する人なら誰でも追加できます。",
+  "agents.open": "エージェントを見る",
+  "agentPage.signIn": "管理しているサーバーに追加するには、この fuwa サーバーにログインするか、アカウントを作成してください。",
+  "agentPage.private": "非公開：あなただけが追加できます",
+  "agentPage.gone": "このエージェントは見つかりません",
+  "agentPage.failed": "このエージェントを開けませんでした",
+  "agentPage.goneAbout": "削除されたか、非公開にされたか、リンクに誤りがある可能性があります。送った人に確認してください。",
+  "agentPage.elsewhere.title": "このエージェントを別の fuwa で開きますか？",
+  "agentPage.elsewhere.about": "このエージェントは、まだ追加していない{host}上にいます。開くとそのインスタンスに接続するため、あなたの IP アドレスが伝わります。リンクを送った人を信頼できる場合のみ続行してください。",
+  "agents.rolesTitle": "{agent}を{server}に追加",
+  "agents.rolesAbout": "最初から役目を果たせるように、参加時に付けるロールを選んでください。ロールがない場合は、全員が持つ権限だけになります。",
+  "agents.cancel": "キャンセル",
+  "agents.addWithRoles": {
+    "other": "{count}個のロールを付けて追加"
+  },
+  "agents.addWithoutRoles": "ロールなしで追加"
 }

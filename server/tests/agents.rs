@@ -107,7 +107,10 @@ async fn world(channel: &Channel) -> World {
 
 async fn add_agent(channel: &Channel, w: &World) {
     pb::agent_service_client::AgentServiceClient::new(channel.clone())
-        .add_agent(authed(&w.owner, pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &w.owner,
+            pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
 }
@@ -335,6 +338,154 @@ async fn messages_name_their_mentions_and_slow_mode_says_how_long_to_wait() {
     assert_eq!(slowed.code(), Code::ResourceExhausted);
     let wait: i64 = slowed.metadata().get("fuwa-retry-after-ms").unwrap().to_str().unwrap().parse().unwrap();
     assert!((1..=30_000).contains(&wait), "{wait}");
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_browse() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = instance.channel.clone();
+    let w = world(&channel).await;
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let mut admin = pb::admin_service_client::AdminServiceClient::new(channel.clone());
+    let ana = pb::auth_service_client::AuthServiceClient::new(channel.clone())
+        .sign_up(pb::SignUpRequest {
+            username: "ana".into(),
+            password: "correct horse battery".into(),
+            display_name: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .token;
+    let by_name = |name: &str| pb::LookUpAgentRequest { username: name.into(), ..Default::default() };
+
+    // A private agent is its owner's alone.
+    let err = agents.look_up_agent(authed(&ana, by_name("helper"))).await.unwrap_err();
+    assert_eq!(err.code(), Code::NotFound);
+    let err = agents.look_up_agent(by_name("helper")).await.unwrap_err();
+    assert_eq!(err.code(), Code::NotFound);
+    let mine = agents.look_up_agent(authed(&w.owner, by_name("@helper"))).await.unwrap().into_inner().agent.unwrap();
+    assert!(!mine.public);
+    assert!(
+        agents
+            .discover_agents(authed(&ana, pb::DiscoverAgentsRequest {}))
+            .await
+            .unwrap()
+            .into_inner()
+            .agents
+            .is_empty()
+    );
+    let err = admin
+        .set_featured_agents(authed(&w.owner, pb::SetFeaturedAgentsRequest { agent_ids: vec![w.agent_id.clone()] }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::FailedPrecondition);
+
+    // Public, anyone finds it, with who made it and where it's been.
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: w.agent_id.clone(), public: Some(true), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    add_agent(&channel, &w).await;
+    let found = agents.look_up_agent(authed(&ana, by_name("Helper"))).await.unwrap().into_inner().agent.unwrap();
+    assert_eq!(found.user.unwrap().id, w.agent_id);
+    assert_eq!(found.owner.unwrap().username, "juan");
+    assert_eq!(found.servers, 1);
+    assert!(found.public);
+    let by_id = pb::LookUpAgentRequest { agent_id: w.agent_id.clone(), ..Default::default() };
+    assert!(agents.look_up_agent(authed(&ana, by_id)).await.is_ok());
+    // An invite link shows it before signing in, too.
+    assert!(agents.look_up_agent(by_name("helper")).await.is_ok());
+
+    // Browse: the most servers first, until an admin features another.
+    let other = agents
+        .create_agent(authed(
+            &w.owner,
+            pb::CreateAgentRequest { username: "other".into(), display_name: "Other".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .agent
+        .unwrap()
+        .user
+        .unwrap()
+        .id;
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: other.clone(), public: Some(true), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let ids = |r: pb::DiscoverAgentsResponse| r.agents.into_iter().map(|a| a.user.unwrap().id).collect::<Vec<_>>();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert_eq!(ids(browse), vec![w.agent_id.clone(), other.clone()]);
+
+    let err = admin
+        .set_featured_agents(authed(&ana, pb::SetFeaturedAgentsRequest { agent_ids: vec![other.clone()] }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
+    admin
+        .set_featured_agents(authed(&w.owner, pb::SetFeaturedAgentsRequest { agent_ids: vec![other.clone()] }))
+        .await
+        .unwrap();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert_eq!(browse.featured_agent_ids, vec![other.clone()]);
+    assert_eq!(ids(browse), vec![other.clone(), w.agent_id.clone()]);
+
+    // Made private, it leaves Browse and its feature with it.
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: other.clone(), public: Some(false), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert!(browse.featured_agent_ids.is_empty());
+    assert_eq!(ids(browse), vec![w.agent_id.clone()]);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn an_agent_can_join_with_roles_ranked_below_whoever_adds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = instance.channel.clone();
+    let w = world(&channel).await;
+    let mut roles = pb::role_service_client::RoleServiceClient::new(channel.clone());
+    let role = roles
+        .create_role(authed(
+            &w.owner,
+            pb::CreateRoleRequest { server_id: w.server_id.clone(), name: "Bots".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .role
+        .unwrap();
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let add = |role_ids: Vec<String>| pb::AddAgentRequest {
+        server_id: w.server_id.clone(),
+        username: "helper".into(),
+        role_ids,
+    };
+
+    // @everyone isn't a role to give, and the agent isn't added either.
+    let err = agents.add_agent(authed(&w.owner, add(vec![w.server_id.clone()]))).await.unwrap_err();
+    assert_eq!(err.code(), Code::InvalidArgument);
+    let member =
+        agents.add_agent(authed(&w.owner, add(vec![role.id.clone()]))).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(member.role_ids, vec![role.id.clone()]);
 
     instance.stop().await;
 }

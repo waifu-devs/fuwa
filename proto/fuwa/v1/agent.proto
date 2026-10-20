@@ -31,8 +31,8 @@ service AgentService {
   // Deletes the agent: it leaves every server, and its messages stay under
   // "Deleted account", as when a person deletes theirs.
   rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse);
-  // Adds an agent to a server. Needs MANAGE_SERVER there, and the agent must
-  // be public or the caller's own.
+  // Adds an agent to a server, with roles if asked. Needs MANAGE_SERVER
+  // there, and the agent must be public or the caller's own.
   rpc AddAgent(AddAgentRequest) returns (AddAgentResponse);
   // Which of a server's agents may use the instance's MCP endpoint
   // (docs/mcp.md). Any member may read it. What an agent can do there is
@@ -53,6 +53,15 @@ service AgentService {
   rpc SetAgentEndpoint(SetAgentEndpointRequest) returns (SetAgentEndpointResponse);
   // A new signing secret. The old one stops being used at once.
   rpc ResetAgentEndpointSecret(ResetAgentEndpointSecretRequest) returns (ResetAgentEndpointSecretResponse);
+  // One agent as someone about to add it sees it, by id or by username: what
+  // an agent's invite link (<instance>/agent/<username>) and the profile
+  // card show. Public agents are found by anyone, signed in or not; a
+  // private one only by its owner, and is NOT_FOUND to everyone else.
+  rpc LookUpAgent(LookUpAgentRequest) returns (LookUpAgentResponse);
+  // The instance's public agents, for Browse: the ones its admins feature
+  // first, in their order (AdminService.SetFeaturedAgents), then the rest,
+  // in the most servers first.
+  rpc DiscoverAgents(DiscoverAgentsRequest) returns (DiscoverAgentsResponse);
 }
 
 message Agent {
@@ -68,6 +77,43 @@ message Agent {
   google.protobuf.Timestamp last_active_at = 6;
   // How many servers it's in.
   int32 servers = 7;
+}
+
+// An agent as anyone who may add it sees it (LookUpAgent, DiscoverAgents).
+message AgentListing {
+  User user = 1;
+  // Markdown, like a person's bio.
+  string bio = 2;
+  // The person who made it.
+  User owner = 3;
+  // How many servers it's in.
+  int32 servers = 4;
+  // Anyone who manages a server may add it. False only for the caller's own
+  // private agents, which no one else can look up.
+  bool public = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message LookUpAgentRequest {
+  // Either one; agent_id wins when both are set.
+  string agent_id = 1;
+  // With or without the "@".
+  string username = 2;
+}
+
+message LookUpAgentResponse {
+  AgentListing agent = 1;
+}
+
+message DiscoverAgentsRequest {}
+
+message DiscoverAgentsResponse {
+  // The featured ones first, in their order, then the rest, in the most
+  // servers first. At most 500.
+  repeated AgentListing agents = 1;
+  // The agents in `agents` the instance's admins feature: apps show them
+  // first, and bigger than the rest.
+  repeated string featured_agent_ids = 2;
 }
 
 message ListAgentsRequest {}
@@ -121,6 +167,10 @@ message AddAgentRequest {
   string server_id = 1;
   // The agent's username.
   string username = 2;
+  // Roles it joins with, so it can do its job from the start. Needs
+  // MANAGE_ROLES too, and each must rank below the caller's highest role
+  // (not @everyone). At most 25.
+  repeated string role_ids = 3;
 }
 
 message AddAgentResponse {

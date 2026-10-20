@@ -260,7 +260,7 @@ function Expires({ invite }: { invite: Found["invite"] }) {
 }
 
 /** Whether `address` is this instance or one this browser already added. */
-function knownInstance(address: string): boolean {
+export function knownInstance(address: string): boolean {
   let origin: string;
   try {
     origin = new URL(normalizeUrl(address)).origin;
@@ -277,8 +277,8 @@ function knownInstance(address: string): boolean {
   });
 }
 
-/** Asks before opening an invite on an instance this browser has never talked to. */
-function Elsewhere({ address, onContinue }: { address: string; onContinue: () => void }) {
+/** Asks before opening an invite (or an agent's link) on an instance this browser has never talked to. */
+export function Elsewhere({ address, onContinue, agent = false }: { address: string; onContinue: () => void; agent?: boolean }) {
   const { t } = useI18n();
   let host = address;
   try {
@@ -304,9 +304,12 @@ function Elsewhere({ address, onContinue }: { address: string; onContinue: () =>
           <GlobeIcon className="size-7" />
         </motion.span>
       </motion.span>
-      <h1 className="text-xl font-extrabold">{t("workspace.invitePage.elsewhere.title")}</h1>
+      <h1 className="text-xl font-extrabold">{t(agent ? "workspace.agentPage.elsewhere.title" : "workspace.invitePage.elsewhere.title")}</h1>
       <p className="text-sm text-muted-foreground">
-        <T k="workspace.invitePage.elsewhere.about" values={{ host: <b className="text-foreground [overflow-wrap:anywhere]">{host}</b> }} />
+        <T
+          k={agent ? "workspace.agentPage.elsewhere.about" : "workspace.invitePage.elsewhere.about"}
+          values={{ host: <b className="text-foreground [overflow-wrap:anywhere]">{host}</b> }}
+        />
       </p>
       <div className="mt-1 flex w-full flex-col gap-2 sm:flex-row-reverse">
         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="flex-1">

@@ -549,5 +549,13 @@
   "nav.profileDecorations": "아바타 꾸미기",
   "nav.profileItemsAbout": "이 인스턴스의 모든 사람이 착용할 수 있는 효과와 아바타 꾸미기예요.",
   "signUps.decorationsLabel": "아바타 주변에 꾸미기 착용 가능",
-  "signUps.decorationsHint": "인스턴스와 서버의 프로필 아이템에 있는 사진이에요. 끄면 아무에게도 보이지 않고, 다시 켜면 각자 고른 꾸미기가 돌아와요."
+  "signUps.decorationsHint": "인스턴스와 서버의 프로필 아이템에 있는 사진이에요. 끄면 아무에게도 보이지 않고, 다시 켜면 각자 고른 꾸미기가 돌아와요.",
+  "nav.featuredAgents": "추천 에이전트",
+  "nav.featuredAgentsAbout": "둘러보기에서 먼저 보이는 공개 에이전트",
+  "featuredAgents.intro": "이곳의 모든 공개 에이전트는 둘러보기에 표시되며, 서버가 많은 순서로 보여요. 추천한 에이전트는 내가 정한 순서대로 맨 앞에 크게 보여요.",
+  "featuredAgents.none": "아직 공개 에이전트가 없어요",
+  "featuredAgents.noneHint": "소유자가 공개하면 에이전트가 여기에 표시돼요.",
+  "featuredAgents.feature": "둘러보기에 추천",
+  "featuredAgents.featuredNow": "{agent}을(를) 둘러보기에 추천했어요",
+  "featuredAgents.unfeaturedNow": "{agent} 추천을 중단했어요"
 }

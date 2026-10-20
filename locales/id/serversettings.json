@@ -829,7 +829,7 @@
   "recordings.changedSound": "Rekaman yang sedang berjalan akan berakhir; rekaman berikutnya, saat seseorang menekan Rekam, hanya menyimpan suara.",
   "recordings.preview": "Rekaman satu jam, untuk satu orang:",
   "agents.intro": "Akun yang dijalankan program. Mereka mengobrol seperti anggota, dengan peran yang Anda berikan.",
-  "agents.username": "Nama pengguna agen",
+  "agents.username": "Nama pengguna atau tautan agen",
   "agents.yours": "Milik Anda:",
   "agents.none": "Belum ada agen di sini. Buat sendiri di {settings}.",
   "agents.settingsAgents": "Pengaturan, Agen",

@@ -563,5 +563,13 @@
   "nav.profileDecorations": "Decorações de avatar",
   "nav.profileItemsAbout": "Efeitos e decorações de avatar que todos nesta instância podem usar.",
   "signUps.decorationsLabel": "As pessoas podem usar uma decoração em volta do avatar",
-  "signUps.decorationsHint": "Imagens dos itens de perfil da instância e dos servidores. Desativado, a de ninguém aparece, e a escolha de cada um volta quando for reativado."
+  "signUps.decorationsHint": "Imagens dos itens de perfil da instância e dos servidores. Desativado, a de ninguém aparece, e a escolha de cada um volta quando for reativado.",
+  "nav.featuredAgents": "Agentes em destaque",
+  "nav.featuredAgentsAbout": "Agentes públicos que Explorar mostra primeiro",
+  "featuredAgents.intro": "Todo agente público daqui aparece em Explorar, primeiro os que estão em mais servidores. Os que você destacar vêm antes, em tamanho grande, na sua ordem.",
+  "featuredAgents.none": "Nenhum agente público ainda",
+  "featuredAgents.noneHint": "Um agente aparece aqui quando o dono o torna público.",
+  "featuredAgents.feature": "Destacar em Explorar",
+  "featuredAgents.featuredNow": "{agent} em destaque em Explorar",
+  "featuredAgents.unfeaturedNow": "{agent} não está mais em destaque"
 }

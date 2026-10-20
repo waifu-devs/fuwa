@@ -234,7 +234,10 @@ async fn an_agent_hears_through_its_endpoint_and_answers_there() {
         .into_inner();
     let agent_id = made.agent.unwrap().user.unwrap().id;
     agents
-        .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into() }))
+        .add_agent(authed(
+            &owner,
+            pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     // Its owner watches who's online: the agent is, while its endpoint works.
@@ -509,7 +512,8 @@ async fn deliveries_in_flight_are_bounded_by_agent_and_by_owner() {
             .into_inner();
         let agent_id = made.agent.unwrap().user.unwrap().id;
         for (server_id, _) in &places {
-            let add = pb::AddAgentRequest { server_id: server_id.clone(), username: username.clone() };
+            let add =
+                pb::AddAgentRequest { server_id: server_id.clone(), username: username.clone(), ..Default::default() };
             agents.add_agent(authed(&owner, add)).await.unwrap();
         }
         let secret = agents
@@ -624,7 +628,10 @@ async fn a_turned_off_agent_stops_hearing_at_once() {
         .await
         .unwrap();
     agents
-        .add_agent(authed(&juan, pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into() }))
+        .add_agent(authed(
+            &juan,
+            pb::AddAgentRequest { server_id: server_id.clone(), username: "dice".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     let got = agents

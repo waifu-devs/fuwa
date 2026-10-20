@@ -445,5 +445,39 @@
   "calls.cantRecord": "यह ब्राउज़र रिकॉर्ड नहीं कर सकता।",
   "calls.noServerRecord": "यह इंस्टेंस सर्वर पर वॉइस चैनल रिकॉर्ड नहीं करता।",
   "calls.serverRecordStopped": "रुक गई। रिकॉर्डिंग इस चैनल की रिकॉर्डिंग में है।",
-  "calls.fileName": "fuwa कॉल {when}"
+  "calls.fileName": "fuwa कॉल {when}",
+  "agents.addToServer": "सर्वर में जोड़ें",
+  "agents.addedTo": "{server} में जोड़ा गया",
+  "agents.managed": "आपके मैनेज किए सर्वर",
+  "agents.noManagedTitle": "जोड़ने के लिए कोई सर्वर नहीं",
+  "agents.noManaged": "किसी सर्वर में एजेंट जोड़ने के लिए आपको वहां “सर्वर प्रबंधित करें” अनुमति चाहिए।",
+  "agents.here": "जोड़ा गया",
+  "agents.add": "जोड़ें",
+  "agents.servers": {
+    "one": "{count} सर्वर में",
+    "other": "{count} सर्वरों में"
+  },
+  "agents.madeBy": "{name} ने बनाया",
+  "agents.copyLink": "आमंत्रण लिंक कॉपी करें",
+  "agents.copied": "कॉपी हो गया",
+  "agents.copyFailed": "लिंक कॉपी नहीं हो सका",
+  "agents.browse": "एजेंट ब्राउज़ करें",
+  "agents.browseAbout": "इस fuwa सर्वर के सार्वजनिक एजेंट। किसी एक को अपने मैनेज किए सर्वर में जोड़ें।",
+  "agents.browseAboutNoServers": "इस fuwa सर्वर के सार्वजनिक एजेंट। सर्वर मैनेज करने वाला कोई भी इन्हें वहां जोड़ सकता है।",
+  "agents.open": "एजेंट देखें",
+  "agentPage.signIn": "इसे अपने मैनेज किए सर्वर में जोड़ने के लिए इस fuwa सर्वर पर साइन इन करें, या खाता बनाएं।",
+  "agentPage.private": "निजी: सिर्फ़ आप इसे जोड़ सकते हैं",
+  "agentPage.gone": "यह एजेंट यहां नहीं है",
+  "agentPage.failed": "यह एजेंट नहीं खुल सका",
+  "agentPage.goneAbout": "हो सकता है इसे हटा दिया गया हो या निजी कर दिया गया हो, या लिंक में टाइपो हो। भेजने वाले से पूछें।",
+  "agentPage.elsewhere.title": "यह एजेंट किसी दूसरे fuwa पर खोलें?",
+  "agentPage.elsewhere.about": "यह एजेंट {host} पर है, जिसे आपने अभी नहीं जोड़ा है। इसे खोलने पर उस इंस्टेंस से कनेक्ट होगा, इसलिए वह आपका IP पता देखेगा। जारी तभी रखें जब आपको लिंक भेजने वाले पर भरोसा हो।",
+  "agents.rolesTitle": "{agent} को {server} में जोड़ें",
+  "agents.rolesAbout": "वे भूमिकाएं चुनें जिनके साथ यह जुड़ेगा, ताकि यह शुरू से अपना काम कर सके। किसी भूमिका के बिना इसे सिर्फ़ वही मिलेगा जो सबके पास है।",
+  "agents.cancel": "रद्द करें",
+  "agents.addWithRoles": {
+    "one": "{count} भूमिका के साथ जोड़ें",
+    "other": "{count} भूमिकाओं के साथ जोड़ें"
+  },
+  "agents.addWithoutRoles": "बिना भूमिकाओं के जोड़ें"
 }

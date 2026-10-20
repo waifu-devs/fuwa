@@ -829,7 +829,7 @@
   "recordings.changedSound": "正在进行的录制会结束；下次有人按下“录制”时将仅保留声音。",
   "recordings.preview": "单人一小时录制：",
   "agents.intro": "由程序驱动的账号。它们像成员一样发言，拥有你授予的身份组。",
-  "agents.username": "智能体的用户名",
+  "agents.username": "智能体的用户名或链接",
   "agents.yours": "你的：",
   "agents.none": "这里还没有智能体。可在 {settings} 中创建你自己的。",
   "agents.settingsAgents": "设置 > 智能体",

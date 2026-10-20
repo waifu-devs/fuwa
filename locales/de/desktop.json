@@ -743,5 +743,31 @@
   "media.unmute": "Ton an",
   "media.cantPlay": "Diese Art von Datei kann die App nicht abspielen. Speichere sie, um sie abzuspielen.",
   "media.broken": "Diese Datei konnte nicht gelesen werden.",
-  "media.noSpeakers": "Die Lautsprecher konnten nicht geöffnet werden."
+  "media.noSpeakers": "Die Lautsprecher konnten nicht geöffnet werden.",
+  "agents.title": "Agenten",
+  "agents.about": "Bots, die alle hinzufügen können, die einen Server verwalten.",
+  "agents.showAll": {
+    "one": "{count} weiteren Agenten zeigen",
+    "other": "Alle {count} Agenten zeigen"
+  },
+  "agents.madeBy": "Erstellt von {name}",
+  "agents.private": "Privat: Nur du kannst ihn hinzufügen.",
+  "agents.add": "Hinzufügen",
+  "agents.alreadyIn": "Schon hier",
+  "agents.addedTo": "{agent} zu {server} hinzugefügt",
+  "agents.missing": "Agent nicht gefunden",
+  "agents.missingAbout": "Hier gibt es keinen Agenten mit diesem Namen, oder er ist privat.",
+  "agents.signInFirst": "Melde dich bei {host} an, um seine Agenten hinzuzufügen.",
+  "agents.copyLink": "Einladungslink kopieren",
+  "agents.adminNav": "Agenten",
+  "agents.adminNavAbout": "Öffentliche Agenten unter „Entdecken“ empfehlen",
+  "agents.adminAbout": "Öffentliche Agenten erscheinen für alle hier unter „Entdecken“. Die du empfiehlst, kommen ganz nach vorne, groß und in deiner Reihenfolge.",
+  "agents.adminCount": {
+    "one": "{count} öffentlicher Agent",
+    "other": "{count} öffentliche Agenten"
+  },
+  "agents.adminNone": "Noch keine öffentlichen Agenten. Ein Agent erscheint hier, sobald sein Eigentümer ihn öffentlich macht.",
+  "agents.featuredNow": "{agent} wird unter „Entdecken“ empfohlen",
+  "agents.unfeaturedNow": "{agent} wird nicht mehr empfohlen",
+  "agents.withRoles": "Mit Rollen beitreten:"
 }

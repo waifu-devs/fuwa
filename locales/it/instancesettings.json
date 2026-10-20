@@ -563,5 +563,13 @@
   "nav.profileDecorations": "Decorazioni dell'avatar",
   "nav.profileItemsAbout": "Effetti e decorazioni dell'avatar che tutti su questa istanza possono indossare.",
   "signUps.decorationsLabel": "Le persone possono indossare una decorazione intorno all'avatar",
-  "signUps.decorationsHint": "Immagini dagli oggetti del profilo dell'istanza e dei server. Se disattivato, non si vede quella di nessuno, e le scelte di tutti tornano quando lo riattivi."
+  "signUps.decorationsHint": "Immagini dagli oggetti del profilo dell'istanza e dei server. Se disattivato, non si vede quella di nessuno, e le scelte di tutti tornano quando lo riattivi.",
+  "nav.featuredAgents": "Agenti in evidenza",
+  "nav.featuredAgentsAbout": "Agenti pubblici che Esplora mostra per primi",
+  "featuredAgents.intro": "Ogni agente pubblico qui compare in Esplora, prima quelli presenti in più server. Quelli che metti in evidenza vengono prima di tutti, in grande e nel tuo ordine.",
+  "featuredAgents.none": "Ancora nessun agente pubblico",
+  "featuredAgents.noneHint": "Un agente compare qui quando il proprietario lo rende pubblico.",
+  "featuredAgents.feature": "Metti in evidenza in Esplora",
+  "featuredAgents.featuredNow": "{agent} è in evidenza in Esplora",
+  "featuredAgents.unfeaturedNow": "{agent} non è più in evidenza"
 }

@@ -843,7 +843,7 @@
   "recordings.changedSound": "Uma gravação em andamento termina; a próxima, quando alguém tocar em Gravar, guarda só som.",
   "recordings.preview": "Uma gravação de uma hora, para uma pessoa:",
   "agents.intro": "Contas controladas por programas. Elas conversam como membros, com os cargos que você der.",
-  "agents.username": "O nome de usuário de um agente",
+  "agents.username": "O nome de usuário ou o link de um agente",
   "agents.yours": "Seus:",
   "agents.none": "Nenhum agente aqui ainda. Crie os seus em {settings}.",
   "agents.settingsAgents": "Configurações, Agentes",

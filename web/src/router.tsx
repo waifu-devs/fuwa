@@ -15,6 +15,7 @@ import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { instanceKey } from "@/fuwa/saved";
 import { InstanceHome } from "@/pages/InstanceHome";
 import { InvitePage } from "@/pages/InvitePage";
+import { AgentPage } from "@/pages/AgentPage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
 import { SsoDone } from "@/pages/SsoDone";
 import { ProviderDone } from "@/pages/ProviderDone";
@@ -98,6 +99,16 @@ const inviteHere = createRoute({
   },
 });
 
+/** An agent's invite link as the instance hands it out (/agent/<username>), like an invite's. */
+const agentHere = createRoute({
+  getParentRoute: () => root,
+  path: "agent/$username",
+  component: function AgentHere() {
+    const { username } = agentHere.useParams();
+    return <Navigate to="/$instance/agent/$username" params={{ instance: instanceKey(window.location.origin), username }} replace />;
+  },
+});
+
 /** Waifu Devs' terms and privacy policy, on its own instances (pages/Legal). */
 const terms = createRoute({ getParentRoute: () => root, path: "terms", component: () => <LegalPage page="terms" /> });
 const privacy = createRoute({ getParentRoute: () => root, path: "privacy", component: () => <LegalPage page="privacy" /> });
@@ -128,6 +139,16 @@ const invite = createRoute({
   component: function InviteRoute() {
     const { instance: key, code } = useParams({ from: "/$instance/invite/$code" });
     return <InvitePage key={`${key}/${code}`} instanceKey={key} code={code} />;
+  },
+});
+
+/** Adding an agent to the servers you manage, from its invite link. */
+const agent = createRoute({
+  getParentRoute: () => instance,
+  path: "agent/$username",
+  component: function AgentRoute() {
+    const { instance: key, username } = useParams({ from: "/$instance/agent/$username" });
+    return <AgentPage key={`${key}/${username}`} instanceKey={key} username={username} />;
   },
 });
 
@@ -175,12 +196,13 @@ const routeTree = root.addChildren([
   index,
   connect,
   inviteHere,
+  agentHere,
   terms,
   privacy,
   linkedCallback,
   ssoDone,
   providerDone,
-  instance.addChildren([instanceIndex, invite, dm, friends, server.addChildren([serverIndex, channel])]),
+  instance.addChildren([instanceIndex, invite, agent, dm, friends, server.addChildren([serverIndex, channel])]),
 ]);
 
 export const router = createRouter({

@@ -44,6 +44,7 @@
     { "id": "read-marks", "date": "2026-10-15", "title": "Unread marks cleared on every device" },
     { "id": "gacha-share", "date": "2026-10-16", "title": "Gacha pulls shared in chat" },
     { "id": "soundboard", "date": "2026-10-17", "title": "Soundboard in voice channels" },
-    { "id": "email-sign-in", "date": "2026-10-19", "title": "Signing in with a code sent by email" }
+    { "id": "email-sign-in", "date": "2026-10-19", "title": "Signing in with a code sent by email" },
+    { "id": "agent-discovery", "date": "2026-10-20", "title": "Agent invite links and agents in Browse" }
   ]
 }

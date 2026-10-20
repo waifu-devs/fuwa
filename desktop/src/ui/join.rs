@@ -796,7 +796,7 @@ impl FuwaApp {
     }
 
     /// The dialogs about getting in, drawn on their own: making a server,
-    /// applying, and where an application stands.
+    /// applying, where an application stands, and adding an agent.
     pub(crate) fn render_join_dialog(
         &mut self,
         dialog: &Dialog,
@@ -815,6 +815,7 @@ impl FuwaApp {
                 }
             }
             Dialog::Application { key, server } => ("application", self.application_card(key, server, &p, window, cx)),
+            Dialog::AddAgent { key } => ("add-agent", self.add_agent_body(key, &p, window, cx)),
             _ => return None,
         };
         let panel = div()

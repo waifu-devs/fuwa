@@ -570,5 +570,13 @@
   "nav.profileDecorations": "Avatar decorations",
   "nav.profileItemsAbout": "Effects and avatar decorations everyone on this instance can wear.",
   "signUps.decorationsLabel": "People can wear a decoration around their avatar",
-  "signUps.decorationsHint": "Pictures from the instance's and servers' profile items. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
+  "signUps.decorationsHint": "Pictures from the instance's and servers' profile items. Turned off, nobody's shows, and everyone's pick comes back when it's on again.",
+  "nav.featuredAgents": "Featured agents",
+  "nav.featuredAgentsAbout": "Public agents Browse shows first",
+  "featuredAgents.intro": "Every public agent here shows in Browse, in the most servers first. The ones you feature come first, and big, in your order.",
+  "featuredAgents.none": "No public agents yet",
+  "featuredAgents.noneHint": "An agent shows here once its owner makes it public.",
+  "featuredAgents.feature": "Feature in Browse",
+  "featuredAgents.featuredNow": "Featuring {agent} in Browse",
+  "featuredAgents.unfeaturedNow": "{agent} isn't featured anymore"
 }

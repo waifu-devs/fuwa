@@ -42,6 +42,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0028_app_settings.sql"),
     include_str!("../migrations/node/0029_read_marks.sql"),
     include_str!("../migrations/node/0030_email_sign_in.sql"),
+    include_str!("../migrations/node/0031_featured_agents.sql"),
 ];
 
 /// The places one account's read marks are kept for, at most; past it the
@@ -2709,6 +2710,7 @@ impl NodeDb {
                 "presence_settings",
                 "account_providers",
                 "agent_endpoints",
+                "featured_agents",
             ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
@@ -2786,6 +2788,45 @@ impl NodeDb {
             (pb::AccountKind::Agent as i64, value),
             agent_row,
         )
+        .await
+    }
+
+    /// The instance's public agents (not turned off), newest first: those
+    /// Browse may show.
+    pub async fn public_agents(&self) -> Result<Vec<AgentRow>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            &format!(
+                "{AGENT_SELECT} WHERE accounts.kind = ?1 AND accounts.public = 1 AND accounts.disabled_at IS NULL
+                 ORDER BY accounts.created_at DESC, accounts.id"
+            ),
+            [pb::AccountKind::Agent as i64],
+            agent_row,
+        )
+        .await
+    }
+
+    /// The agents featured in Browse, in order, as stored: some may be
+    /// private now.
+    pub async fn featured_agents(&self) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT account_id FROM featured_agents ORDER BY position", (), |r| r.get::<String>(0)).await
+    }
+
+    /// Replaces the featured agents (already checked) with these, in order.
+    pub async fn set_featured_agents(&self, agent_ids: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM featured_agents", ()).await?;
+            for (position, id) in agent_ids.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO featured_agents (account_id, position) VALUES (?1, ?2)",
+                    (id.as_str(), position as i64),
+                )
+                .await?;
+            }
+            Ok(())
+        })
         .await
     }
 

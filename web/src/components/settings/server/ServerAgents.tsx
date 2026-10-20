@@ -16,6 +16,7 @@ import { ago, displayName, isAgent, toDate } from "@/lib/format";
 import { type Key, T, useI18n } from "@/i18n/react";
 import { openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { parseAgentLink } from "@/lib/agent-links";
 
 /**
  * The agents in a server, for people who manage it: who's here, adding one
@@ -63,7 +64,8 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
   const suggestions = mine.filter((a) => !hereIds.has(a.user?.id));
 
   async function add(name: string) {
-    const clean = name.trim().replace(/^@/, "").toLowerCase();
+    // An agent's invite link works here too.
+    const clean = (parseAgentLink(name)?.username ?? name.trim().replace(/^@/, "")).toLowerCase();
     if (!clean) {
       void shake.start({ x: [0, -8, 6, -4, 0], transition: { duration: 0.35 } });
       return;
@@ -122,7 +124,7 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
               onChange={(e) => setUsername(e.target.value)}
               placeholder={t("serversettings.agents.username")}
               spellCheck={false}
-              maxLength={33}
+              maxLength={300}
               className="h-10 rounded-xl pl-9"
             />
           </span>

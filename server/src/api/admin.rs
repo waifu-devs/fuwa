@@ -408,6 +408,32 @@ impl AdminService for Api {
         )
     }
 
+    async fn set_featured_agents(
+        &self,
+        request: Request<pb::SetFeaturedAgentsRequest>,
+    ) -> Result<Response<pb::SetFeaturedAgentsResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let node = self.app.node()?;
+                let mut ids = Vec::new();
+                for id in request.into_inner().agent_ids {
+                    let agent = node.agent(Some(&id), None).await?.ok_or(Error::NotFound("agent"))?;
+                    if !agent.public {
+                        return Err(Error::FailedPrecondition("only public agents can be featured".into()));
+                    }
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+                node.set_featured_agents(&ids).await?;
+                tracing::info!(count = ids.len(), "featured agents changed by an admin");
+                Ok(pb::SetFeaturedAgentsResponse { featured_agent_ids: ids })
+            }
+            .await,
+        )
+    }
+
     async fn list_server_shares(
         &self,
         request: Request<pb::ListServerSharesRequest>,

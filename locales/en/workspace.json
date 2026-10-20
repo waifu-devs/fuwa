@@ -445,5 +445,39 @@
   "calls.cantRecord": "This browser can't record.",
   "calls.noServerRecord": "This instance doesn't record voice channels on the server.",
   "calls.serverRecordStopped": "Stopped. The recording is in this channel's recordings.",
-  "calls.fileName": "fuwa call {when}"
+  "calls.fileName": "fuwa call {when}",
+  "agents.addToServer": "Add to server",
+  "agents.addedTo": "Added to {server}",
+  "agents.managed": "Servers you manage",
+  "agents.noManagedTitle": "No servers to add it to",
+  "agents.noManaged": "You need Manage server in a server to add agents there.",
+  "agents.here": "Added",
+  "agents.add": "Add",
+  "agents.servers": {
+    "one": "in {count} server",
+    "other": "in {count} servers"
+  },
+  "agents.madeBy": "Made by {name}",
+  "agents.copyLink": "Copy invite link",
+  "agents.copied": "Copied",
+  "agents.copyFailed": "Couldn't copy the link",
+  "agents.browse": "Browse agents",
+  "agents.browseAbout": "Public agents on this fuwa server. Add one to a server you manage.",
+  "agents.browseAboutNoServers": "Public agents on this fuwa server. Whoever manages a server can add them there.",
+  "agents.open": "See agent",
+  "agentPage.signIn": "Sign in, or make an account on this fuwa server, to add it to a server you manage.",
+  "agentPage.private": "Private: only you can add it",
+  "agentPage.gone": "This agent isn't here",
+  "agentPage.failed": "Couldn't open this agent",
+  "agentPage.goneAbout": "It may have been deleted or made private, or the link has a typo. Ask whoever sent it.",
+  "agentPage.elsewhere.title": "Open this agent on another fuwa?",
+  "agentPage.elsewhere.about": "This agent lives on {host}, which you haven't added yet. Opening it connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link.",
+  "agents.rolesTitle": "Add {agent} to {server}",
+  "agents.rolesAbout": "Pick the roles it joins with, so it can do its job from the start. Without any, it gets only what everyone has.",
+  "agents.cancel": "Cancel",
+  "agents.addWithRoles": {
+    "one": "Add with {count} role",
+    "other": "Add with {count} roles"
+  },
+  "agents.addWithoutRoles": "Add without roles"
 }

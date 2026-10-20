@@ -59,6 +59,7 @@ import { FEDERATION_FIELDS, federationSection } from "./instance/federation-fiel
 import { ModerationSettings } from "./instance/Moderation";
 import { MODERATION_FIELDS, moderationSection } from "./instance/moderation-section";
 import { Servers } from "./instance/Servers";
+import { FeaturedAgents } from "./instance/FeaturedAgents";
 import { SIGN_IN_PROVIDER_FIELDS, signInProviderSection } from "./instance/provider-fields";
 import { SignInProviderSettings } from "./instance/SignInProviders";
 import { SettingsScreen, type SettingsGroup } from "./SettingsScreen";
@@ -244,6 +245,7 @@ export function InstanceSettingsDialog({
   const itemsHere = instanceHas(inst?.node?.versions, "profile-items");
   const previewsHere = instanceHas(inst?.node?.versions, "link-previews");
   const endpointsHere = instanceHas(inst?.node?.versions, "agent-endpoints");
+  const agentsHere = instanceHas(inst?.node?.versions, "agent-discovery");
 
   return (
     <SettingsScreen
@@ -253,7 +255,7 @@ export function InstanceSettingsDialog({
       subtitle={t("instancesettings.nav.subtitle")}
       section={tab}
       onSectionChange={setTab}
-      groups={settingsGroups(t, name, itemsHere, endpointsHere, previewsHere)}
+      groups={settingsGroups(t, name, itemsHere, endpointsHere, previewsHere, agentsHere)}
       footer={<SaveBar scope="screen" count={changed.length} saving={save.pending} error={save.error} onSave={() => commit(changed, [])} onDiscard={discard} />}
     >
       <SettingsBody
@@ -290,6 +292,7 @@ function SettingsBody({
 }) {
   if (tab === "accounts") return <Accounts instanceKey={instanceKey} />;
   if (tab === "servers") return <Servers instanceKey={instanceKey} onLeave={onLeave} />;
+  if (tab === "featured-agents") return <FeaturedAgents instanceKey={instanceKey} />;
   if (tab === "announcement") return <Announcement instanceKey={instanceKey} />;
   if (tab === "profile-items") return <ProfileItems instanceKey={instanceKey} />;
   if (loadError) return <p className="text-sm text-muted-foreground first-letter:uppercase">{loadError}</p>;
@@ -310,7 +313,14 @@ function SettingsBody({
 }
 
 /** The menu: the instance's settings, then what an admin manages. */
-function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpointsHere: boolean, previewsHere: boolean): SettingsGroup[] {
+function settingsGroups(
+  t: I18n["t"],
+  name: string,
+  itemsHere: boolean,
+  endpointsHere: boolean,
+  previewsHere: boolean,
+  agentsHere: boolean,
+): SettingsGroup[] {
   return [
     {
       label: t("instancesettings.nav.instance"),
@@ -402,6 +412,17 @@ function settingsGroups(t: I18n["t"], name: string, itemsHere: boolean, endpoint
           description: t("instancesettings.nav.serversAbout"),
           keywords: "communities export backup delete caps usage storage",
         },
+        ...(agentsHere
+          ? [
+              {
+                id: "featured-agents",
+                label: t("instancesettings.nav.featuredAgents"),
+                icon: BotIcon,
+                description: t("instancesettings.nav.featuredAgentsAbout"),
+                keywords: "agents bots browse featured discover public",
+              },
+            ]
+          : []),
         ...(itemsHere
           ? [
               {

@@ -829,7 +829,7 @@
   "recordings.changedSound": "Bản ghi đang chạy sẽ kết thúc; bản ghi tiếp theo, khi có người bấm Ghi, chỉ lưu âm thanh.",
   "recordings.preview": "Một bản ghi dài một giờ, cho một người:",
   "agents.intro": "Tài khoản do chương trình điều khiển. Chúng trò chuyện như thành viên, với vai trò bạn cấp.",
-  "agents.username": "Tên người dùng của tác tử",
+  "agents.username": "Tên người dùng hoặc liên kết của tác tử",
   "agents.yours": "Của bạn:",
   "agents.none": "Chưa có tác tử nào ở đây. Tự tạo trong {settings}.",
   "agents.settingsAgents": "Cài đặt, Tác tử",

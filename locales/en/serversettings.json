@@ -843,7 +843,7 @@
   "recordings.changedSound": "A recording going on ends; the next, when someone presses Record, keeps sound only.",
   "recordings.preview": "An hour-long recording, for one person:",
   "agents.intro": "Accounts programs drive. They talk like members, with the roles you give them.",
-  "agents.username": "An agent's username",
+  "agents.username": "An agent's username or link",
   "agents.yours": "Yours:",
   "agents.none": "No agents here yet. Make your own under {settings}.",
   "agents.settingsAgents": "Settings, Agents",

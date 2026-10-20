@@ -434,5 +434,37 @@
   "calls.cantRecord": "Browser ini tidak dapat merekam.",
   "calls.noServerRecord": "Instans ini tidak merekam saluran suara di server.",
   "calls.serverRecordStopped": "Dihentikan. Rekaman ada di daftar rekaman saluran ini.",
-  "calls.fileName": "panggilan fuwa {when}"
+  "calls.fileName": "panggilan fuwa {when}",
+  "agents.addToServer": "Tambahkan ke server",
+  "agents.addedTo": "Ditambahkan ke {server}",
+  "agents.managed": "Server yang Anda kelola",
+  "agents.noManagedTitle": "Tidak ada server untuk menambahkannya",
+  "agents.noManaged": "Anda memerlukan izin Kelola server di sebuah server untuk menambahkan agen ke sana.",
+  "agents.here": "Ditambahkan",
+  "agents.add": "Tambahkan",
+  "agents.servers": {
+    "other": "di {count} server"
+  },
+  "agents.madeBy": "Dibuat oleh {name}",
+  "agents.copyLink": "Salin tautan undangan",
+  "agents.copied": "Disalin",
+  "agents.copyFailed": "Tidak dapat menyalin tautan",
+  "agents.browse": "Jelajahi agen",
+  "agents.browseAbout": "Agen publik di server fuwa ini. Tambahkan salah satunya ke server yang Anda kelola.",
+  "agents.browseAboutNoServers": "Agen publik di server fuwa ini. Siapa pun yang mengelola server bisa menambahkannya ke sana.",
+  "agents.open": "Lihat agen",
+  "agentPage.signIn": "Masuk, atau buat akun di server fuwa ini, untuk menambahkannya ke server yang Anda kelola.",
+  "agentPage.private": "Privat: hanya Anda yang bisa menambahkannya",
+  "agentPage.gone": "Agen ini tidak ada di sini",
+  "agentPage.failed": "Tidak dapat membuka agen ini",
+  "agentPage.goneAbout": "Agen ini mungkin sudah dihapus atau dijadikan privat, atau tautannya salah ketik. Tanyakan kepada pengirimnya.",
+  "agentPage.elsewhere.title": "Buka agen ini di fuwa lain?",
+  "agentPage.elsewhere.about": "Agen ini berada di {host}, yang belum Anda tambahkan. Membukanya akan menghubungkan ke instans tersebut, sehingga instans itu dapat melihat alamat IP Anda. Lanjutkan hanya jika Anda memercayai pengirim tautan.",
+  "agents.rolesTitle": "Tambahkan {agent} ke {server}",
+  "agents.rolesAbout": "Pilih peran yang dibawanya saat bergabung, agar ia bisa bekerja sejak awal. Tanpa peran, ia hanya mendapat apa yang dimiliki semua orang.",
+  "agents.cancel": "Batal",
+  "agents.addWithRoles": {
+    "other": "Tambahkan dengan {count} peran"
+  },
+  "agents.addWithoutRoles": "Tambahkan tanpa peran"
 }

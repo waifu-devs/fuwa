@@ -743,5 +743,33 @@
   "media.unmute": "Remettre le son",
   "media.cantPlay": "L’app ne peut pas lire ce type de fichier. Enregistre-le pour le lire.",
   "media.broken": "Impossible de lire ce fichier.",
-  "media.noSpeakers": "Impossible d’ouvrir les haut-parleurs."
+  "media.noSpeakers": "Impossible d’ouvrir les haut-parleurs.",
+  "agents.title": "Agents",
+  "agents.about": "Des bots que toute personne qui gère un serveur peut ajouter.",
+  "agents.showAll": {
+    "one": "Afficher {count} agent de plus",
+    "many": "Afficher les {count} d’agents",
+    "other": "Afficher les {count} agents"
+  },
+  "agents.madeBy": "Créé par {name}",
+  "agents.private": "Privé : toi seul peux l’ajouter.",
+  "agents.add": "Ajouter",
+  "agents.alreadyIn": "Déjà ici",
+  "agents.addedTo": "{agent} ajouté à {server}",
+  "agents.missing": "Agent introuvable",
+  "agents.missingAbout": "Il n’y a aucun agent de ce nom ici, ou il est privé.",
+  "agents.signInFirst": "Connecte-toi à {host} pour ajouter ses agents.",
+  "agents.copyLink": "Copier le lien d’invitation",
+  "agents.adminNav": "Agents",
+  "agents.adminNavAbout": "Mettre des agents publics à la une dans Parcourir",
+  "agents.adminAbout": "Les agents publics apparaissent dans Parcourir pour tout le monde ici. Ceux que tu mets à la une passent devant, en grand, dans l’ordre que tu choisis.",
+  "agents.adminCount": {
+    "one": "{count} agent public",
+    "many": "{count} d’agents publics",
+    "other": "{count} agents publics"
+  },
+  "agents.adminNone": "Pas encore d’agents publics. Un agent apparaît ici dès que son propriétaire le rend public.",
+  "agents.featuredNow": "{agent} est à la une dans Parcourir",
+  "agents.unfeaturedNow": "{agent} n’est plus à la une",
+  "agents.withRoles": "Rejoindre avec les rôles :"
 }

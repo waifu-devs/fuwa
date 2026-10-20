@@ -51,6 +51,12 @@ pub fn link(base: &str, code: &str) -> String {
     format!("{}/invite/{code}", base.trim_end_matches('/'))
 }
 
+/// An agent's invite link, on its instance: whoever opens it can add it
+/// to a server they manage (if it's public, or theirs).
+pub fn agent_link(base: &str, username: &str) -> String {
+    format!("{}/agent/{username}", base.trim_end_matches('/'))
+}
+
 /// Time until something, in its largest unit, rounded: "45 minutes", "6 hours", "7 days".
 pub fn time_left(ms: i64) -> String {
     let minutes = ((ms as f64) / 60_000.0).round().max(1.0) as i64;
@@ -169,5 +175,6 @@ mod tests {
     #[test]
     fn links_read_like_the_web() {
         assert_eq!(link("https://fuwa.chat/", "abc"), "https://fuwa.chat/invite/abc");
+        assert_eq!(agent_link("https://fuwa.chat/", "helper_bot"), "https://fuwa.chat/agent/helper_bot");
     }
 }

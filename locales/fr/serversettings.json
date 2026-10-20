@@ -845,7 +845,7 @@
   "recordings.changedSound": "Un enregistrement en cours se termine ; le suivant, quand quelqu’un appuie sur Enregistrer, ne conserve que le son.",
   "recordings.preview": "Un enregistrement d’une heure, pour une personne :",
   "agents.intro": "Des comptes pilotés par des programmes. Ils parlent comme des membres, avec les rôles que tu leur donnes.",
-  "agents.username": "Le nom d’utilisateur d’un agent",
+  "agents.username": "Le nom d’utilisateur ou le lien d’un agent",
   "agents.yours": "Les tiens :",
   "agents.none": "Pas encore d’agents ici. Crée les tiens dans {settings}.",
   "agents.settingsAgents": "Paramètres, Agents",
