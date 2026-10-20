@@ -620,7 +620,20 @@
     and list it in `MIGRATIONS`.
   - `cluster/`: running as separate parts (`FUWA_ROLE`). `index.rs` is the
     directory's in-memory index of every server, its members, its invite
-    codes and its shard.
+    codes and its shard. Memberships are what grows with big servers, so it
+    keeps accounts and servers as numbers (a ULID account as its bits) and a
+    membership as two of them: about 100 bytes an account and 10 a
+    membership. Questions about a big server's members go through
+    `members_among`/`neighbours` with the few people asked about (those
+    online, or watching), so they cost the smaller side, not the server's
+    size. A shard registers in pieces (`RegisterShardInPieces`, at most
+    `MEMBER_PAGE` member ids each, a big server's entry split over pieces in a
+    row), and a moved server's members come in pages (`AdoptServer` with
+    `pages_members`, then `ServerMembers`), so no number of members hits the
+    cluster's message limit; a part from before pages gets one message.
+    Deleting a server tells only the members presence keeps anything about
+    (`Presence::kept_members`), and an on-screen stream only about who was
+    shown or in focus.
     `calls.rs` holds every call that crosses parts, as `App` methods that run
     locally in one process and over `proto/fuwa/cluster` when split
     (`app.authenticate`, `server_changed`, `membership_changed`,

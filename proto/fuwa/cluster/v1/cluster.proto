@@ -27,6 +27,9 @@ service DirectoryService {
   // A shard says which servers it holds, when it starts and whenever it has
   // lost track of what the directory knows.
   rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse);
+  // RegisterShard in pieces, so a shard's memberships needn't fit in one
+  // message.
+  rpc RegisterShardInPieces(stream RegisterShardInPiecesRequest) returns (RegisterShardInPiecesResponse);
   // Which shard holds each server, and where to reach it.
   rpc Placements(PlacementsRequest) returns (PlacementsResponse);
   // A server's profile changed.
@@ -150,6 +153,9 @@ service ShardService {
   // Takes a server from the shard at `from_url`, opens it here and starts
   // replicating it. Answers once it's ready for clients.
   rpc AdoptServer(AdoptServerRequest) returns (AdoptServerResponse);
+  // A page of a server's members, in id order, for an AdoptServer that left
+  // them out.
+  rpc ServerMembers(ServerMembersRequest) returns (ServerMembersResponse);
   // Ends a move for this shard: lets go of the server (deleting its files
   // here and this shard's replica of it), or keeps it and takes changes again.
   rpc ReleaseServer(ReleaseServerRequest) returns (ReleaseServerResponse);
@@ -358,6 +364,19 @@ message RegisterShardRequest {
   // When this shard's process started: the same every time it registers
   // until it restarts.
   google.protobuf.Timestamp started_at = 6;
+}
+
+// One piece of a registration. The first has the shard's fields; the others
+// only add servers. A server's entry may be split over pieces in a row: each
+// later one with the same server adds to its members and invites. Nothing is
+// taken until the piece marked last.
+message RegisterShardInPiecesRequest {
+  RegisterShardRequest piece = 1;
+  bool last = 2;
+}
+
+message RegisterShardInPiecesResponse {
+  RegisterShardResponse answer = 1;
 }
 
 message RegisterShardResponse {
@@ -800,10 +819,28 @@ message AdoptServerRequest {
   string from_url = 2;
   // As SendServerRequest's.
   bool keep_calls = 3;
+  // The directory asks with ServerMembers for members left out of the
+  // answer, so a big server's needn't fit in one message.
+  bool pages_members = 4;
 }
 
 message AdoptServerResponse {
   ServerEntry entry = 1;
+  // The entry has none of the server's members: ask with ServerMembers.
+  bool members_left_out = 2;
+}
+
+message ServerMembersRequest {
+  string server_id = 1;
+  // The last id of the page before; empty for the first.
+  string after = 2;
+  // At most this many; 0 for the shard's own page size.
+  uint32 limit = 3;
+}
+
+message ServerMembersResponse {
+  // Empty past the last.
+  repeated string member_ids = 1;
 }
 
 message ReleaseServerRequest {
