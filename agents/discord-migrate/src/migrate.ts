@@ -41,27 +41,39 @@ import {
   type SourceThread,
   type Target,
   type TargetFile,
+  type TargetPost,
 } from "./model.ts";
 import type { ChannelHistory, JobState, StateStore } from "./state.ts";
 
 export interface MigrateOptions {
   /** The most recent messages to copy from each text channel; 0 copies none. */
   messagesPerChannel: number;
+  /** Only messages (and forum posts) from this time on, in milliseconds since 1970. */
+  since?: number;
   /** How many channels' histories are copied at once. */
   channelsAtOnce: number;
   /** Files bigger than this are named instead of copied. */
   maxFileBytes: number;
+  /** What to copy; everything unless set. History also needs `messagesPerChannel`. */
+  parts?: readonly Part[];
+  /** Discord channels to leave out; a category leaves out the channels in it too. */
+  leaveOut?: readonly string[];
   signal?: AbortSignal;
   /** Called whenever something changes; `report` is the same object each time. */
   onProgress?: (report: Report) => void;
 }
 
 export type Phase = "server" | "roles" | "emoji" | "sounds" | "channels" | "invite" | "history" | "done";
+/** A part of a server someone can choose to copy or not. */
+export type Part = Exclude<Phase, "done">;
+export const PARTS: readonly Part[] = ["server", "roles", "emoji", "sounds", "channels", "invite", "history"];
 
 /** How a migration is going, and what it did. */
 export interface Report {
   phase: Phase;
   guildName: string;
+  /** What was chosen to copy. */
+  parts: Part[];
   roles: number;
   emojis: number;
   stickers: number;
@@ -95,6 +107,7 @@ export function newReport(guildName = ""): Report {
   return {
     phase: "server",
     guildName,
+    parts: [...PARTS],
     roles: 0,
     emojis: 0,
     stickers: 0,
@@ -119,8 +132,15 @@ export async function migrate(
   report: Report = newReport(),
 ): Promise<Report> {
   const { signal } = options;
-  const guild = await source.guild();
-  report.guildName = guild.name;
+  const whole = await source.guild();
+  report.guildName = whole.name;
+  report.parts = PARTS.filter(
+    (p) => (options.parts ?? PARTS).includes(p) && (p !== "history" || options.messagesPerChannel > 0),
+  );
+  const wanted = (p: Part) => report.parts.includes(p);
+  const out = new Set(options.leaveOut);
+  // The channels left out aren't copied, nor their history, and aren't listed as skipped either.
+  const guild = { ...whole, channels: whole.channels.filter((c) => !out.has(c.id) && !out.has(c.parentId ?? "")) };
   const missing = await target.missing();
   if (missing.length) throw new NotReadyError(missing.join("\n"));
   const soundboard = await target.soundboard();
@@ -135,7 +155,8 @@ export async function migrate(
     else report.skippedMore++;
     progress();
   };
-  const step = async (phase: Phase, work: () => Promise<void>) => {
+  const step = async (phase: Part, work: () => Promise<void>) => {
+    if (!wanted(phase)) return;
     signal?.throwIfAborted();
     report.phase = phase;
     progress();
@@ -187,7 +208,6 @@ export async function migrate(
   });
 
   await step("history", async () => {
-    if (options.messagesPerChannel <= 0) return;
     const ctx: Ctx = {
       source,
       target,
@@ -201,9 +221,9 @@ export async function migrate(
         guildId: guild.id,
         serverId: target.serverId,
         roles: state.roles,
-        roleNames: Object.fromEntries(guild.roles.map((r) => [r.id, r.name])),
+        roleNames: Object.fromEntries(whole.roles.map((r) => [r.id, r.name])),
         channels: state.channels,
-        channelNames: Object.fromEntries(guild.channels.map((c) => [c.id, c.name])),
+        channelNames: Object.fromEntries(whole.channels.map((c) => [c.id, c.name])),
         emojis: { ...state.emojis },
       },
     };
@@ -235,7 +255,7 @@ export async function migrate(
       const where = { hook, channelId: fuwaChannel, name: channel.name };
       try {
         if (channel.kind === "forum") {
-          for (const post of await source.forumPosts(channel.id, options.messagesPerChannel)) {
+          for (const post of await source.forumPosts(channel.id, options.messagesPerChannel, options.since)) {
             await copyThread(ctx, where, history, post, true);
           }
         } else {
@@ -407,7 +427,8 @@ async function copyChannels(
 ): Promise<void> {
   const ordered = displayOrder(guild.channels);
   report.channels = ordered.filter((c) => state.channels[c.id]).length;
-  if (state.channelsDone) return;
+  // Done before, unless channels left out then are wanted now.
+  if (state.channelsDone && ordered.every((c) => c.kind === "other" || state.channels[c.id])) return;
   // Categories first, so channels can go in them.
   const categoriesFirst = [
     ...ordered.filter((c) => c.kind === "category"),
@@ -466,30 +487,105 @@ interface Where {
   name: string;
 }
 
-/** A text channel's latest messages, through its webhook, noting the threads they started. */
+/** Most webhook posts sent in one batch, and about the most bytes of text in one. */
+export const BATCH_POSTS = 25;
+const BATCH_BYTES = 128 * 1024;
+
+type Step =
+  | { post: TargetPost; done?: (id: string) => void | Promise<void>; failed?: (err: Refused) => void }
+  | { then: () => void | Promise<void> };
+
+/**
+ * Webhook posts that go out together in one call (fuwa's batch endpoint),
+ * in order, with what to do once each has its id. What a batch changes in
+ * the saved state waits for it too, so a stop never notes as copied what
+ * didn't go out.
+ */
+class Batch {
+  #steps: Step[] = [];
+  #posts = 0;
+  #bytes = 0;
+
+  readonly ctx: Ctx;
+  readonly where: Where;
+
+  constructor(ctx: Ctx, where: Where) {
+    this.ctx = ctx;
+    this.where = where;
+  }
+
+  add(post: TargetPost, done?: (id: string) => void | Promise<void>, failed?: (err: Refused) => void) {
+    this.#steps.push({ post, done, failed });
+    this.#posts++;
+    this.#bytes += post.content.length + JSON.stringify(post.embeds).length;
+  }
+
+  /** Runs once everything added before it went out. */
+  then(work: () => void | Promise<void>) {
+    this.#steps.push({ then: work });
+  }
+
+  get full(): boolean {
+    return this.#posts >= BATCH_POSTS || this.#bytes >= BATCH_BYTES;
+  }
+
+  async flush(): Promise<void> {
+    const steps = this.#steps.splice(0);
+    this.#posts = 0;
+    this.#bytes = 0;
+    if (!steps.length) return;
+    const posts = steps.flatMap((s) => ("post" in s ? [s.post] : []));
+    const results = posts.length ? await this.ctx.target.postMany(this.where.hook, posts) : [];
+    let i = 0;
+    for (const step of steps) {
+      if (!("post" in step)) {
+        await step.then();
+        continue;
+      }
+      const result = results[i++]!;
+      if (result instanceof Refused) step.failed?.(result);
+      else await step.done?.(result);
+    }
+    await this.ctx.save();
+    this.ctx.progress();
+  }
+}
+
+/** A text channel's latest messages, through its webhook in batches, noting the threads they started. */
 async function copyChannel(ctx: Ctx, where: Where, channelId: string, history: ChannelHistory): Promise<void> {
-  const { source, options, report, save, progress } = ctx;
-  for await (const message of source.messages(channelId, options.messagesPerChannel, history.lastId)) {
+  const { source, options, report } = ctx;
+  const batch = new Batch(ctx, where);
+  let lastDay = history.lastDay;
+  const messages = source.messages(channelId, options.messagesPerChannel, history.lastId, options.since);
+  for await (const message of messages) {
     options.signal?.throwIfAborted();
+    // A message with files has gone out already, so what it changes is saved straight away.
+    let sent = false;
     if (!message.system) {
       const day = dayOf(message.at);
-      if (day !== history.lastDay) {
-        await ctx.target.post(where.hook, { content: dayDivider(message.at), username: IMPORTER_NAME, embeds: [] });
-        history.lastDay = day;
-        await save();
+      if (day !== lastDay) {
+        lastDay = day;
+        batch.add({ content: dayDivider(message.at), username: IMPORTER_NAME, embeds: [] });
+        batch.then(() => {
+          history.lastDay = day;
+        });
       }
-      const firstId = await copyMessage(ctx, where, message);
-      if (message.threadId && firstId) {
+      sent = await copyMessage(ctx, batch, message, undefined, (firstId) => {
+        if (!message.threadId) return;
         (history.threads ??= {})[message.threadId] = firstId;
         report.threads++;
-      }
-      history.messages++;
-      report.messages++;
+      });
+      batch.then(() => {
+        history.messages++;
+        report.messages++;
+      });
     }
-    history.lastId = message.id;
-    await save();
-    progress();
+    batch.then(() => {
+      history.lastId = message.id;
+    });
+    if (sent || batch.full) await batch.flush();
   }
+  await batch.flush();
 }
 
 /**
@@ -511,15 +607,20 @@ async function copyThread(
   anchor ??= channel.threads?.[thread.id];
   const what = forum ? `The post ${thread.name} in #${where.name}` : `A thread in #${where.name}`;
   try {
-    for await (const message of source.messages(thread.id, options.messagesPerChannel, history.lastId)) {
+    const messages = source.messages(thread.id, options.messagesPerChannel, history.lastId, options.since);
+    for await (const message of messages) {
       options.signal?.throwIfAborted();
       if (!message.system) {
         if (!anchor && forum) {
           const opening = message.id === thread.id;
           const title = `**${thread.name}**`;
-          anchor = opening
-            ? await copyMessage(ctx, where, message, title)
-            : await ctx.target.post(where.hook, { content: title, username: IMPORTER_NAME, embeds: [] });
+          const batch = new Batch(ctx, where);
+          const opened = (id: string) => {
+            anchor = id;
+          };
+          if (opening) await copyMessage(ctx, batch, message, title, opened);
+          else batch.add({ content: title, username: IMPORTER_NAME, embeds: [] }, opened);
+          await batch.flush();
           if (!anchor) break;
           (channel.threads ??= {})[thread.id] = anchor;
           report.threads++;
@@ -575,14 +676,20 @@ function leftText(text: string, left: string[]): string {
   return `${text}${text ? "\n" : ""}*(${left.length === 1 ? "a file" : `${left.length} files`} not copied: ${left.join(", ")})*`;
 }
 
-/** Posts one message through the webhook, with its files after; returns the first fuwa message's id. */
+/**
+ * Adds one message to the batch, and sends its files right after it as the
+ * agent (going out with the batch so far); `first` gets the first fuwa
+ * message's id once it has one. Whether the batch went out for its files.
+ */
 async function copyMessage(
   ctx: Ctx,
-  where: Where,
+  batch: Batch,
   message: SourceMessage,
   title?: string,
-): Promise<string | undefined> {
+  first?: (id: string) => void,
+): Promise<boolean> {
   const { target, report, skip, map } = ctx;
+  const { where } = batch;
   const { files, left } = await filesOf(ctx, message);
   let text = leftText(messageText(message, map), left);
   if (title) text = text ? `${title}\n${text}` : title;
@@ -591,18 +698,29 @@ async function copyMessage(
   if (!pieces.length && embeds.length) pieces.push("");
   const post = { username: cleanName(message.authorName, "someone", 80), avatarUrl: message.authorAvatarUrl };
   let firstId: string | undefined;
-  try {
-    for (const [i, piece] of pieces.entries()) {
-      const id = await target.post(where.hook, {
-        ...post,
-        content: piece,
-        embeds: i === pieces.length - 1 ? embeds : [],
-      });
-      firstId ??= id;
+  const got = async (id: string) => {
+    if (firstId) return;
+    firstId = id;
+    first?.(id);
+    if (!message.pinned) return;
+    try {
+      await target.pin(where.channelId, id);
+      report.pins++;
+    } catch (err) {
+      skip(`A pin in #${where.name}`, err);
     }
-  } catch (err) {
+  };
+  let failed = false;
+  const fail = (err: Refused) => {
+    if (failed) return;
+    failed = true;
     skip(`A message by ${message.authorName} in #${where.name}`, err);
+  };
+  for (const [i, piece] of pieces.entries()) {
+    batch.add({ ...post, content: piece, embeds: i === pieces.length - 1 ? embeds : [] }, got, fail);
   }
+  if (!files.length) return false;
+  await batch.flush();
   for (let i = 0; i < files.length; i += MAX_FILES) {
     try {
       const id = await target.sendFiles(
@@ -610,21 +728,13 @@ async function copyMessage(
         `Files from **${post.username}**`,
         files.slice(i, i + MAX_FILES),
       );
-      firstId ??= id;
       report.files += Math.min(MAX_FILES, files.length - i);
+      await got(id);
     } catch (err) {
       skip(`Files from ${message.authorName} in #${where.name}`, err);
     }
   }
-  if (message.pinned && firstId) {
-    try {
-      await target.pin(where.channelId, firstId);
-      report.pins++;
-    } catch (err) {
-      skip(`A pin in #${where.name}`, err);
-    }
-  }
-  return firstId;
+  return true;
 }
 
 /** Posts one message in a thread as the agent, under its author's name, with its files. */

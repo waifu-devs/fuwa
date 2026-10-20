@@ -345,6 +345,9 @@ on the same port as everything else. It answers `204`, or `200` with the
 message with `?wait=true`. Each webhook may post 30 messages a minute (then
 `429` with `Retry-After`), and never pings @everyone, @here or roles. Anyone
 with the address can post, so a leaked one is replaced with New address.
+Tools that bring a lot over at once can post up to 25 messages in one call
+to the same address with `/batch` (`{"messages": [...]}`), which counts once
+toward the limit; `proto/fuwa/v1/webhook.proto` has the details.
 
 ### Agents
 

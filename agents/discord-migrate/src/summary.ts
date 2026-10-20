@@ -1,8 +1,8 @@
 // What the bot says about a migration, on both sides: the progress message it
 // keeps editing, and the summary at the end. Pure.
-import type { Phase, Report } from "./migrate.ts";
+import type { Part, Phase, Report } from "./migrate.ts";
 
-const STEPS: Phase[] = ["server", "roles", "emoji", "sounds", "channels", "invite", "history"];
+const STEPS: Part[] = ["server", "roles", "emoji", "sounds", "channels", "invite", "history"];
 
 const count = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many}`;
@@ -29,12 +29,17 @@ function stepText(step: Phase, r: Report): string {
   }
 }
 
+/** "a, b and c". */
+function listed(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
 /** The progress message: each step done, going, or still to come. */
 export function progressText(r: Report, history: boolean): string {
-  const at = STEPS.indexOf(r.phase);
+  const at = r.phase === "done" ? STEPS.length : STEPS.indexOf(r.phase);
   const lines = [`Copying **${r.guildName || "the server"}** to fuwa…`];
   for (const [i, step] of STEPS.entries()) {
-    if (step === "history" && !history) continue;
+    if (!r.parts.includes(step) || (step === "history" && !history)) continue;
     const mark = r.phase === "done" || i < at ? "✅" : i === at ? "⏳" : "▫️";
     lines.push(`${mark} ${stepText(step, r)}`);
   }
@@ -43,11 +48,24 @@ export function progressText(r: Report, history: boolean): string {
 
 /** The summary at the end: what came over, the invite, and what didn't. */
 export function summaryText(r: Report): string {
+  const has = (p: Part) => r.parts.includes(p);
+  const copied = [
+    ...(has("roles") ? [plural(r.roles, "role")] : []),
+    ...(has("channels") ? [plural(r.channels, "channel")] : []),
+    ...(has("emoji") ? [plural(r.emojis, "emoji", "emoji"), plural(r.stickers, "sticker")] : []),
+    ...(has("sounds") ? [plural(r.sounds, "sound")] : []),
+    ...(has("history")
+      ? [
+          `${plural(r.messages, "message")}${r.threads ? ` (with ${plural(r.threads, "thread")})` : ""}`,
+          plural(r.files, "file"),
+          plural(r.pins, "pin"),
+        ]
+      : []),
+  ];
   const lines = [
-    `Done! **${r.guildName}** is on fuwa: ${plural(r.roles, "role")}, ${plural(r.channels, "channel")}, ` +
-      `${plural(r.emojis, "emoji", "emoji")}, ${plural(r.stickers, "sticker")}, ${plural(r.sounds, "sound")}, ` +
-      `${plural(r.messages, "message")}${r.threads ? ` (with ${plural(r.threads, "thread")})` : ""}, ` +
-      `${plural(r.files, "file")} and ${plural(r.pins, "pin")}.`,
+    copied.length
+      ? `Done! **${r.guildName}** is on fuwa: ${listed(copied)}.`
+      : `Done! **${r.guildName}** is on fuwa.`,
   ];
   if (r.invite) lines.push("", `Invite your members with ${r.invite}`);
   if (r.skipped.length) {

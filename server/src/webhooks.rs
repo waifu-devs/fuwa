@@ -3,7 +3,11 @@
 //! like Discord's, so tools made for Discord webhooks work unchanged. Served
 //! where servers are kept (a single process, or the shard holding the server,
 //! which the gateways pass these on to). See `proto/fuwa/v1/webhook.proto`.
-//! The same address with `/tile` sets (POST) or ends (DELETE) one of the
+//! The same address with `/batch` posts up to 25 messages at once, in order
+//! (`{"messages": [...]}`, each shaped as above), counting as one post
+//! toward the webhook's limit, and answers their ids
+//! (`{"messages": [{"id": ...}]}`); one that can't be posted fails the whole
+//! batch. The same address with `/tile` sets (POST) or ends (DELETE) one of the
 //! webhook's live tiles (`proto/fuwa/v1/live_tile.proto`).
 
 use std::collections::{HashMap, VecDeque};
@@ -17,7 +21,10 @@ use axum::routing::{delete, post};
 use http::{HeaderValue, StatusCode, header};
 use serde::Deserialize;
 
-use crate::api::{WebhookPost, end_webhook_tile, execute_webhook, set_webhook_tile, verify_webhook};
+use crate::api::{
+    MAX_WEBHOOK_BATCH, WebhookPost, end_webhook_tile, execute_webhook, execute_webhook_batch, set_webhook_tile,
+    verify_webhook,
+};
 use crate::app::App;
 use crate::error::{Error, MISROUTED};
 use crate::id::now_ms;
@@ -25,6 +32,8 @@ use crate::pb;
 
 /// The biggest body taken: a long message with ten full embeds fits easily.
 const MAX_BODY: usize = 256 * 1024;
+/// The biggest batch taken: 25 long messages with a few embeds each.
+const MAX_BATCH_BODY: usize = 2 * 1024 * 1024;
 /// Messages one webhook may post a minute, as Discord allows.
 const PER_MINUTE: usize = 30;
 const MINUTE_MS: i64 = 60_000;
@@ -32,6 +41,7 @@ const MINUTE_MS: i64 = 60_000;
 pub fn routes(app: Arc<App>) -> Router {
     let limiter = Arc::new(Limiter::default());
     let tiles = app.clone();
+    let batches = (app.clone(), limiter.clone());
     Router::new()
         .route(
             "/webhooks/{server_id}/{webhook_id}/{token}",
@@ -47,6 +57,14 @@ pub fn routes(app: Arc<App>) -> Router {
                     }
                 },
             ),
+        )
+        .route(
+            "/webhooks/{server_id}/{webhook_id}/{token}/batch",
+            post(move |Path((server_id, webhook_id, token)): Path<(String, String, String)>, body: Bytes| {
+                let (app, limiter) = batches.clone();
+                async move { execute_batch(&app, &limiter, &server_id, &webhook_id, &token, &body).await }
+            })
+            .layer(DefaultBodyLimit::max(MAX_BATCH_BODY)),
         )
         .route(
             "/webhooks/{server_id}/{webhook_id}/{token}/tile",
@@ -159,6 +177,24 @@ struct Body {
     embeds: Vec<Embed>,
 }
 
+/// Several posts at once.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Batch {
+    messages: Vec<Body>,
+}
+
+impl From<Body> for WebhookPost {
+    fn from(body: Body) -> Self {
+        WebhookPost {
+            content: body.content,
+            username: body.username,
+            avatar_url: body.avatar_url,
+            embeds: body.embeds.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Embed {
@@ -222,26 +258,10 @@ async fn execute(
         Ok(body) => body,
         Err(err) => return answer(StatusCode::BAD_REQUEST, &format!("the body isn't the JSON a webhook takes: {err}")),
     };
-    // Only real posts count, so knowing a webhook's id (every member sees it)
-    // isn't enough to hold it back.
-    if let Err(err) = verify_webhook(app, server_id, webhook_id, token).await {
-        return failed(err);
-    }
-    if let Err(ms) = limiter.take(webhook_id, now_ms()) {
-        let seconds = (ms + 999) / 1000;
-        let mut response = answer(StatusCode::TOO_MANY_REQUESTS, "this webhook is posting too fast; slow down");
-        if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
-            response.headers_mut().insert(header::RETRY_AFTER, value);
-        }
+    if let Some(response) = admit(app, limiter, server_id, webhook_id, token).await {
         return response;
     }
-    let post = WebhookPost {
-        content: body.content,
-        username: body.username,
-        avatar_url: body.avatar_url,
-        embeds: body.embeds.into_iter().map(Into::into).collect(),
-    };
-    match execute_webhook(app, server_id, webhook_id, token, post).await {
+    match execute_webhook(app, server_id, webhook_id, token, body.into()).await {
         Ok(message) if wait => {
             let json = serde_json::json!({
                 "id": message.id,
@@ -252,6 +272,61 @@ async fn execute(
             (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], json.to_string()).into_response()
         }
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => failed(err),
+    }
+}
+
+/// What to answer when a post may not go out now: the token isn't the
+/// webhook's, or it's over its limit. Only real posts count, so knowing a webhook's id
+/// (every member sees it) isn't enough to hold it back.
+async fn admit(app: &Arc<App>, limiter: &Limiter, server_id: &str, webhook_id: &str, token: &str) -> Option<Response> {
+    if let Err(err) = verify_webhook(app, server_id, webhook_id, token).await {
+        return Some(failed(err));
+    }
+    limiter.take(webhook_id, now_ms()).err().map(|ms| {
+        let seconds = (ms + 999) / 1000;
+        let mut response = answer(StatusCode::TOO_MANY_REQUESTS, "this webhook is posting too fast; slow down");
+        if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+        response
+    })
+}
+
+async fn execute_batch(
+    app: &Arc<App>,
+    limiter: &Limiter,
+    server_id: &str,
+    webhook_id: &str,
+    token: &str,
+    body: &[u8],
+) -> Response {
+    let batch: Batch = match serde_json::from_slice(body) {
+        Ok(batch) => batch,
+        Err(err) => return answer(StatusCode::BAD_REQUEST, &format!("the body isn't the JSON a batch takes: {err}")),
+    };
+    if batch.messages.is_empty() || batch.messages.len() > MAX_WEBHOOK_BATCH {
+        return answer(StatusCode::BAD_REQUEST, &format!("a batch takes 1 to {MAX_WEBHOOK_BATCH} messages"));
+    }
+    if let Some(response) = admit(app, limiter, server_id, webhook_id, token).await {
+        return response;
+    }
+    let posts = batch.messages.into_iter().map(Into::into).collect();
+    match execute_webhook_batch(app, server_id, webhook_id, token, posts).await {
+        Ok(messages) => {
+            let messages: Vec<_> = messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "channel_id": m.channel_id,
+                        "timestamp": m.created_at.as_ref().map(crate::id::millis),
+                    })
+                })
+                .collect();
+            let json = serde_json::json!({ "messages": messages });
+            (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], json.to_string()).into_response()
+        }
         Err(err) => failed(err),
     }
 }

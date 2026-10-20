@@ -10,7 +10,7 @@ import {
   PermissionFlagsBits,
   StickerFormatType,
 } from "discord.js";
-import { compareIds } from "./convert.ts";
+import { compareIds, idAt } from "./convert.ts";
 import {
   type Download,
   Refused,
@@ -108,7 +108,7 @@ export class DiscordSource implements Source {
     return channel;
   }
 
-  async forumPosts(channelId: string, limit: number): Promise<SourceThread[]> {
+  async forumPosts(channelId: string, limit: number, since?: number): Promise<SourceThread[]> {
     const channel = await this.#readable(channelId);
     if (!channel || (channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildMedia)) return [];
     const posts = new Map<string, AnyThreadChannel>();
@@ -123,15 +123,20 @@ export class DiscordSource implements Source {
       before = last;
     }
     return [...posts.values()]
-      .filter((t) => t.type === ChannelType.PublicThread)
+      .filter((t) => t.type === ChannelType.PublicThread && (!since || compareIds(t.id, idAt(since)) >= 0))
       .sort((a, b) => compareIds(a.id, b.id))
       .slice(-limit)
       .map((t) => ({ id: t.id, name: t.name }));
   }
 
-  async *messages(channelId: string, limit: number, after?: string): AsyncIterable<SourceMessage> {
+  async *messages(channelId: string, limit: number, after?: string, since?: number): AsyncIterable<SourceMessage> {
     const channel = await this.#readable(channelId);
     if (!channel?.isTextBased()) return;
+    // Nothing from before `since`: start after the first id that time could have.
+    if (since) {
+      const floor = (BigInt(idAt(since)) - 1n).toString();
+      if (!after || compareIds(after, floor) < 0) after = floor;
+    }
     // Walk back to where the window starts, counting only, then read forward
     // a page at a time, so files' links (which Discord signs for a day) are
     // fresh when they're downloaded.

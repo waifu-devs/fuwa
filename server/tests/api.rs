@@ -6033,6 +6033,81 @@ async fn post_webhook(instance: &Instance, webhook: &pb::Webhook, body: &str, wa
 }
 
 #[tokio::test]
+async fn webhooks_post_batches() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let server = create_server(&mut c, &owner, "Batches", true).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+    let hook = c
+        .webhooks
+        .create_webhook(authed(
+            &owner,
+            pb::CreateWebhookRequest {
+                server_id: server.id.clone(),
+                channel_id: general.id.clone(),
+                name: "Import".into(),
+                avatar_url: String::new(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    let batch = |body: String| {
+        let url = format!("http://{}/webhooks/{}/{}/{}/batch", instance.addr, hook.server_id, hook.id, hook.token);
+        reqwest::Client::new().post(url).header("content-type", "application/json").body(body).send()
+    };
+
+    // A batch lands in order, each under its own name, and answers the ids.
+    let body = r#"{"messages":[{"content":"one","username":"alice"},{"content":"two","username":"bob"},{"embeds":[{"title":"three"}]}]}"#;
+    let response = batch(body.into()).await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let answered: serde_json::Value = response.json().await.unwrap();
+    let ids: Vec<&str> = answered["messages"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap()).collect();
+    let listed = messages(&mut c, &owner, &server.id, &general.id).await;
+    let posted: Vec<_> = listed.iter().filter(|m| m.author_id == hook.id).collect();
+    assert_eq!(posted.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ids);
+    assert_eq!(
+        posted.iter().map(|m| (m.content.as_str(), m.webhook.as_ref().unwrap().name.as_str())).collect::<Vec<_>>(),
+        [("one", "alice"), ("two", "bob"), ("", "Import")]
+    );
+
+    // One bad message fails the whole batch, and nothing of it is posted.
+    let response = batch(r#"{"messages":[{"content":"four"},{"content":"  "}]}"#.into()).await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(messages(&mut c, &owner, &server.id, &general.id).await.len(), listed.len());
+
+    // Empty batches, too-big ones and wrong tokens.
+    assert_eq!(batch(r#"{"messages":[]}"#.into()).await.unwrap().status(), reqwest::StatusCode::BAD_REQUEST);
+    let many = format!("{{\"messages\":[{}]}}", vec![r#"{"content":"x"}"#; 26].join(","));
+    assert_eq!(batch(many).await.unwrap().status(), reqwest::StatusCode::BAD_REQUEST);
+    let wrong = format!("http://{}/webhooks/{}/{}/{}/batch", instance.addr, hook.server_id, hook.id, "x".repeat(64));
+    let response =
+        reqwest::Client::new().post(wrong).header("content-type", "application/json").body(body).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // A batch counts once toward the webhook's 30 posts a minute.
+    for _ in 0..28 {
+        assert_eq!(batch(r#"{"messages":[{"content":"a"},{"content":"b"}]}"#.into()).await.unwrap().status(), 200);
+    }
+    let response = batch(r#"{"messages":[{"content":"a"}]}"#.into()).await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(response.headers().contains_key("retry-after"));
+}
+
+#[tokio::test]
 async fn webhooks_post_into_channels() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;

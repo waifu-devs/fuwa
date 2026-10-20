@@ -131,6 +131,12 @@ export function compareIds(a: string, b: string): number {
   return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
 }
 
+/** Discord's first id for a moment (milliseconds since 1970): ids start with when they were made. */
+export function idAt(ms: number): string {
+  return (BigInt(Math.max(0, ms - DISCORD_EPOCH)) << 22n).toString();
+}
+const DISCORD_EPOCH = 1_420_070_400_000;
+
 /** A custom emoji's name as fuwa takes it: 2 to 32 letters, digits and underscores, not already taken. */
 export function emojiName(name: string, taken: Set<string>): string {
   let base = name

@@ -351,29 +351,54 @@ pub async fn execute_webhook(
     token: &str,
     post: WebhookPost,
 ) -> Result<pb::Message> {
+    let mut posted = execute_webhook_batch(app, server_id, webhook_id, token, vec![post]).await?;
+    posted.pop().ok_or(Error::NotFound("webhook"))
+}
+
+/// The most messages one batch may post.
+pub const MAX_WEBHOOK_BATCH: usize = 25;
+
+/// Posts several messages through a webhook, in order, in one write: all of
+/// them or, when one can't be posted, none. For tools that bring a lot over
+/// at once (an import), so each message isn't a call and a write of its own.
+pub async fn execute_webhook_batch(
+    app: &Arc<App>,
+    server_id: &str,
+    webhook_id: &str,
+    token: &str,
+    posts: Vec<WebhookPost>,
+) -> Result<Vec<pb::Message>> {
+    if posts.is_empty() || posts.len() > MAX_WEBHOOK_BATCH {
+        return Err(Error::invalid(format!("a batch takes 1 to {MAX_WEBHOOK_BATCH} messages")));
+    }
     let sdb = app.servers.get(server_id).await?;
     let webhook = load_webhook(&*sdb.read()?, &sdb.id, webhook_id).await.ok().filter(|w| same_token(&w.token, token));
     let webhook = webhook.ok_or(Error::NotFound("webhook"))?;
-    let username = match post.username.trim() {
-        "" => webhook.name.clone(),
-        name => text("username", name, 1, 80)?,
-    };
-    let avatar_url = match post.avatar_url.trim() {
-        "" => webhook.avatar_url.clone(),
-        url => app.picture_link(&super::url("avatar_url", url)?),
-    };
-    let mut message = WebhookMessage {
-        content: post.content,
-        embeds: post.embeds,
-        author: pb::MessageWebhook { webhook_id: webhook.id.clone(), name: username, avatar_url },
-    };
-    check_webhook_message(app, &mut message)?;
+    let mut messages = Vec::with_capacity(posts.len());
+    for post in posts {
+        let username = match post.username.trim() {
+            "" => webhook.name.clone(),
+            name => text("username", name, 1, 80)?,
+        };
+        let avatar_url = match post.avatar_url.trim() {
+            "" => webhook.avatar_url.clone(),
+            url => app.picture_link(&super::url("avatar_url", url)?),
+        };
+        let mut message = WebhookMessage {
+            content: post.content,
+            embeds: post.embeds,
+            author: pb::MessageWebhook { webhook_id: webhook.id.clone(), name: username, avatar_url },
+        };
+        check_webhook_message(app, &mut message)?;
+        messages.push(message);
+    }
     let limits = sdb.limits(&app.settings().limits).await?;
     if let Some(limit) = limits.storage_bytes
         && sdb.storage_bytes() >= limit
     {
         return Err(Error::ResourceExhausted("this server is out of storage".into()));
     }
+    let count = messages.len() as i64;
     let posted = sdb
         .write(&webhook.id, async |conn, events| {
             // Checked again inside the write: it may have been reset, moved or deleted since.
@@ -384,14 +409,22 @@ pub async fn execute_webhook(
             postable(conn, &sdb.id, &current.channel_id).await?;
             let now = now_ms();
             conn.execute(
-                "UPDATE webhooks SET last_used_at = ?2, messages = messages + 1 WHERE id = ?1",
-                (current.id.as_str(), now),
+                "UPDATE webhooks SET last_used_at = ?2, messages = messages + ?3 WHERE id = ?1",
+                (current.id.as_str(), now, count),
             )
             .await?;
-            insert_webhook_message(conn, &sdb.id, &current.channel_id, message.clone(), now, events).await
+            let mut posted = Vec::with_capacity(messages.len());
+            for message in &messages {
+                posted.push(
+                    insert_webhook_message(conn, &sdb.id, &current.channel_id, message.clone(), now, events).await?,
+                );
+            }
+            Ok(posted)
         })
         .await?;
-    super::messages::preview_links(app, &sdb.id, &posted, true);
+    for message in &posted {
+        super::messages::preview_links(app, &sdb.id, message, true);
+    }
     Ok(posted)
 }
 

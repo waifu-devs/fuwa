@@ -145,11 +145,11 @@ export interface Source {
   /**
    * The channel's most recent `limit` messages, oldest first, leaving out
    * `after` and everything before it (to pick up where a stopped run left
-   * off).
+   * off), and anything sent before `since` (milliseconds since 1970).
    */
-  messages(channelId: string, limit: number, after?: string): AsyncIterable<SourceMessage>;
-  /** A forum's latest `limit` posts that anyone can see, oldest first. */
-  forumPosts(channelId: string, limit: number): Promise<SourceThread[]>;
+  messages(channelId: string, limit: number, after?: string, since?: number): AsyncIterable<SourceMessage>;
+  /** A forum's latest `limit` posts that anyone can see, oldest first, leaving out those started before `since`. */
+  forumPosts(channelId: string, limit: number, since?: number): Promise<SourceThread[]>;
   /** A file from Discord's CDN, or undefined when it's bigger than `maxBytes`. */
   download(url: string, maxBytes: number): Promise<Download | undefined>;
 }
@@ -222,8 +222,11 @@ export interface Target {
   createEmoji(name: string, picture: Download): Promise<{ id: string; name: string }>;
   createHook(channelId: string, name: string): Promise<Hook>;
   deleteHook(hook: Hook): Promise<void>;
-  /** Posts through the hook and returns the message's id. */
-  post(hook: Hook, post: TargetPost): Promise<string>;
+  /**
+   * Posts through the hook, in order, in as few calls as the instance allows,
+   * and returns each message's id, or why fuwa turned that one down.
+   */
+  postMany(hook: Hook, posts: TargetPost[]): Promise<(string | Refused)[]>;
   /** Sends files as the agent and returns the message's id. */
   sendFiles(channelId: string, content: string, files: TargetFile[]): Promise<string>;
   /** Replies as the agent in the thread under a message, starting it if there's none yet. */

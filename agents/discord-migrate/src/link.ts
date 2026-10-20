@@ -3,6 +3,7 @@
 // person (or team) manages both. Codes live only in memory, work once, and
 // run out; a fuwa server gets a few wrong tries before it has to wait.
 import { randomInt } from "node:crypto";
+import type { Part } from "./migrate.ts";
 
 /** Letters and digits nobody mixes up when typing them over. */
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -20,6 +21,12 @@ export interface Pending {
   messagesPerChannel: number;
   /** A Discord channel to post the invite in at the end. */
   announceChannelId?: string;
+  /** What to copy; everything unless set. */
+  parts?: Part[];
+  /** Discord channels and categories to leave out. */
+  leaveOut?: string[];
+  /** Only messages from this time on (milliseconds since 1970). */
+  since?: number;
 }
 
 export function newCode(): string {

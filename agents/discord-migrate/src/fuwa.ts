@@ -28,7 +28,7 @@ import { type SoundboardClient, hasSoundboard, soundboard, toOggOpus } from "./s
 /** An upload for a soundboard sound (MEDIA_PURPOSE_SOUND), which the SDK on npm doesn't name yet. */
 const SOUND = 11 as MediaPurpose;
 
-/** A webhook may post 30 messages a minute: one every two seconds keeps under it. */
+/** A webhook takes 30 calls a minute (a batch of posts counts once): one every two seconds keeps under it. */
 const POST_EVERY_MS = 2_000;
 const TRIES = 6;
 
@@ -69,6 +69,8 @@ export class FuwaTarget implements Target {
   readonly #agent: Agent;
   readonly #tokens = new Map<string, string>();
   readonly #lastPost = new Map<string, number>();
+  /** Whether the instance takes batches of posts; false once it turns out not to. */
+  #batches = true;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #sounds: SoundboardClient;
 
@@ -230,16 +232,39 @@ export class FuwaTarget implements Target {
     await this.#api.webhooks.deleteWebhook({ serverId: this.serverId, webhookId: hook.id });
   }
 
-  async post(hook: Hook, post: TargetPost): Promise<string> {
+  async postMany(hook: Hook, posts: TargetPost[]): Promise<(string | Refused)[]> {
+    if (!posts.length) return [];
+    if (this.#batches) {
+      try {
+        const { messages } = (await this.#execute(hook, "/batch", { messages: posts.map(webhookPost) })) as {
+          messages: { id: string }[];
+        };
+        return messages.map((m) => m.id);
+      } catch (err) {
+        if (err instanceof NoBatches) this.#batches = false;
+        else if (!(err instanceof Refused)) throw err;
+        else if (posts.length === 1) return [err];
+        // One of them was turned down: post them one by one, so only that one is left out.
+      }
+    }
+    const ids: (string | Refused)[] = [];
+    for (const post of posts) {
+      try {
+        ids.push(((await this.#execute(hook, "?wait=true", webhookPost(post))) as { id: string }).id);
+      } catch (err) {
+        if (!(err instanceof Refused)) throw err;
+        ids.push(err);
+      }
+    }
+    return ids;
+  }
+
+  /** Calls the webhook (`suffix` after its address), at most every POST_EVERY_MS, trying again when it's busy. */
+  async #execute(hook: Hook, suffix: string, payload: unknown): Promise<unknown> {
     const token = this.#tokens.get(hook.id);
     if (!token) throw new Refused("that webhook is gone");
-    const url = `${this.#api.url}/webhooks/${this.serverId}/${hook.id}/${token}?wait=true`;
-    const body = JSON.stringify({
-      content: post.content,
-      username: post.username,
-      avatar_url: post.avatarUrl ?? "",
-      embeds: post.embeds.map(webhookEmbed),
-    });
+    const url = `${this.#api.url}/webhooks/${this.serverId}/${hook.id}/${token}${suffix}`;
+    const body = JSON.stringify(payload);
     for (let attempt = 1; ; attempt++) {
       const wait = (this.#lastPost.get(hook.id) ?? 0) + POST_EVERY_MS - Date.now();
       if (wait > 0) await this.#sleep(wait);
@@ -252,11 +277,13 @@ export class FuwaTarget implements Target {
         await this.#sleep(1000 * 2 ** attempt);
         continue;
       }
-      if (res.ok) return ((await res.json()) as { id: string }).id;
+      if (res.ok) return await res.json();
       const message = await res
         .json()
         .then((j) => (j as { message?: string }).message ?? "")
         .catch(() => "");
+      // An instance from before batches has no such address at all.
+      if (res.status === 404 && !message && suffix === "/batch") throw new NoBatches();
       if (res.status === 429 || res.status >= 500) {
         if (attempt >= TRIES) throw new Error(message || `the webhook answered ${res.status}`);
         const after = Number(res.headers.get("retry-after"));
@@ -348,6 +375,19 @@ export class FuwaTarget implements Target {
     });
   }
 }
+
+/** A post as a webhook takes it, shaped like Discord's. */
+function webhookPost(post: TargetPost) {
+  return {
+    content: post.content,
+    username: post.username,
+    avatar_url: post.avatarUrl ?? "",
+    embeds: post.embeds.map(webhookEmbed),
+  };
+}
+
+/** The instance can't post a batch through a webhook; it's older than that. */
+class NoBatches extends Error {}
 
 /** An embed as a webhook post takes it, shaped like Discord's. */
 function webhookEmbed(e: SourceEmbed) {
