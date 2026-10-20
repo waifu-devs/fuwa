@@ -1,7 +1,8 @@
 // discord-migrate: a Discord bot, and a fuwa agent, that copy a Discord server
 // into a fuwa server. A Discord admin runs /migrate start and gets a code; in
 // the fuwa server (with the agent added as an admin) someone who manages it
-// runs /import <code>. The bot then copies the server (migrate.ts), keeping a
+// runs /import <code>. Before the code, they pick what to copy: the parts of
+// the server, channels to leave out, and how much history. The bot then copies the server (migrate.ts), keeping a
 // progress message up to date on both sides and posting a summary at the end.
 //
 //   DISCORD_TOKEN=... FUWA_TOKEN=... node src/main.ts
@@ -10,13 +11,18 @@
 // FUWA_URL              the fuwa instance (https://fuwa.chat)
 // FUWA_TOKEN            the fuwa agent's token (Settings > Agents), a secret
 // DATA_DIR              where each migration's progress is kept, to pick up after a stop (./data)
-// MESSAGES_PER_CHANNEL  how many of each channel's latest messages /migrate copies unless told (1000)
+// MESSAGE_BUDGET        about how many messages /migrate copies in all unless told, shared over the channels (20000)
+// MESSAGES_PER_CHANNEL  the most of each channel's latest messages /migrate copies unless told (1000)
 // MAX_MESSAGES          the most /migrate may be asked for per channel (50000)
 // CHANNELS_AT_ONCE      how many channels' histories are copied at once (4)
 // MAX_FILE_MB           files bigger than this are named instead of copied (25)
 import { Agent, CommandOptionType, type Message, Permission } from "@waifu-devs/fuwa";
 import {
+  ActionRowBuilder,
   ApplicationFlags,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelSelectMenuBuilder,
   ChannelType,
   type ChatInputCommandInteraction,
   Client,
@@ -28,11 +34,13 @@ import {
   OAuth2Scopes,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
 } from "discord.js";
+import { type Choice, PART_NAMES, choiceText, perChannel, problems } from "./choose.ts";
 import { DiscordSource } from "./discord.ts";
 import { FuwaTarget } from "./fuwa.ts";
 import { Links, type Pending } from "./link.ts";
-import { NotReadyError, migrate, newReport, reason } from "./migrate.ts";
+import { NotReadyError, PARTS, type Part, migrate, newReport, reason } from "./migrate.ts";
 import { FileStore } from "./state.ts";
 import { progressText, stoppedText, summaryText } from "./summary.ts";
 
@@ -53,12 +61,24 @@ const whole = (name: string, fallback: number) => {
 };
 const maxMessages = whole("MAX_MESSAGES", 50_000);
 const defaultMessages = Math.min(whole("MESSAGES_PER_CHANNEL", 1000), maxMessages);
+const messageBudget = whole("MESSAGE_BUDGET", 20_000);
 const channelsAtOnce = Math.max(1, whole("CHANNELS_AT_ONCE", 4));
 const maxFileBytes = whole("MAX_FILE_MB", 25) * 1024 * 1024;
 const store = new FileStore(env.DATA_DIR || "data");
 const links = new Links();
 /** Progress messages are edited at most this often. */
 const EDIT_EVERY_MS = 15_000;
+/** How long the picker /migrate start shows keeps working (Discord's own limit is 15 minutes). */
+const PICK_MS = 14 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+/** Channels whose history is copied, and channels that can be left out. */
+const TEXT_KINDS = [
+  ChannelType.GuildText,
+  ChannelType.GuildAnnouncement,
+  ChannelType.GuildForum,
+  ChannelType.GuildMedia,
+];
+const PICKABLE = [...TEXT_KINDS, ChannelType.GuildCategory, ChannelType.GuildVoice, ChannelType.GuildStageVoice];
 
 /** Running migrations, by Discord guild and by fuwa server. */
 const byGuild = new Map<string, AbortController>();
@@ -84,11 +104,16 @@ const migrateCommand = new SlashCommandBuilder()
       .addIntegerOption((o) =>
         o
           .setName("messages")
-          .setDescription(
-            `How many of each channel's latest messages to copy (${defaultMessages} unless set; 0 for none)`,
-          )
+          .setDescription("Latest messages to copy per channel (0 for none; unless set, fewer the more channels)")
           .setMinValue(0)
           .setMaxValue(maxMessages),
+      )
+      .addIntegerOption((o) =>
+        o
+          .setName("days")
+          .setDescription("Only copy messages from the last this many days")
+          .setMinValue(1)
+          .setMaxValue(36_500),
       )
       .addChannelOption((o) =>
         o
@@ -153,31 +178,120 @@ async function start(interaction: ChatInputCommandInteraction) {
     await private_("This server is already being copied. `/migrate cancel` stops it.");
     return;
   }
-  let messages = interaction.options.getInteger("messages") ?? defaultMessages;
+  const guild = interaction.guild ?? discord.guilds.cache.get(interaction.guildId);
+  const textChannels = guild?.channels.cache.filter((c) => TEXT_KINDS.includes(c.type)).size ?? 0;
+  let messages =
+    interaction.options.getInteger("messages") ??
+    perChannel(textChannels, messageBudget, defaultMessages);
   let note = "";
   if (messages > 0 && !(await readsMessages())) {
     messages = 0;
     note =
-      "\n\nThis bot can't read messages' text (its Message Content intent is off), so only the server's structure will be copied.";
+      "\n\nThis bot can't read messages' text (its Message Content intent is off), so no history can be copied.";
   }
+  const choice: Choice = {
+    parts: PARTS.filter((p) => p !== "history" || messages > 0),
+    leaveOut: [],
+    messagesPerChannel: messages,
+    days: interaction.options.getInteger("days") ?? 0,
+  };
+  const offered = PARTS.filter((p) => p !== "history" || messages > 0);
+  const picker = (warning = "") => ({
+    content:
+      "Choose what to copy to fuwa, then get your code.\n\n" +
+      choiceText(choice) +
+      note +
+      (warning ? `\n\n**${warning}**` : ""),
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("parts")
+          .setPlaceholder("What to copy")
+          .setMinValues(0)
+          .setMaxValues(offered.length)
+          .addOptions(
+            offered.map((p) => ({ label: PART_NAMES[p], value: p, default: choice.parts.includes(p) })),
+          ),
+      ),
+      new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId("leave_out")
+          .setPlaceholder("Channels or categories to leave out (optional)")
+          .setChannelTypes(PICKABLE)
+          .setMinValues(0)
+          .setMaxValues(25)
+          .setDefaultChannels(choice.leaveOut),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("go").setLabel("Get the code").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("stop").setLabel("Cancel").setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  });
+  const response = await interaction.reply({ ...picker(), flags: MessageFlags.Ephemeral, withResponse: true });
+  const message = response.resource?.message;
+  if (!message) return;
+  const collector = message.createMessageComponentCollector({ time: PICK_MS });
+  collector.on("collect", async (i) => {
+    try {
+      if (i.isStringSelectMenu() && i.customId === "parts") {
+        choice.parts = PARTS.filter((p) => i.values.includes(p));
+        await i.update(picker());
+      } else if (i.isChannelSelectMenu() && i.customId === "leave_out") {
+        choice.leaveOut = [...i.values];
+        await i.update(picker());
+      } else if (i.isButton() && i.customId === "stop") {
+        collector.stop("cancelled");
+        await i.update({ content: "Cancelled. Nothing was copied.", components: [] });
+      } else if (i.isButton() && i.customId === "go") {
+        const wrong = problems(choice);
+        if (wrong.length) {
+          await i.update(picker(wrong.join(" ")));
+          return;
+        }
+        if (byGuild.has(interaction.guildId)) {
+          collector.stop("busy");
+          const content = "This server is already being copied. `/migrate cancel` stops it.";
+          await i.update({ content, components: [] });
+          return;
+        }
+        collector.stop("done");
+        await i.update({ content: codeText(interaction, choice), components: [] });
+      }
+    } catch (err) {
+      console.error("Discord: the /migrate picker failed:", reason(err));
+    }
+  });
+  collector.on("end", (_, why) => {
+    if (why !== "time") return;
+    void interaction
+      .editReply({ content: "This ran out. Run `/migrate start` again when you're ready.", components: [] })
+      .catch(() => {});
+  });
+}
+
+/** Makes a code for what was chosen, and says what to do with it. */
+function codeText(interaction: ChatInputCommandInteraction<"cached" | "raw">, choice: Choice): string {
+  const history = choice.parts.includes("history") ? choice.messagesPerChannel : 0;
   const pending: Pending = {
     guildId: interaction.guildId,
     channelId: interaction.channelId,
     userId: interaction.user.id,
-    messagesPerChannel: messages,
+    messagesPerChannel: history,
     announceChannelId: interaction.options.getChannel("announce")?.id,
+    parts: choice.parts,
+    leaveOut: choice.leaveOut,
+    since: choice.days ? Date.now() - choice.days * DAY_MS : undefined,
   };
   const code = links.create(pending);
   const name = agent.me.username;
-  await private_(
+  return (
     `Your code is **${code}**. It works once, for 30 minutes.\n\n` +
-      "1. On fuwa, make a server for this one (or open one you manage).\n" +
-      `2. Add **@${name}** to it (Server settings > Integrations) and give it a role with Administrator, at the top of the role list.\n` +
-      `3. Run \`/import ${code}\` in any channel there.\n\n` +
-      `It copies roles, channels, emoji and stickers, ` +
-      (messages ? `the latest ${messages.toLocaleString("en-US")} messages of each text channel` : "no messages") +
-      ", and makes an invite for your members. You'll see its progress here and there." +
-      note,
+    "1. On fuwa, make a server for this one (or open one you manage).\n" +
+    `2. Add **@${name}** to it (Server settings > Integrations) and give it a role with Administrator, at the top of the role list.\n` +
+    `3. Run \`/import ${code}\` in any channel there.\n\n` +
+    choiceText(choice) +
+    "\nYou'll see its progress here and there."
   );
 }
 
@@ -328,8 +442,10 @@ async function run(
   const controller = new AbortController();
   byGuild.set(guild.id, controller);
   byServer.add(target.serverId);
-  const history = pending.messagesPerChannel > 0;
+  const parts: Part[] = pending.parts ?? [...PARTS];
+  const history = pending.messagesPerChannel > 0 && parts.includes("history");
   const report = newReport(guild.name);
+  report.parts = parts.filter((p) => p !== "history" || history);
   try {
     const fuwaPost = await reply(progressText(report, history));
     const discordChannel = await discord.channels.fetch(pending.channelId).catch(() => null);
@@ -353,6 +469,9 @@ async function run(
         store,
         {
           messagesPerChannel: pending.messagesPerChannel,
+          since: pending.since,
+          parts,
+          leaveOut: pending.leaveOut,
           channelsAtOnce,
           maxFileBytes,
           signal: controller.signal,

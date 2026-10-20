@@ -9,8 +9,9 @@ discord.js.
 ## How a server moves
 
 1. A Discord administrator adds the bot to their server and runs
-   **`/migrate start`**. It answers, only to them, with a code like
-   `K7QD-M2XP` (it works once, for 30 minutes) and what to do next.
+   **`/migrate start`**. It answers, only to them, with a picker of what to
+   copy (below), and once they press Get the code, a code like `K7QD-M2XP`
+   (it works once, for 30 minutes) and what to do next.
 2. On fuwa, they make a server for the community (or open one they manage),
    add the agent (Server settings > Integrations) and give it a role with
    Administrator at the top of the role list.
@@ -23,10 +24,33 @@ Discord channel where `/migrate start` ran and in the fuwa channel where
 the invite for members, and what didn't come over and why. `/migrate cancel`
 stops it.
 
-`/migrate start` takes two options: `messages`, how many of each text
-channel's latest messages to copy (`MESSAGES_PER_CHANNEL` unless set, 0 for
-none), and `announce`, a Discord channel to post the fuwa invite in when it's
-done.
+## Choosing what comes over
+
+`/migrate start`'s picker has everything ticked to start with:
+
+- **What to copy**: the server's name, description, icon and banner; roles
+  and their permissions; emoji and stickers; soundboard sounds; categories
+  and channels; an invite for members; message history. Untick any of them.
+  History needs the channels, to go in.
+- **Channels or categories to leave out**, up to 25. Leaving out a category
+  leaves out the channels in it. Channels left out aren't copied, nor their
+  history, and the summary doesn't list them as not copied.
+
+Its options set how much history:
+
+- `messages`: how many of each text channel's latest messages to copy (0 for
+  none). Unless set, it depends on the server's size: `MESSAGE_BUDGET`
+  messages shared out over its text, announcement and forum channels, from
+  100 up to `MESSAGES_PER_CHANNEL` each. With the defaults, a server with 20
+  channels or fewer gets 1,000 of each, one with 40 gets 500, and one with
+  200 or more gets 100.
+- `days`: only messages (and forum posts) from the last this many days.
+
+And `announce` is a Discord channel to post the fuwa invite in when it's done.
+
+Running it again for the same fuwa server picks up where the last run
+stopped, with what's chosen this time: parts and channels left out before
+can be added later, and nothing is copied twice.
 
 ## What comes over
 
@@ -54,10 +78,17 @@ were said. Each thread, and each forum's posts, take up to `messages` too.
 Sounds need an instance with a soundboard: on one without, they're listed as
 not copied and roles leave out the soundboard's permissions. Discord keeps
 sounds as MP3 or Ogg, and fuwa takes Ogg Opus, so the bot needs `ffmpeg` (the
-image has it) for any that aren't. A webhook posts at most 30 messages a minute, so
-history takes about two seconds a message per channel, with `CHANNELS_AT_ONCE`
-channels at a time: 1,000 messages in each of 8 channels takes a bit over an
-hour.
+image has it) for any that aren't.
+
+History goes out in batches, so a big import isn't a flood of calls: up to 25
+messages in one call to the webhook's batch address, which fuwa posts in one
+write, and at most one call every two seconds per channel, with
+`CHANNELS_AT_ONCE` channels at a time. A message with files goes out with
+the batch before it, then its files from the agent; thread replies are
+posted by the agent one at a time. On an instance from before batches the
+bot posts one message every two seconds instead (the webhook limit), and a
+batch fuwa turns down (say, AutoMod blocking one message) is posted one by
+one, so only that message is left out.
 
 Every step is written down as it's done (`DATA_DIR`, one file per Discord
 server and fuwa server), so a run that stops (cancelled, a restart, the
@@ -88,7 +119,8 @@ stops the run, to be picked up later.
 | `FUWA_URL` | the fuwa instance, `https://fuwa.chat` by default |
 | `FUWA_TOKEN` | the fuwa agent's token (Settings > Agents). A secret |
 | `DATA_DIR` | where each migration's progress is kept, `./data` by default (`/data` in the image: put a volume there) |
-| `MESSAGES_PER_CHANNEL` | how many of each channel's latest messages `/migrate start` copies unless told, `1000` by default |
+| `MESSAGE_BUDGET` | about how many messages `/migrate start` copies in all unless told, shared out over the text channels, `20000` by default |
+| `MESSAGES_PER_CHANNEL` | the most of each channel's latest messages `/migrate start` copies unless told, `1000` by default |
 | `MAX_MESSAGES` | the most `/migrate start` may be asked for per channel, `50000` by default |
 | `CHANNELS_AT_ONCE` | how many channels' histories are copied at once, `4` by default |
 | `MAX_FILE_MB` | files bigger than this are named in the message instead of copied, `25` by default |

@@ -42,12 +42,15 @@
   include it.
 - `agents/discord-migrate/`: a Discord bot and fuwa agent in one process
   that copy a Discord server into a fuwa server (its README). `/migrate start`
-  in Discord gives a one-use code (`src/link.ts`, in memory) that `/import`
+  in Discord shows a picker of what to copy (parts, channels to leave out;
+  history sized by the server's channel count, `src/choose.ts`), then gives a
+  one-use code (`src/link.ts`, in memory) that `/import`
   redeems in the fuwa server, run by its owner or a manager, with the agent an
   Administrator there. `src/migrate.ts` runs the steps over the two sides in
   `src/model.ts` (`src/discord.ts` reads through discord.js, `src/fuwa.ts`
   writes through the SDK, history through a webhook per channel so messages
-  keep their authors' names and pictures; thread replies from the agent, since
+  keep their authors' names and pictures, in batches of up to 25 through the
+  webhook's `/batch` address (`server/src/webhooks.rs`); thread replies from the agent, since
   webhooks can't post in threads), writing each step down per pair of
   servers (`src/state.ts`, `DATA_DIR`) so a stopped run picks up where it left
   off. `Refused` marks one thing that can't be copied, for good: it's skipped

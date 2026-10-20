@@ -61,7 +61,10 @@ pub use shared::{
     spawn_shared_fanout, undo as shared_undo,
 };
 pub use sso::note_lapses;
-pub use webhooks::{WebhookPost, end_webhook_tile, execute_webhook, set_webhook_tile, verify_webhook};
+pub use webhooks::{
+    MAX_WEBHOOK_BATCH, WebhookPost, end_webhook_tile, execute_webhook, execute_webhook_batch, set_webhook_tile,
+    verify_webhook,
+};
 
 use std::sync::Arc;
 

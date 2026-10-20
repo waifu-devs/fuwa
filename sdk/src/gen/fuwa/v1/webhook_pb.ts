@@ -255,6 +255,12 @@ export const DeleteWebhookResponseSchema: GenMessage<DeleteWebhookResponse> = /*
  * webhook may post 30 messages a minute; past that it answers 429 with
  * Retry-After. Webhook messages never ping @everyone, @here or roles.
  *
+ * To bring a lot over at once (an import), POST to the same address with
+ * /batch: {"messages": [...]}, 1 to 25 posts shaped as above. They're posted
+ * in order, in one write, all or none (one that can't be posted fails the
+ * batch), and the batch counts once toward the 30 a minute. It answers 200
+ * with {"messages": [{"id", "channel_id", "timestamp"}]}, in the same order.
+ *
  * @generated from service fuwa.v1.WebhookService
  */
 export const WebhookService: GenService<{

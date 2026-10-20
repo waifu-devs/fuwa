@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Permission } from "@waifu-devs/fuwa";
 import { IMPORTER_NAME, NotReadyError, migrate, newReport } from "../src/migrate.ts";
-import type {
-  Download,
-  Hook,
-  Source,
-  SourceGuild,
-  SourceMessage,
-  Target,
-  TargetFile,
-  TargetOverwrite,
-  TargetPost,
+import {
+  Refused,
+  type Download,
+  type Hook,
+  type Source,
+  type SourceGuild,
+  type SourceMessage,
+  type Target,
+  type TargetFile,
+  type TargetOverwrite,
+  type TargetPost,
 } from "../src/model.ts";
 import { MemoryStore } from "../src/state.ts";
 import { progressText, summaryText } from "../src/summary.ts";
@@ -276,11 +277,20 @@ class FakeTarget implements Target {
   async deleteHook(hook: Hook) {
     this.hooks.delete(hook.id);
   }
-  async post(hook: Hook, post: TargetPost) {
-    if (this.posts.length >= this.failAfterPosts) throw new Error("the instance went away");
-    const id = this.#id("msg");
-    this.posts.push({ hook: hook.channelId, post, id });
-    return id;
+  /** How many posts each call through a webhook carried. */
+  batches: number[] = [];
+  /** Posts with this text are turned down, as AutoMod would. */
+  refuse = "";
+  async postMany(hook: Hook, posts: TargetPost[]) {
+    // All of a batch or none of it, as fuwa does.
+    if (this.posts.length + posts.length > this.failAfterPosts) throw new Error("the instance went away");
+    this.batches.push(posts.length);
+    return posts.map((post) => {
+      if (this.refuse && post.content.includes(this.refuse)) return new Refused("AutoMod blocked it");
+      const id = this.#id("msg");
+      this.posts.push({ hook: hook.channelId, post, id });
+      return id;
+    });
   }
   async sendFiles(channelId: string, content: string, files: TargetFile[]) {
     this.files.push({ channelId, content, files });
@@ -431,11 +441,62 @@ test("a whole server comes over", async () => {
   assert.match(progressText(report, true), /✅ History: 3 of 3 channels, 7 messages, 2 threads, 2 files/);
 });
 
+test("history goes out in batches, and one message turned down leaves out just that one", async () => {
+  const target = new FakeTarget();
+  target.refuse = "secret";
+  const report = await migrate(new FakeSource(), target, new MemoryStore(), options);
+  // The first day's divider and message, the second day's divider and bob's text go out together, before bob's files.
+  assert.ok(target.batches.includes(4), `batches: ${target.batches}`);
+  assert.ok(target.batches.length < target.posts.length);
+  assert.ok(!target.posts.some((p) => p.post.content.includes("secret")));
+  assert.ok(target.posts.some((p) => p.post.content.startsWith("xxx")));
+  assert.ok(report.skipped.some((s) => s.startsWith("A message by") && s.includes("AutoMod")));
+});
+
+test("only what was chosen comes over, without the channels left out", async () => {
+  const target = new FakeTarget();
+  const report = await migrate(new FakeSource(), target, new MemoryStore(), {
+    ...options,
+    parts: ["roles", "channels", "history"],
+    leaveOut: ["c-cat"],
+  });
+  assert.deepEqual(target.calls, []);
+  assert.deepEqual(target.emojis, []);
+  assert.deepEqual(target.sounds, []);
+  assert.equal(report.invite, undefined);
+  assert.equal(target.roles.length, 2);
+  // The category, and the channels in it, stay behind; the directory is still one fuwa can't have.
+  assert.deepEqual(
+    target.channels.map((c) => c.name),
+    ["help"],
+  );
+  assert.ok(report.skipped.some((s) => s.includes("#directory")));
+  assert.ok(!report.skipped.some((s) => s.includes("#general")));
+  assert.equal(report.historyTotal, 1);
+  assert.ok(target.posts.every((p) => p.hook === target.channels[0]!.id));
+  const progress = progressText(report, true);
+  assert.doesNotMatch(progress, /emoji|sound|invite|icon/i);
+  assert.match(progress, /✅ 2 roles/);
+  const summary = summaryText(report);
+  assert.match(summary, /2 roles, 1 channel, 2 messages \(with 1 thread\), 0 files and 0 pins\./);
+  assert.doesNotMatch(summary, /emoji|sound|Invite your/);
+
+  // Picking up later with the channels left out before copies just those.
+  const store = new MemoryStore();
+  const later = new FakeTarget();
+  await migrate(new FakeSource(), later, store, { ...options, parts: ["channels"], leaveOut: ["c-cat"] });
+  await migrate(new FakeSource(), later, store, { ...options, parts: ["channels"] });
+  assert.deepEqual(
+    later.channels.map((c) => c.name),
+    ["help", "Chat", "general", "mods", "Lounge"],
+  );
+});
+
 test("a stopped run picks up where it left off, copying nothing twice", async () => {
   const source = new FakeSource();
   const store = new MemoryStore();
   const first = new FakeTarget();
-  first.failAfterPosts = 4;
+  first.failAfterPosts = 5;
   await assert.rejects(migrate(source, first, store, options), /went away/);
   assert.equal(first.hooks.size, 0);
 
