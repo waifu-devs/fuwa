@@ -39,6 +39,12 @@ pub(crate) fn channel_glyph(c: &pb::Channel) -> &'static str {
         _ => "hash",
     }
 }
+/// The banner across the top of a server's channels: 16:9 of the sidebar,
+/// as the web's `aspect-video`.
+pub const BANNER: f32 = SIDEBAR * 9.0 / 16.0;
+/// The header over it, which turns solid once the banner has scrolled under it.
+const HEADER: f32 = 56.0;
+
 /// A channel row: the web's `row-y` (6px each side) around 15px text, and the 2px gap.
 const ROW: f32 = 36.5;
 /// A category's header: `mt-4` over a `py-1` 12px line.
@@ -47,11 +53,25 @@ const LABEL: f32 = 40.0;
 impl FuwaApp {
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
+        // A server with a banner wears it across the top of its channels, Discord-style: the
+        // name sits over the picture in white until the channels scroll it away (the web's
+        // ChannelSidebar).
+        let decorated = match &self.nav {
+            Nav::Server { key, server } => self
+                .core
+                .shared
+                .read(|s| s.instance(key).and_then(|i| i.server(server)).filter(|s| !s.banner_url.is_empty()).cloned()),
+            _ => None,
+        };
+        // Held to how far it can go: the handle is shared with other lists and can keep an offset past the end.
+        let handle = sidebar_scroll();
+        let scrolled = (-f32::from(handle.offset().y)).clamp(0.0, f32::from(handle.max_offset().y).max(0.0));
+        let over = decorated.is_some() && scrolled < BANNER - HEADER;
         let (header, body) = match self.nav.clone() {
             Nav::Server { key, server } => {
                 // No conversations in sight.
                 self.core.set_dms_in_view(&[]);
-                self.server_sidebar(&key, &server, window, cx)
+                self.server_sidebar(&key, &server, over, window, cx)
             }
             // A conversation or Friends on an instance shows that instance's sidebar, as on the web.
             Nav::Home { dm: Some((key, _)) } | Nav::Friends { key } => self.instance_sidebar(&key, window, cx),
@@ -61,6 +81,43 @@ impl FuwaApp {
         let call_bar = self.call_bar(window, cx);
         // Your balances in a server with currencies, over your name (docs/economy.md).
         let wallet = self.sidebar_wallet(window, cx);
+        // The picture moves at half the speed of the channels over it, unless motion is reduced.
+        let shift = if cx.reduce_motion() { 0.0 } else { scrolled / 2.0 };
+        let banner = decorated.map(|server| {
+            div()
+                .relative()
+                .mx(px(-8.0))
+                .h(px(BANNER))
+                .overflow_hidden()
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(shift))
+                        .child(crate::ui::banner::still_banner(&server, SIDEBAR, BANNER, window, cx)),
+                )
+                // A little more shade under the name than the banner's own, for white text on a bright picture.
+                .child(div().absolute().top_0().left_0().right_0().h(px(HEADER)).bg(gpui_kit::linear_gradient(
+                    180.0,
+                    gpui_kit::linear_color_stop(gpui_kit::hsla(0.0, 0.0, 0.0, 0.25), 0.0),
+                    gpui_kit::linear_color_stop(gpui_kit::hsla(0.0, 0.0, 0.0, 0.0), 1.0),
+                )))
+        });
+        let floating = banner.is_some();
+        let bar = div()
+            .h(px(HEADER))
+            .flex_none()
+            .flex()
+            .items_center()
+            .px(px(16.0))
+            .gap(px(8.0))
+            .border_b_1()
+            .border_color(if over { alpha(p.border, 0.0) } else { p.border.into() })
+            .when(floating, |el| el.absolute().top_0().left_0().right_0())
+            .when(floating && !over, |el| el.bg(p.side_surface))
+            .child(header);
+        // Above the channels, or floating over the banner (drawn last, so on top).
+        let (above, floats) = if floating { (None, Some(bar)) } else { (Some(bar), None) };
         div()
             .w(px(SIDEBAR))
             .h_full()
@@ -70,27 +127,26 @@ impl FuwaApp {
             .bg(p.side_surface)
             .border_r_1()
             .border_color(p.border)
+            .when_some(above, |el, bar| el.child(bar))
             .child(
                 div()
-                    .h(px(56.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .px(px(16.0))
-                    .gap(px(8.0))
-                    .border_b_1()
-                    .border_color(p.border)
-                    .child(header),
-            )
-            .child(
-                div()
-                    .id("sidebar-scroll")
+                    .relative()
                     .flex_1()
-                    .overflow_y_scroll()
-                    .track_scroll(&sidebar_scroll())
-                    .px(px(8.0))
-                    .pb(px(12.0))
-                    .child(body),
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .id("sidebar-scroll")
+                            .flex_1()
+                            .overflow_y_scroll()
+                            .track_scroll(&sidebar_scroll())
+                            .px(px(8.0))
+                            .pb(px(12.0))
+                            .when_some(banner, |el, banner| el.child(banner))
+                            .child(body),
+                    )
+                    .when_some(floats, |el, bar| el.child(bar)),
             )
             .when_some(wallet, |el, wallet| el.child(wallet))
             .when_some(call_bar, |el, bar| el.child(bar))
@@ -101,6 +157,7 @@ impl FuwaApp {
         &mut self,
         key: &str,
         server_id: &str,
+        over_banner: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (AnyElement, AnyElement) {
@@ -157,8 +214,12 @@ impl FuwaApp {
             window,
             cx,
         );
+        // White on the banner, while it's under the header.
+        let white = |a: f32| gpui_kit::hsla(0.0, 0.0, 1.0, a);
+        let (ink, faint) =
+            if over_banner { (white(1.0), white(0.85)) } else { (p.foreground.into(), p.muted_foreground.into()) };
         let header = {
-            let hover = alpha(p.muted, 0.6);
+            let hover = if over_banner { white(0.1) } else { alpha(p.muted, 0.6) };
             let of = of.clone();
             div()
                 .id("server-name")
@@ -170,6 +231,7 @@ impl FuwaApp {
                 .flex()
                 .items_center()
                 .gap(px(8.0))
+                .text_color(ink)
                 .cursor_pointer()
                 .when(menu_open, |el| el.bg(hover))
                 .hover(move |s| s.bg(hover))
@@ -212,7 +274,7 @@ impl FuwaApp {
                                 .whitespace_nowrap()
                                 .text_size(px(12.0))
                                 .line_height(px(16.0))
-                                .text_color(p.muted_foreground)
+                                .text_color(faint)
                                 .child(motion::count(
                                     format!("server-members|{key}|{server_id}"),
                                     members.max(0) as u64,
@@ -233,7 +295,7 @@ impl FuwaApp {
                         .path("icons/chevron-down.svg")
                         .size(px(16.0))
                         .flex_none()
-                        .text_color(p.foreground)
+                        .text_color(ink)
                         .with_transformation(gpui_kit::Transformation::rotate(gpui_kit::radians(turn.to_radians()))),
                 )
                 .into_any_element()
