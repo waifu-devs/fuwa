@@ -338,3 +338,102 @@ async fn messages_name_their_mentions_and_slow_mode_says_how_long_to_wait() {
 
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_browse() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = instance.channel.clone();
+    let w = world(&channel).await;
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let mut admin = pb::admin_service_client::AdminServiceClient::new(channel.clone());
+    let ana = pb::auth_service_client::AuthServiceClient::new(channel.clone())
+        .sign_up(pb::SignUpRequest {
+            username: "ana".into(),
+            password: "correct horse battery".into(),
+            display_name: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .token;
+    let by_name = |name: &str| pb::LookUpAgentRequest { username: name.into(), ..Default::default() };
+
+    // A private agent is its owner's alone.
+    let err = agents.look_up_agent(authed(&ana, by_name("helper"))).await.unwrap_err();
+    assert_eq!(err.code(), Code::NotFound);
+    let mine = agents.look_up_agent(authed(&w.owner, by_name("@helper"))).await.unwrap().into_inner().agent.unwrap();
+    assert!(!mine.public);
+    assert!(agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner().agents.is_empty());
+    let err = admin
+        .set_featured_agents(authed(&w.owner, pb::SetFeaturedAgentsRequest { agent_ids: vec![w.agent_id.clone()] }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::FailedPrecondition);
+
+    // Public, anyone finds it, with who made it and where it's been.
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: w.agent_id.clone(), public: Some(true), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    add_agent(&channel, &w).await;
+    let found = agents.look_up_agent(authed(&ana, by_name("Helper"))).await.unwrap().into_inner().agent.unwrap();
+    assert_eq!(found.user.unwrap().id, w.agent_id);
+    assert_eq!(found.owner.unwrap().username, "juan");
+    assert_eq!(found.servers, 1);
+    assert!(found.public);
+    let by_id = pb::LookUpAgentRequest { agent_id: w.agent_id.clone(), ..Default::default() };
+    assert!(agents.look_up_agent(authed(&ana, by_id)).await.is_ok());
+
+    // Browse: the most servers first, until an admin features another.
+    let other = agents
+        .create_agent(authed(&w.owner, pb::CreateAgentRequest { username: "other".into(), display_name: "Other".into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .agent
+        .unwrap()
+        .user
+        .unwrap()
+        .id;
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: other.clone(), public: Some(true), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let ids = |r: pb::DiscoverAgentsResponse| r.agents.into_iter().map(|a| a.user.unwrap().id).collect::<Vec<_>>();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert_eq!(ids(browse), vec![w.agent_id.clone(), other.clone()]);
+
+    let err = admin
+        .set_featured_agents(authed(&ana, pb::SetFeaturedAgentsRequest { agent_ids: vec![other.clone()] }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
+    admin
+        .set_featured_agents(authed(&w.owner, pb::SetFeaturedAgentsRequest { agent_ids: vec![other.clone()] }))
+        .await
+        .unwrap();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert_eq!(browse.featured_agent_ids, vec![other.clone()]);
+    assert_eq!(ids(browse), vec![other.clone(), w.agent_id.clone()]);
+
+    // Made private, it leaves Browse and its feature with it.
+    agents
+        .update_agent(authed(
+            &w.owner,
+            pb::UpdateAgentRequest { agent_id: other.clone(), public: Some(false), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
+    assert!(browse.featured_agent_ids.is_empty());
+    assert_eq!(ids(browse), vec![w.agent_id.clone()]);
+
+    instance.stop().await;
+}

@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/agent.proto.
  */
 export const file_fuwa_v1_agent: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUiEwoRTGlzdEFnZW50c1JlcXVlc3QiNAoSTGlzdEFnZW50c1Jlc3BvbnNlEh4KBmFnZW50cxgBIAMoCzIOLmZ1d2EudjEuQWdlbnQiPAoSQ3JlYXRlQWdlbnRSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJDChNDcmVhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudBINCgV0b2tlbhgCIAEoCSK0AQoSVXBkYXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEhkKDGRpc3BsYXlfbmFtZRgCIAEoCUgAiAEBEhcKCmF2YXRhcl91cmwYAyABKAlIAYgBARIQCgNiaW8YBCABKAlIAogBARITCgZwdWJsaWMYBSABKAhIA4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgYKBF9iaW9CCQoHX3B1YmxpYyI0ChNVcGRhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudCIqChZSZXNldEFnZW50VG9rZW5SZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIigKF1Jlc2V0QWdlbnRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJIiYKEkRlbGV0ZUFnZW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSIVChNEZWxldGVBZ2VudFJlc3BvbnNlIjYKD0FkZEFnZW50UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiMwoQQWRkQWdlbnRSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJECglNY3BBY2Nlc3MSJAoEbW9kZRgBIAEoDjIWLmZ1d2EudjEuTWNwQWNjZXNzTW9kZRIRCglhZ2VudF9pZHMYAiADKAkiKAoTR2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoUR2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiTAoTU2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoGYWNjZXNzGAIgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiOgoUU2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3Mi1gIKDUFnZW50RW5kcG9pbnQSEAoIYWdlbnRfaWQYASABKAkSCwoDdXJsGAIgASgJEg4KBmV2ZW50cxgDIAMoCRIOCgZzZWNyZXQYBCABKAkSLgoKdXBkYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNQoRbGFzdF9kZWxpdmVyZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKDWZhaWxpbmdfc2luY2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmxhc3RfZXJyb3IYCCABKAkSLwoLZGlzYWJsZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnNlY3JldF9zZXQYCiABKAgSEwoLc2VjcmV0X2hpbnQYCyABKAkiKwoXR2V0QWdlbnRFbmRwb2ludFJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkiRAoYR2V0QWdlbnRFbmRwb2ludFJlc3BvbnNlEigKCGVuZHBvaW50GAEgASgLMhYuZnV3YS52MS5BZ2VudEVuZHBvaW50IkgKF1NldEFnZW50RW5kcG9pbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEgsKA3VybBgCIAEoCRIOCgZldmVudHMYAyADKAkiRAoYU2V0QWdlbnRFbmRwb2ludFJlc3BvbnNlEigKCGVuZHBvaW50GAEgASgLMhYuZnV3YS52MS5BZ2VudEVuZHBvaW50IjMKH1Jlc2V0QWdlbnRFbmRwb2ludFNlY3JldFJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkiTAogUmVzZXRBZ2VudEVuZHBvaW50U2VjcmV0UmVzcG9uc2USKAoIZW5kcG9pbnQYASABKAsyFi5mdXdhLnYxLkFnZW50RW5kcG9pbnQiVAoNQWdlbnREZWxpdmVyeRIQCghhZ2VudF9pZBgBIAEoCRIRCgljaGFsbGVuZ2UYAiABKAkSHgoGZXZlbnRzGAMgAygLMg4uZnV3YS52MS5FdmVudCJUChNBZ2VudERlbGl2ZXJ5QW5zd2VyEhEKCWNoYWxsZW5nZRgBIAEoCRIqCgdyZXBsaWVzGAIgAygLMhkuZnV3YS52MS5JbnRlcmFjdGlvblJlcGx5IoYBChBJbnRlcmFjdGlvblJlcGx5EhYKDmludGVyYWN0aW9uX2lkGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSHgoGZW1iZWRzGAMgAygLMg4uZnV3YS52MS5FbWJlZBIpCgpjb21wb25lbnRzGAQgAygLMhUuZnV3YS52MS5Db21wb25lbnRSb3cqfgoNTWNwQWNjZXNzTW9kZRIfChtNQ1BfQUNDRVNTX01PREVfVU5TUEVDSUZJRUQQABIXChNNQ1BfQUNDRVNTX01PREVfQUxMEAESGgoWTUNQX0FDQ0VTU19NT0RFX0NIT1NFThACEhcKE01DUF9BQ0NFU1NfTU9ERV9PRkYQAzKHBwoMQWdlbnRTZXJ2aWNlEkUKCkxpc3RBZ2VudHMSGi5mdXdhLnYxLkxpc3RBZ2VudHNSZXF1ZXN0GhsuZnV3YS52MS5MaXN0QWdlbnRzUmVzcG9uc2USSAoLQ3JlYXRlQWdlbnQSGy5mdXdhLnYxLkNyZWF0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuQ3JlYXRlQWdlbnRSZXNwb25zZRJICgtVcGRhdGVBZ2VudBIbLmZ1d2EudjEuVXBkYXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5VcGRhdGVBZ2VudFJlc3BvbnNlElQKD1Jlc2V0QWdlbnRUb2tlbhIfLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVxdWVzdBogLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVzcG9uc2USSAoLRGVsZXRlQWdlbnQSGy5mdXdhLnYxLkRlbGV0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuRGVsZXRlQWdlbnRSZXNwb25zZRI/CghBZGRBZ2VudBIYLmZ1d2EudjEuQWRkQWdlbnRSZXF1ZXN0GhkuZnV3YS52MS5BZGRBZ2VudFJlc3BvbnNlEksKDEdldE1jcEFjY2VzcxIcLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVxdWVzdBodLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVzcG9uc2USSwoMU2V0TWNwQWNjZXNzEhwuZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXF1ZXN0Gh0uZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXNwb25zZRJXChBHZXRBZ2VudEVuZHBvaW50EiAuZnV3YS52MS5HZXRBZ2VudEVuZHBvaW50UmVxdWVzdBohLmZ1d2EudjEuR2V0QWdlbnRFbmRwb2ludFJlc3BvbnNlElcKEFNldEFnZW50RW5kcG9pbnQSIC5mdXdhLnYxLlNldEFnZW50RW5kcG9pbnRSZXF1ZXN0GiEuZnV3YS52MS5TZXRBZ2VudEVuZHBvaW50UmVzcG9uc2USbwoYUmVzZXRBZ2VudEVuZHBvaW50U2VjcmV0EiguZnV3YS52MS5SZXNldEFnZW50RW5kcG9pbnRTZWNyZXRSZXF1ZXN0GikuZnV3YS52MS5SZXNldEFnZW50RW5kcG9pbnRTZWNyZXRSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUipwEKDEFnZW50TGlzdGluZxIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEgsKA2JpbxgCIAEoCRIcCgVvd25lchgDIAEoCzINLmZ1d2EudjEuVXNlchIPCgdzZXJ2ZXJzGAQgASgFEg4KBnB1YmxpYxgFIAEoCBIuCgpjcmVhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI4ChJMb29rVXBBZ2VudFJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiOwoTTG9va1VwQWdlbnRSZXNwb25zZRIkCgVhZ2VudBgBIAEoCzIVLmZ1d2EudjEuQWdlbnRMaXN0aW5nIhcKFURpc2NvdmVyQWdlbnRzUmVxdWVzdCJbChZEaXNjb3ZlckFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmZ1d2EudjEuQWdlbnRMaXN0aW5nEhoKEmZlYXR1cmVkX2FnZW50X2lkcxgCIAMoCSITChFMaXN0QWdlbnRzUmVxdWVzdCI0ChJMaXN0QWdlbnRzUmVzcG9uc2USHgoGYWdlbnRzGAEgAygLMg4uZnV3YS52MS5BZ2VudCI8ChJDcmVhdGVBZ2VudFJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIkMKE0NyZWF0ZUFnZW50UmVzcG9uc2USHQoFYWdlbnQYASABKAsyDi5mdXdhLnYxLkFnZW50Eg0KBXRva2VuGAIgASgJIrQBChJVcGRhdGVBZ2VudFJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkSGQoMZGlzcGxheV9uYW1lGAIgASgJSACIAQESFwoKYXZhdGFyX3VybBgDIAEoCUgBiAEBEhAKA2JpbxgEIAEoCUgCiAEBEhMKBnB1YmxpYxgFIAEoCEgDiAEBQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCBgoEX2Jpb0IJCgdfcHVibGljIjQKE1VwZGF0ZUFnZW50UmVzcG9uc2USHQoFYWdlbnQYASABKAsyDi5mdXdhLnYxLkFnZW50IioKFlJlc2V0QWdlbnRUb2tlblJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkiKAoXUmVzZXRBZ2VudFRva2VuUmVzcG9uc2USDQoFdG9rZW4YASABKAkiJgoSRGVsZXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIhUKE0RlbGV0ZUFnZW50UmVzcG9uc2UiNgoPQWRkQWdlbnRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIzChBBZGRBZ2VudFJlc3BvbnNlEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIkQKCU1jcEFjY2VzcxIkCgRtb2RlGAEgASgOMhYuZnV3YS52MS5NY3BBY2Nlc3NNb2RlEhEKCWFnZW50X2lkcxgCIAMoCSIoChNHZXRNY3BBY2Nlc3NSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI6ChRHZXRNY3BBY2Nlc3NSZXNwb25zZRIiCgZhY2Nlc3MYASABKAsyEi5mdXdhLnYxLk1jcEFjY2VzcyJMChNTZXRNY3BBY2Nlc3NSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIiCgZhY2Nlc3MYAiABKAsyEi5mdXdhLnYxLk1jcEFjY2VzcyI6ChRTZXRNY3BBY2Nlc3NSZXNwb25zZRIiCgZhY2Nlc3MYASABKAsyEi5mdXdhLnYxLk1jcEFjY2VzcyLWAgoNQWdlbnRFbmRwb2ludBIQCghhZ2VudF9pZBgBIAEoCRILCgN1cmwYAiABKAkSDgoGZXZlbnRzGAMgAygJEg4KBnNlY3JldBgEIAEoCRIuCgp1cGRhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI1ChFsYXN0X2RlbGl2ZXJlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoNZmFpbGluZ19zaW5jZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKbGFzdF9lcnJvchgIIAEoCRIvCgtkaXNhYmxlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2VjcmV0X3NldBgKIAEoCBITCgtzZWNyZXRfaGludBgLIAEoCSIrChdHZXRBZ2VudEVuZHBvaW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSJEChhHZXRBZ2VudEVuZHBvaW50UmVzcG9uc2USKAoIZW5kcG9pbnQYASABKAsyFi5mdXdhLnYxLkFnZW50RW5kcG9pbnQiSAoXU2V0QWdlbnRFbmRwb2ludFJlcXVlc3QSEAoIYWdlbnRfaWQYASABKAkSCwoDdXJsGAIgASgJEg4KBmV2ZW50cxgDIAMoCSJEChhTZXRBZ2VudEVuZHBvaW50UmVzcG9uc2USKAoIZW5kcG9pbnQYASABKAsyFi5mdXdhLnYxLkFnZW50RW5kcG9pbnQiMwofUmVzZXRBZ2VudEVuZHBvaW50U2VjcmV0UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSJMCiBSZXNldEFnZW50RW5kcG9pbnRTZWNyZXRSZXNwb25zZRIoCghlbmRwb2ludBgBIAEoCzIWLmZ1d2EudjEuQWdlbnRFbmRwb2ludCJUCg1BZ2VudERlbGl2ZXJ5EhAKCGFnZW50X2lkGAEgASgJEhEKCWNoYWxsZW5nZRgCIAEoCRIeCgZldmVudHMYAyADKAsyDi5mdXdhLnYxLkV2ZW50IlQKE0FnZW50RGVsaXZlcnlBbnN3ZXISEQoJY2hhbGxlbmdlGAEgASgJEioKB3JlcGxpZXMYAiADKAsyGS5mdXdhLnYxLkludGVyYWN0aW9uUmVwbHkihgEKEEludGVyYWN0aW9uUmVwbHkSFgoOaW50ZXJhY3Rpb25faWQYASABKAkSDwoHY29udGVudBgCIAEoCRIeCgZlbWJlZHMYAyADKAsyDi5mdXdhLnYxLkVtYmVkEikKCmNvbXBvbmVudHMYBCADKAsyFS5mdXdhLnYxLkNvbXBvbmVudFJvdyp+Cg1NY3BBY2Nlc3NNb2RlEh8KG01DUF9BQ0NFU1NfTU9ERV9VTlNQRUNJRklFRBAAEhcKE01DUF9BQ0NFU1NfTU9ERV9BTEwQARIaChZNQ1BfQUNDRVNTX01PREVfQ0hPU0VOEAISFwoTTUNQX0FDQ0VTU19NT0RFX09GRhADMqQICgxBZ2VudFNlcnZpY2USRQoKTGlzdEFnZW50cxIaLmZ1d2EudjEuTGlzdEFnZW50c1JlcXVlc3QaGy5mdXdhLnYxLkxpc3RBZ2VudHNSZXNwb25zZRJICgtDcmVhdGVBZ2VudBIbLmZ1d2EudjEuQ3JlYXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5DcmVhdGVBZ2VudFJlc3BvbnNlEkgKC1VwZGF0ZUFnZW50EhsuZnV3YS52MS5VcGRhdGVBZ2VudFJlcXVlc3QaHC5mdXdhLnYxLlVwZGF0ZUFnZW50UmVzcG9uc2USVAoPUmVzZXRBZ2VudFRva2VuEh8uZnV3YS52MS5SZXNldEFnZW50VG9rZW5SZXF1ZXN0GiAuZnV3YS52MS5SZXNldEFnZW50VG9rZW5SZXNwb25zZRJICgtEZWxldGVBZ2VudBIbLmZ1d2EudjEuRGVsZXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5EZWxldGVBZ2VudFJlc3BvbnNlEj8KCEFkZEFnZW50EhguZnV3YS52MS5BZGRBZ2VudFJlcXVlc3QaGS5mdXdhLnYxLkFkZEFnZW50UmVzcG9uc2USSwoMR2V0TWNwQWNjZXNzEhwuZnV3YS52MS5HZXRNY3BBY2Nlc3NSZXF1ZXN0Gh0uZnV3YS52MS5HZXRNY3BBY2Nlc3NSZXNwb25zZRJLCgxTZXRNY3BBY2Nlc3MSHC5mdXdhLnYxLlNldE1jcEFjY2Vzc1JlcXVlc3QaHS5mdXdhLnYxLlNldE1jcEFjY2Vzc1Jlc3BvbnNlElcKEEdldEFnZW50RW5kcG9pbnQSIC5mdXdhLnYxLkdldEFnZW50RW5kcG9pbnRSZXF1ZXN0GiEuZnV3YS52MS5HZXRBZ2VudEVuZHBvaW50UmVzcG9uc2USVwoQU2V0QWdlbnRFbmRwb2ludBIgLmZ1d2EudjEuU2V0QWdlbnRFbmRwb2ludFJlcXVlc3QaIS5mdXdhLnYxLlNldEFnZW50RW5kcG9pbnRSZXNwb25zZRJvChhSZXNldEFnZW50RW5kcG9pbnRTZWNyZXQSKC5mdXdhLnYxLlJlc2V0QWdlbnRFbmRwb2ludFNlY3JldFJlcXVlc3QaKS5mdXdhLnYxLlJlc2V0QWdlbnRFbmRwb2ludFNlY3JldFJlc3BvbnNlEkgKC0xvb2tVcEFnZW50EhsuZnV3YS52MS5Mb29rVXBBZ2VudFJlcXVlc3QaHC5mdXdhLnYxLkxvb2tVcEFnZW50UmVzcG9uc2USUQoORGlzY292ZXJBZ2VudHMSHi5mdXdhLnYxLkRpc2NvdmVyQWdlbnRzUmVxdWVzdBofLmZ1d2EudjEuRGlzY292ZXJBZ2VudHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.Agent
@@ -74,6 +74,143 @@ export const AgentSchema: GenMessage<Agent> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_agent, 0);
 
 /**
+ * An agent as anyone who may add it sees it (LookUpAgent, DiscoverAgents).
+ *
+ * @generated from message fuwa.v1.AgentListing
+ */
+export type AgentListing = Message<"fuwa.v1.AgentListing"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * Markdown, like a person's bio.
+   *
+   * @generated from field: string bio = 2;
+   */
+  bio: string;
+
+  /**
+   * The person who made it.
+   *
+   * @generated from field: fuwa.v1.User owner = 3;
+   */
+  owner?: User | undefined;
+
+  /**
+   * How many servers it's in.
+   *
+   * @generated from field: int32 servers = 4;
+   */
+  servers: number;
+
+  /**
+   * Anyone who manages a server may add it. False only for the caller's own
+   * private agents, which no one else can look up.
+   *
+   * @generated from field: bool public = 5;
+   */
+  public: boolean;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 6;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.AgentListing.
+ * Use `create(AgentListingSchema)` to create a new message.
+ */
+export const AgentListingSchema: GenMessage<AgentListing> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 1);
+
+/**
+ * @generated from message fuwa.v1.LookUpAgentRequest
+ */
+export type LookUpAgentRequest = Message<"fuwa.v1.LookUpAgentRequest"> & {
+  /**
+   * Either one; agent_id wins when both are set.
+   *
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * With or without the "@".
+   *
+   * @generated from field: string username = 2;
+   */
+  username: string;
+};
+
+/**
+ * Describes the message fuwa.v1.LookUpAgentRequest.
+ * Use `create(LookUpAgentRequestSchema)` to create a new message.
+ */
+export const LookUpAgentRequestSchema: GenMessage<LookUpAgentRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 2);
+
+/**
+ * @generated from message fuwa.v1.LookUpAgentResponse
+ */
+export type LookUpAgentResponse = Message<"fuwa.v1.LookUpAgentResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.AgentListing agent = 1;
+   */
+  agent?: AgentListing | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.LookUpAgentResponse.
+ * Use `create(LookUpAgentResponseSchema)` to create a new message.
+ */
+export const LookUpAgentResponseSchema: GenMessage<LookUpAgentResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 3);
+
+/**
+ * @generated from message fuwa.v1.DiscoverAgentsRequest
+ */
+export type DiscoverAgentsRequest = Message<"fuwa.v1.DiscoverAgentsRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DiscoverAgentsRequest.
+ * Use `create(DiscoverAgentsRequestSchema)` to create a new message.
+ */
+export const DiscoverAgentsRequestSchema: GenMessage<DiscoverAgentsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 4);
+
+/**
+ * @generated from message fuwa.v1.DiscoverAgentsResponse
+ */
+export type DiscoverAgentsResponse = Message<"fuwa.v1.DiscoverAgentsResponse"> & {
+  /**
+   * The featured ones first, in their order, then the rest, in the most
+   * servers first. At most 500.
+   *
+   * @generated from field: repeated fuwa.v1.AgentListing agents = 1;
+   */
+  agents: AgentListing[];
+
+  /**
+   * The agents in `agents` the instance's admins feature: apps show them
+   * first, and bigger than the rest.
+   *
+   * @generated from field: repeated string featured_agent_ids = 2;
+   */
+  featuredAgentIds: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.DiscoverAgentsResponse.
+ * Use `create(DiscoverAgentsResponseSchema)` to create a new message.
+ */
+export const DiscoverAgentsResponseSchema: GenMessage<DiscoverAgentsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 5);
+
+/**
  * @generated from message fuwa.v1.ListAgentsRequest
  */
 export type ListAgentsRequest = Message<"fuwa.v1.ListAgentsRequest"> & {
@@ -84,7 +221,7 @@ export type ListAgentsRequest = Message<"fuwa.v1.ListAgentsRequest"> & {
  * Use `create(ListAgentsRequestSchema)` to create a new message.
  */
 export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 1);
+  messageDesc(file_fuwa_v1_agent, 6);
 
 /**
  * @generated from message fuwa.v1.ListAgentsResponse
@@ -101,7 +238,7 @@ export type ListAgentsResponse = Message<"fuwa.v1.ListAgentsResponse"> & {
  * Use `create(ListAgentsResponseSchema)` to create a new message.
  */
 export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 2);
+  messageDesc(file_fuwa_v1_agent, 7);
 
 /**
  * @generated from message fuwa.v1.CreateAgentRequest
@@ -127,7 +264,7 @@ export type CreateAgentRequest = Message<"fuwa.v1.CreateAgentRequest"> & {
  * Use `create(CreateAgentRequestSchema)` to create a new message.
  */
 export const CreateAgentRequestSchema: GenMessage<CreateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 3);
+  messageDesc(file_fuwa_v1_agent, 8);
 
 /**
  * @generated from message fuwa.v1.CreateAgentResponse
@@ -151,7 +288,7 @@ export type CreateAgentResponse = Message<"fuwa.v1.CreateAgentResponse"> & {
  * Use `create(CreateAgentResponseSchema)` to create a new message.
  */
 export const CreateAgentResponseSchema: GenMessage<CreateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 4);
+  messageDesc(file_fuwa_v1_agent, 9);
 
 /**
  * @generated from message fuwa.v1.UpdateAgentRequest
@@ -190,7 +327,7 @@ export type UpdateAgentRequest = Message<"fuwa.v1.UpdateAgentRequest"> & {
  * Use `create(UpdateAgentRequestSchema)` to create a new message.
  */
 export const UpdateAgentRequestSchema: GenMessage<UpdateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 5);
+  messageDesc(file_fuwa_v1_agent, 10);
 
 /**
  * @generated from message fuwa.v1.UpdateAgentResponse
@@ -207,7 +344,7 @@ export type UpdateAgentResponse = Message<"fuwa.v1.UpdateAgentResponse"> & {
  * Use `create(UpdateAgentResponseSchema)` to create a new message.
  */
 export const UpdateAgentResponseSchema: GenMessage<UpdateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 6);
+  messageDesc(file_fuwa_v1_agent, 11);
 
 /**
  * @generated from message fuwa.v1.ResetAgentTokenRequest
@@ -224,7 +361,7 @@ export type ResetAgentTokenRequest = Message<"fuwa.v1.ResetAgentTokenRequest"> &
  * Use `create(ResetAgentTokenRequestSchema)` to create a new message.
  */
 export const ResetAgentTokenRequestSchema: GenMessage<ResetAgentTokenRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 7);
+  messageDesc(file_fuwa_v1_agent, 12);
 
 /**
  * @generated from message fuwa.v1.ResetAgentTokenResponse
@@ -243,7 +380,7 @@ export type ResetAgentTokenResponse = Message<"fuwa.v1.ResetAgentTokenResponse">
  * Use `create(ResetAgentTokenResponseSchema)` to create a new message.
  */
 export const ResetAgentTokenResponseSchema: GenMessage<ResetAgentTokenResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 8);
+  messageDesc(file_fuwa_v1_agent, 13);
 
 /**
  * @generated from message fuwa.v1.DeleteAgentRequest
@@ -260,7 +397,7 @@ export type DeleteAgentRequest = Message<"fuwa.v1.DeleteAgentRequest"> & {
  * Use `create(DeleteAgentRequestSchema)` to create a new message.
  */
 export const DeleteAgentRequestSchema: GenMessage<DeleteAgentRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 9);
+  messageDesc(file_fuwa_v1_agent, 14);
 
 /**
  * @generated from message fuwa.v1.DeleteAgentResponse
@@ -273,7 +410,7 @@ export type DeleteAgentResponse = Message<"fuwa.v1.DeleteAgentResponse"> & {
  * Use `create(DeleteAgentResponseSchema)` to create a new message.
  */
 export const DeleteAgentResponseSchema: GenMessage<DeleteAgentResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 10);
+  messageDesc(file_fuwa_v1_agent, 15);
 
 /**
  * @generated from message fuwa.v1.AddAgentRequest
@@ -297,7 +434,7 @@ export type AddAgentRequest = Message<"fuwa.v1.AddAgentRequest"> & {
  * Use `create(AddAgentRequestSchema)` to create a new message.
  */
 export const AddAgentRequestSchema: GenMessage<AddAgentRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 11);
+  messageDesc(file_fuwa_v1_agent, 16);
 
 /**
  * @generated from message fuwa.v1.AddAgentResponse
@@ -314,7 +451,7 @@ export type AddAgentResponse = Message<"fuwa.v1.AddAgentResponse"> & {
  * Use `create(AddAgentResponseSchema)` to create a new message.
  */
 export const AddAgentResponseSchema: GenMessage<AddAgentResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 12);
+  messageDesc(file_fuwa_v1_agent, 17);
 
 /**
  * @generated from message fuwa.v1.McpAccess
@@ -338,7 +475,7 @@ export type McpAccess = Message<"fuwa.v1.McpAccess"> & {
  * Use `create(McpAccessSchema)` to create a new message.
  */
 export const McpAccessSchema: GenMessage<McpAccess> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 13);
+  messageDesc(file_fuwa_v1_agent, 18);
 
 /**
  * @generated from message fuwa.v1.GetMcpAccessRequest
@@ -355,7 +492,7 @@ export type GetMcpAccessRequest = Message<"fuwa.v1.GetMcpAccessRequest"> & {
  * Use `create(GetMcpAccessRequestSchema)` to create a new message.
  */
 export const GetMcpAccessRequestSchema: GenMessage<GetMcpAccessRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 14);
+  messageDesc(file_fuwa_v1_agent, 19);
 
 /**
  * @generated from message fuwa.v1.GetMcpAccessResponse
@@ -372,7 +509,7 @@ export type GetMcpAccessResponse = Message<"fuwa.v1.GetMcpAccessResponse"> & {
  * Use `create(GetMcpAccessResponseSchema)` to create a new message.
  */
 export const GetMcpAccessResponseSchema: GenMessage<GetMcpAccessResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 15);
+  messageDesc(file_fuwa_v1_agent, 20);
 
 /**
  * @generated from message fuwa.v1.SetMcpAccessRequest
@@ -394,7 +531,7 @@ export type SetMcpAccessRequest = Message<"fuwa.v1.SetMcpAccessRequest"> & {
  * Use `create(SetMcpAccessRequestSchema)` to create a new message.
  */
 export const SetMcpAccessRequestSchema: GenMessage<SetMcpAccessRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 16);
+  messageDesc(file_fuwa_v1_agent, 21);
 
 /**
  * @generated from message fuwa.v1.SetMcpAccessResponse
@@ -411,7 +548,7 @@ export type SetMcpAccessResponse = Message<"fuwa.v1.SetMcpAccessResponse"> & {
  * Use `create(SetMcpAccessResponseSchema)` to create a new message.
  */
 export const SetMcpAccessResponseSchema: GenMessage<SetMcpAccessResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 17);
+  messageDesc(file_fuwa_v1_agent, 22);
 
 /**
  * Where an agent hears about its events when it doesn't keep a stream open
@@ -509,7 +646,7 @@ export type AgentEndpoint = Message<"fuwa.v1.AgentEndpoint"> & {
  * Use `create(AgentEndpointSchema)` to create a new message.
  */
 export const AgentEndpointSchema: GenMessage<AgentEndpoint> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 18);
+  messageDesc(file_fuwa_v1_agent, 23);
 
 /**
  * @generated from message fuwa.v1.GetAgentEndpointRequest
@@ -526,7 +663,7 @@ export type GetAgentEndpointRequest = Message<"fuwa.v1.GetAgentEndpointRequest">
  * Use `create(GetAgentEndpointRequestSchema)` to create a new message.
  */
 export const GetAgentEndpointRequestSchema: GenMessage<GetAgentEndpointRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 19);
+  messageDesc(file_fuwa_v1_agent, 24);
 
 /**
  * @generated from message fuwa.v1.GetAgentEndpointResponse
@@ -543,7 +680,7 @@ export type GetAgentEndpointResponse = Message<"fuwa.v1.GetAgentEndpointResponse
  * Use `create(GetAgentEndpointResponseSchema)` to create a new message.
  */
 export const GetAgentEndpointResponseSchema: GenMessage<GetAgentEndpointResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 20);
+  messageDesc(file_fuwa_v1_agent, 25);
 
 /**
  * @generated from message fuwa.v1.SetAgentEndpointRequest
@@ -570,7 +707,7 @@ export type SetAgentEndpointRequest = Message<"fuwa.v1.SetAgentEndpointRequest">
  * Use `create(SetAgentEndpointRequestSchema)` to create a new message.
  */
 export const SetAgentEndpointRequestSchema: GenMessage<SetAgentEndpointRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 21);
+  messageDesc(file_fuwa_v1_agent, 26);
 
 /**
  * @generated from message fuwa.v1.SetAgentEndpointResponse
@@ -587,7 +724,7 @@ export type SetAgentEndpointResponse = Message<"fuwa.v1.SetAgentEndpointResponse
  * Use `create(SetAgentEndpointResponseSchema)` to create a new message.
  */
 export const SetAgentEndpointResponseSchema: GenMessage<SetAgentEndpointResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 22);
+  messageDesc(file_fuwa_v1_agent, 27);
 
 /**
  * @generated from message fuwa.v1.ResetAgentEndpointSecretRequest
@@ -604,7 +741,7 @@ export type ResetAgentEndpointSecretRequest = Message<"fuwa.v1.ResetAgentEndpoin
  * Use `create(ResetAgentEndpointSecretRequestSchema)` to create a new message.
  */
 export const ResetAgentEndpointSecretRequestSchema: GenMessage<ResetAgentEndpointSecretRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 23);
+  messageDesc(file_fuwa_v1_agent, 28);
 
 /**
  * @generated from message fuwa.v1.ResetAgentEndpointSecretResponse
@@ -621,7 +758,7 @@ export type ResetAgentEndpointSecretResponse = Message<"fuwa.v1.ResetAgentEndpoi
  * Use `create(ResetAgentEndpointSecretResponseSchema)` to create a new message.
  */
 export const ResetAgentEndpointSecretResponseSchema: GenMessage<ResetAgentEndpointSecretResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 24);
+  messageDesc(file_fuwa_v1_agent, 29);
 
 /**
  * What the instance posts to an agent's endpoint, as proto3 JSON.
@@ -661,7 +798,7 @@ export type AgentDelivery = Message<"fuwa.v1.AgentDelivery"> & {
  * Use `create(AgentDeliverySchema)` to create a new message.
  */
 export const AgentDeliverySchema: GenMessage<AgentDelivery> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 25);
+  messageDesc(file_fuwa_v1_agent, 30);
 
 /**
  * What an agent may answer a delivery with (any 2xx says it was received;
@@ -692,7 +829,7 @@ export type AgentDeliveryAnswer = Message<"fuwa.v1.AgentDeliveryAnswer"> & {
  * Use `create(AgentDeliveryAnswerSchema)` to create a new message.
  */
 export const AgentDeliveryAnswerSchema: GenMessage<AgentDeliveryAnswer> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 26);
+  messageDesc(file_fuwa_v1_agent, 31);
 
 /**
  * @generated from message fuwa.v1.InteractionReply
@@ -724,7 +861,7 @@ export type InteractionReply = Message<"fuwa.v1.InteractionReply"> & {
  * Use `create(InteractionReplySchema)` to create a new message.
  */
 export const InteractionReplySchema: GenMessage<InteractionReply> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_agent, 27);
+  messageDesc(file_fuwa_v1_agent, 32);
 
 /**
  * @generated from enum fuwa.v1.McpAccessMode
@@ -902,6 +1039,31 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof ResetAgentEndpointSecretRequestSchema;
     output: typeof ResetAgentEndpointSecretResponseSchema;
+  },
+  /**
+   * One agent as someone about to add it sees it, by id or by username: what
+   * an agent's invite link (<instance>/agent/<username>) and the profile
+   * card show. Public agents are found by anyone signed in; a private one
+   * only by its owner, and is NOT_FOUND to everyone else.
+   *
+   * @generated from rpc fuwa.v1.AgentService.LookUpAgent
+   */
+  lookUpAgent: {
+    methodKind: "unary";
+    input: typeof LookUpAgentRequestSchema;
+    output: typeof LookUpAgentResponseSchema;
+  },
+  /**
+   * The instance's public agents, for Browse: the ones its admins feature
+   * first, in their order (AdminService.SetFeaturedAgents), then the rest,
+   * in the most servers first.
+   *
+   * @generated from rpc fuwa.v1.AgentService.DiscoverAgents
+   */
+  discoverAgents: {
+    methodKind: "unary";
+    input: typeof DiscoverAgentsRequestSchema;
+    output: typeof DiscoverAgentsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_agent, 0);

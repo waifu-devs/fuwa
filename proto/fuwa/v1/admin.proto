@@ -58,6 +58,11 @@ service AdminService {
   // show there: one taken out of Browse stays picked, and shows again once
   // it's back.
   rpc SetFeaturedServers(SetFeaturedServersRequest) returns (SetFeaturedServersResponse);
+  // Picks the agents Browse shows first, and big, in this order
+  // (AgentService.DiscoverAgents, DiscoverAgentsResponse.featured_agent_ids).
+  // Each must be a public agent; one made private later stays picked but
+  // doesn't show until it's public again.
+  rpc SetFeaturedAgents(SetFeaturedAgentsRequest) returns (SetFeaturedAgentsResponse);
 
   // Puts a banner on every client of this instance, or takes it down.
   rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
@@ -631,6 +636,15 @@ message SetFeaturedServersRequest {
 
 message SetFeaturedServersResponse {
   repeated string featured_server_ids = 1;
+}
+
+message SetFeaturedAgentsRequest {
+  // Every featured agent's account id, in order; empty for none.
+  repeated string agent_ids = 1;
+}
+
+message SetFeaturedAgentsResponse {
+  repeated string featured_agent_ids = 1;
 }
 
 message MoveServerRequest {

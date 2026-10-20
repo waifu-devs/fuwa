@@ -17,6 +17,9 @@ use crate::servers::{self as store, Audit, Payload};
 /// Most agents one person may make.
 pub const MAX_AGENTS: i64 = 25;
 
+/// Most agents Browse lists.
+pub const MAX_DISCOVERED_AGENTS: usize = 500;
+
 /// Most agents a server may name in its MCP access.
 pub const MAX_MCP_AGENTS: usize = 100;
 
@@ -82,6 +85,58 @@ impl Api {
             last_active_at: row.last_active_at.map(timestamp),
             servers: i32::try_from(servers).unwrap_or(i32::MAX),
         }
+    }
+
+    /// An agent as someone who may add it sees it, with its owner's name.
+    async fn agent_listing(&self, row: AgentRow) -> Result<pb::AgentListing> {
+        let owner = self.app.node()?.account(&row.owner_id).await?.map(|a| a.user());
+        let servers = self.app.index.joined_ids(&row.account.id).len();
+        Ok(pb::AgentListing {
+            user: Some(row.account.user()),
+            bio: row.bio,
+            owner,
+            servers: i32::try_from(servers).unwrap_or(i32::MAX),
+            public: row.public,
+            created_at: Some(timestamp(row.account.created_at)),
+        })
+    }
+
+    /// An agent the caller may add somewhere: any public one, or their own.
+    /// A private agent is as good as missing to everyone else.
+    async fn look_up_agent(&self, caller: &Account, req: pb::LookUpAgentRequest) -> Result<pb::AgentListing> {
+        let node = self.app.node()?;
+        let row = if !req.agent_id.is_empty() {
+            node.agent(Some(&req.agent_id), None).await?
+        } else {
+            let username = req.username.trim().trim_start_matches('@');
+            if username.is_empty() {
+                return Err(Error::invalid("name an agent by id or username"));
+            }
+            node.agent(None, Some(&auth::validate_username(username)?)).await?
+        };
+        let row = row
+            .filter(|row| !row.account.disabled && (row.public || row.owner_id == caller.id))
+            .ok_or(Error::NotFound("agent"))?;
+        self.agent_listing(row).await
+    }
+
+    /// Public agents for Browse: featured first, in their order, then the
+    /// most servers first.
+    async fn discover_agents(&self) -> Result<pb::DiscoverAgentsResponse> {
+        let node = self.app.node()?;
+        let mut rows = node.public_agents().await?;
+        let featured: Vec<String> =
+            node.featured_agents().await?.into_iter().filter(|id| rows.iter().any(|r| &r.account.id == id)).collect();
+        let place = |id: &str| featured.iter().position(|f| f == id).unwrap_or(featured.len());
+        let servers = |id: &str| self.app.index.joined_ids(id).len();
+        // Stable, so agents in as many servers keep the newest first.
+        rows.sort_by_key(|r| (place(&r.account.id), std::cmp::Reverse(servers(&r.account.id))));
+        rows.truncate(MAX_DISCOVERED_AGENTS);
+        let mut agents = Vec::with_capacity(rows.len());
+        for row in rows {
+            agents.push(self.agent_listing(row).await?);
+        }
+        Ok(pb::DiscoverAgentsResponse { agents, featured_agent_ids: featured })
     }
 
     async fn update_agent(&self, owner: &Account, req: pb::UpdateAgentRequest) -> Result<pb::Agent> {
@@ -421,6 +476,33 @@ impl AgentService for Api {
                 let agent = self.own_agent(&owner, &request.get_ref().agent_id).await?;
                 self.erase_account(&agent.account).await?;
                 Ok(pb::DeleteAgentResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn look_up_agent(
+        &self,
+        request: Request<pb::LookUpAgentRequest>,
+    ) -> Result<Response<pb::LookUpAgentResponse>, Status> {
+        respond(
+            async {
+                let caller = self.account(request.metadata()).await?;
+                let agent = Api::look_up_agent(self, &caller, request.into_inner()).await?;
+                Ok(pb::LookUpAgentResponse { agent: Some(agent) })
+            }
+            .await,
+        )
+    }
+
+    async fn discover_agents(
+        &self,
+        request: Request<pb::DiscoverAgentsRequest>,
+    ) -> Result<Response<pb::DiscoverAgentsResponse>, Status> {
+        respond(
+            async {
+                self.account(request.metadata()).await?;
+                Api::discover_agents(self).await
             }
             .await,
         )
