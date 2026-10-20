@@ -19,7 +19,7 @@ import {
 } from "./gen/fuwa/v1/types_pb.js";
 import type { Media } from "./gen/fuwa/v1/media_pb.js";
 import { messages, type MessagePagesOptions, type MessageWithAuthor } from "./pages.js";
-import { parseCommand, mentions, type ParsedCommand } from "./text.js";
+import { agentInviteLink, parseCommand, mentions, type ParsedCommand } from "./text.js";
 import { uploadPicture, type UploadOptions } from "./upload.js";
 import { VoiceConnection, type JoinVoiceOptions } from "./voice.js";
 
@@ -235,6 +235,15 @@ export class Agent {
   get me(): User {
     if (!this.#me) throw new Error("the agent hasn't started yet");
     return this.#me;
+  }
+
+  /**
+   * The agent's invite link, once started (`<instance>/agent/<username>`),
+   * on the address it connected to: post it, or print it at start, so
+   * people can add it to their servers.
+   */
+  get inviteLink(): string {
+    return agentInviteLink(this.#opts.url, this.me.username);
   }
 
   /**

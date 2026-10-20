@@ -107,7 +107,10 @@ async fn world(channel: &Channel) -> World {
 
 async fn add_agent(channel: &Channel, w: &World) {
     pb::agent_service_client::AgentServiceClient::new(channel.clone())
-        .add_agent(authed(&w.owner, pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &w.owner,
+            pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
 }
@@ -449,6 +452,40 @@ async fn public_agents_are_found_by_anyone_and_featured_ones_come_first_in_brows
     let browse = agents.discover_agents(authed(&ana, pb::DiscoverAgentsRequest {})).await.unwrap().into_inner();
     assert!(browse.featured_agent_ids.is_empty());
     assert_eq!(ids(browse), vec![w.agent_id.clone()]);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn an_agent_can_join_with_roles_ranked_below_whoever_adds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = instance.channel.clone();
+    let w = world(&channel).await;
+    let mut roles = pb::role_service_client::RoleServiceClient::new(channel.clone());
+    let role = roles
+        .create_role(authed(
+            &w.owner,
+            pb::CreateRoleRequest { server_id: w.server_id.clone(), name: "Bots".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .role
+        .unwrap();
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    let add = |role_ids: Vec<String>| pb::AddAgentRequest {
+        server_id: w.server_id.clone(),
+        username: "helper".into(),
+        role_ids,
+    };
+
+    // @everyone isn't a role to give, and the agent isn't added either.
+    let err = agents.add_agent(authed(&w.owner, add(vec![w.server_id.clone()]))).await.unwrap_err();
+    assert_eq!(err.code(), Code::InvalidArgument);
+    let member =
+        agents.add_agent(authed(&w.owner, add(vec![role.id.clone()]))).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(member.role_ids, vec![role.id.clone()]);
 
     instance.stop().await;
 }

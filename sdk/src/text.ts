@@ -55,3 +55,11 @@ export function roleMention(roleId: string): string {
 export function emoji(name: string, id: string, animated = false): string {
   return `<${animated ? "a" : ""}:${name}:${id}>`;
 }
+
+/**
+ * An agent's invite link: `<instance>/agent/<username>`. Whoever opens it
+ * picks a server they manage to add the agent to (when it's public).
+ */
+export function agentInviteLink(instance: string, username: string): string {
+  return `${instance.replace(/\/+$/, "")}/agent/${username.replace(/^@/, "")}`;
+}

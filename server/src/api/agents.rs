@@ -6,6 +6,7 @@ use tonic::{Request, Response, Status};
 
 use super::endpoints;
 use super::messages::post_join;
+use super::roles::{check_below, load_role};
 use super::{Api, respond, text};
 use crate::auth;
 use crate::error::{Error, Result};
@@ -19,6 +20,9 @@ pub const MAX_AGENTS: i64 = 25;
 
 /// Most agents Browse lists.
 pub const MAX_DISCOVERED_AGENTS: usize = 500;
+
+/// Most roles an agent may join with.
+pub const MAX_JOIN_ROLES: usize = 25;
 
 /// Most agents a server may name in its MCP access.
 pub const MAX_MCP_AGENTS: usize = 100;
@@ -166,12 +170,18 @@ impl Api {
 
     async fn add_agent(&self, account: &Account, req: pb::AddAgentRequest) -> Result<pb::Member> {
         let seat = self.with(account, &req.server_id, Permission::ManageServer).await?;
+        if !req.role_ids.is_empty() {
+            seat.access.require(Permission::ManageRoles)?;
+        }
+        if req.role_ids.len() > MAX_JOIN_ROLES {
+            return Err(Error::invalid(format!("an agent joins with at most {MAX_JOIN_ROLES} roles")));
+        }
         let username = auth::validate_username(&req.username)?;
         let agent = self.app.find_agent(&username).await?.ok_or(Error::NotFound("agent"))?;
         if !agent.public && agent.owner_id != account.id {
             return Err(Error::denied("that agent is private: only the person who made it can add it to servers"));
         }
-        let sdb = seat.sdb;
+        let (sdb, access) = (seat.sdb, seat.access);
         let limits = sdb.limits(&self.app.settings().limits).await?;
         let user = agent.account.user();
         let now = now_ms();
@@ -195,7 +205,28 @@ impl Api {
                 }
                 let server = store::load_server(conn).await?;
                 // Agents don't agree to rules: whoever adds one answers for it.
-                let member = store::add_member(conn, &user, &sdb.id, now, false).await?;
+                let mut member = store::add_member(conn, &user, &sdb.id, now, false).await?;
+                if !req.role_ids.is_empty() {
+                    for role_id in &req.role_ids {
+                        let role = load_role(conn, &sdb.id, role_id).await?;
+                        if role.id == sdb.id {
+                            return Err(Error::invalid("everyone has @everyone"));
+                        }
+                        check_below(&access, &role)?;
+                        conn.execute(
+                            "INSERT INTO member_roles (user_id, role_id) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+                            (user.id.as_str(), role.id.as_str()),
+                        )
+                        .await?;
+                        let entry = Audit::new(pb::AuditAction::MemberRolesUpdate, &user.id).role(&role.name).change(
+                            "role",
+                            "",
+                            role.id.as_str(),
+                        );
+                        store::audit(conn, &account.id, entry).await?;
+                    }
+                    member = store::member(conn, &sdb.id, &user.id).await?.ok_or(Error::NotFound("member"))?;
+                }
                 events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member.clone()) }));
                 post_join(conn, &server, &user.id, now, events).await?;
                 store::audit(conn, &account.id, Audit::new(pb::AuditAction::AgentAdd, &user.id)).await?;

@@ -122,7 +122,10 @@ async fn world(channel: &Channel) -> World {
         .into_inner();
     let agent_id = made.agent.unwrap().user.unwrap().id;
     agents
-        .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &owner,
+            pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     World { owner, owner_id, agent: made.token, agent_id, server_id: server.id, general_id, other_id }
@@ -309,7 +312,10 @@ async fn people_run_an_agents_commands_and_only_the_agent_hears() {
         .unwrap();
     let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
     agents
-        .add_agent(authed(&w.owner, pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into() }))
+        .add_agent(authed(
+            &w.owner,
+            pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into(), ..Default::default() },
+        ))
         .await
         .unwrap();
     let replayed = events

@@ -469,5 +469,13 @@
   "agentPage.failed": "Couldn't open this agent",
   "agentPage.goneAbout": "It may have been deleted or made private, or the link has a typo. Ask whoever sent it.",
   "agentPage.elsewhere.title": "Open this agent on another fuwa?",
-  "agentPage.elsewhere.about": "This agent lives on {host}, which you haven't added yet. Opening it connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link."
+  "agentPage.elsewhere.about": "This agent lives on {host}, which you haven't added yet. Opening it connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link.",
+  "agents.rolesTitle": "Add {agent} to {server}",
+  "agents.rolesAbout": "Pick the roles it joins with, so it can do its job from the start. Without any, it gets only what everyone has.",
+  "agents.cancel": "Cancel",
+  "agents.addWithRoles": {
+    "one": "Add with {count} role",
+    "other": "Add with {count} roles"
+  },
+  "agents.addWithoutRoles": "Add without roles"
 }

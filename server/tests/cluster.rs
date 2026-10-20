@@ -680,7 +680,7 @@ async fn a_split_instance_works_like_one() {
         reset_mask: Some(prost_types::FieldMask { paths: vec!["default_limits.members".into()] }),
     };
     c.admin.update_settings(authed(&juan, reset)).await.unwrap();
-    let add = pb::AddAgentRequest { server_id: on_b.id.clone(), username: "relay".into() };
+    let add = pb::AddAgentRequest { server_id: on_b.id.clone(), username: "relay".into(), ..Default::default() };
     // The shard hears about the reset shortly.
     let mut member = None;
     for _ in 0..50 {
@@ -842,7 +842,7 @@ async fn agents_follow_servers_they_are_added_to_across_shards() {
     assert!(next(&mut stream).await.ready.unwrap().servers.is_empty());
 
     for server in [&first, &second] {
-        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() };
         c.agents.add_agent(authed(&juan, add)).await.unwrap();
         let followed = loop {
             if let Some(followed) = next(&mut stream).await.followed {
@@ -896,7 +896,7 @@ async fn an_agent_joining_many_servers_stays_within_its_stream_limit() {
     let mut last = None;
     for n in 0..6 {
         let server = create_server(&mut c, &juan, &format!("Server {n}")).await;
-        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() };
         c.agents.add_agent(authed(&juan, add)).await.unwrap();
         let followed = loop {
             if let Some(followed) = next(&mut stream).await.followed {
@@ -2288,7 +2288,7 @@ async fn an_agent_streaming_through_a_gateway_is_online() {
         .unwrap()
         .into_inner();
     let (agent, agent_id) = (made.token, made.agent.unwrap().user.unwrap().id);
-    let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+    let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into(), ..Default::default() };
     c.agents.add_agent(authed(&juan, add)).await.unwrap();
 
     let mut heard = presence.watch_presence(authed(&juan, pb::WatchPresenceRequest {})).await.unwrap().into_inner();

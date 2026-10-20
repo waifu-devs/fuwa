@@ -65,7 +65,9 @@ agent.on("mention", async (ctx) => {
   await ctx.reply(`Hi ${author?.displayName || "there"}! Try \`${agent.prefix}help\`.`);
 });
 
-agent.on("ready", ({ me, servers }) => console.log(`Signed in as @${me.username}, in ${servers.length} server(s).`));
+agent.on("ready", ({ me, servers }) =>
+  console.log(`Signed in as @${me.username}, in ${servers.length} server(s). Add it to yours: ${agent.inviteLink}`),
+);
 agent.on("serverAdded", () => console.log("Added to a server."));
 agent.on("disconnected", ({ error, retryInMs }) =>
   console.log(`Lost the connection (${error.message}); trying again in ${Math.round(retryInMs / 1000)}s.`),

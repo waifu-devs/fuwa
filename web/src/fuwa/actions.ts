@@ -1961,9 +1961,9 @@ export const resetAgentToken = (key: string, agentId: string) =>
 export const deleteAgent = (key: string, agentId: string) =>
   call((signal) => api(key).agents.deleteAgent({ agentId }, { signal })).pipe(Effect.as(true));
 
-/** Adds an agent, by username, to a server the caller manages. */
-export const addAgent = (key: string, serverId: string, username: string) =>
-  call((signal) => api(key).agents.addAgent({ serverId, username: username.trim().replace(/^@/, "") }, { signal })).pipe(
+/** Adds an agent, by username, to a server the caller manages, with roles to join with if given. */
+export const addAgent = (key: string, serverId: string, username: string, roleIds: string[] = []) =>
+  call((signal) => api(key).agents.addAgent({ serverId, username: username.trim().replace(/^@/, ""), roleIds }, { signal })).pipe(
     Effect.map((r) => r.member!),
   );
 

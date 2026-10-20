@@ -31,8 +31,8 @@ service AgentService {
   // Deletes the agent: it leaves every server, and its messages stay under
   // "Deleted account", as when a person deletes theirs.
   rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse);
-  // Adds an agent to a server. Needs MANAGE_SERVER there, and the agent must
-  // be public or the caller's own.
+  // Adds an agent to a server, with roles if asked. Needs MANAGE_SERVER
+  // there, and the agent must be public or the caller's own.
   rpc AddAgent(AddAgentRequest) returns (AddAgentResponse);
   // Which of a server's agents may use the instance's MCP endpoint
   // (docs/mcp.md). Any member may read it. What an agent can do there is
@@ -167,6 +167,10 @@ message AddAgentRequest {
   string server_id = 1;
   // The agent's username.
   string username = 2;
+  // Roles it joins with, so it can do its job from the start. Needs
+  // MANAGE_ROLES too, and each must rank below the caller's highest role
+  // (not @everyone). At most 25.
+  repeated string role_ids = 3;
 }
 
 message AddAgentResponse {
