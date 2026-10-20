@@ -60,6 +60,9 @@ the toolbar). These lines have no ID of their own, so there's no Copy ID.
 A join line: Wave · Copy message ID · Delete message. An AutoMod alert: Copy
 message ID · Delete alert. A message still sending: Retry (failed) · Copy
 text · Dismiss (failed).
+An ephemeral message (`ephemeral`, [ephemeral-messages.md](ephemeral-messages.md), web): Copy text · Dismiss
+message. Nothing else: it isn't stored, so there's nothing to reply to, react
+to, pin or delete.
 
 ### Someone (`member`): their name or avatar anywhere
 

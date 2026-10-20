@@ -22,6 +22,12 @@
   "messages.copyId": "메시지 ID 복사",
   "messages.edit": "수정",
   "messages.hidePreviews": "링크 미리보기 삭제",
+  "ephemeral.onlyYou": "나만 볼 수 있는 메시지예요",
+  "ephemeral.dismiss": "메시지 닫기",
+  "ephemeral.minutesLeft": {
+    "other": "{count}분 후에 사라져요"
+  },
+  "ephemeral.underAMinute": "1분 안에 사라져요",
   "spoiler.reveal": "스포일러, 눌러서 보기",
   "leaving.title": "fuwa를 떠나는 중",
   "leaving.about": "링크 텍스트와 실제 이동하는 곳이 달라요. 실제로 열리는 주소:",

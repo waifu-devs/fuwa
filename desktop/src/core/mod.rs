@@ -30,6 +30,7 @@ pub mod economy;
 pub mod effects;
 pub mod email;
 pub mod emoji;
+pub mod ephemeral;
 pub mod fonts;
 pub mod foreground;
 pub mod friends;
@@ -242,6 +243,8 @@ pub struct Shared {
     /// Who's typing where (`typing.rs`), apart from the store so a typing
     /// line doesn't build the message list again.
     typing: Arc<Mutex<typing::Typing>>,
+    /// Agents' messages for your eyes only (`ephemeral.rs`), in memory alone.
+    ephemeral: Arc<Mutex<ephemeral::Ephemeral>>,
     /// Read marks waiting to go out to your other devices (`reads.rs`).
     reads: Arc<reads::Outbox>,
 }
@@ -512,6 +515,7 @@ impl Core {
             notices: notices_tx,
             prefs: Arc::new(Mutex::new(Arc::new(prefs.clone()))),
             typing: Arc::new(Mutex::new(typing::Typing::default())),
+            ephemeral: Arc::new(Mutex::new(ephemeral::Ephemeral::default())),
             reads: Arc::new(reads::Outbox::default()),
         };
         // Only you can open the app's folders.

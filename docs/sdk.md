@@ -223,6 +223,24 @@ agent.on("typingStarted", (payload) => {
   `channelId`, `threadId` (empty in the channel itself) and `userId`. They
   aren't stored: none come while catching up. Endpoints don't get them.
 
+### Messages only one person sees
+
+```ts
+agent.command("balance", (ctx) => ctx.replyEphemeral(`You have ${coins(ctx.message.authorId)} coins`));
+agent.on("interaction", (ctx) => ctx.replyEphemeral({ content: "Only you got this", expiresInSeconds: 120 }));
+await agent.sendEphemeral(serverId, channelId, userId, "Psst");
+```
+
+- `agent.sendEphemeral(serverId, channelId, userId, content)` sends a
+  message in a channel that only `userId` sees, marked as only visible to
+  them, for `expiresInSeconds` (up to an hour, 15 minutes unless given):
+  an ephemeral message ([docs/ephemeral-messages.md](ephemeral-messages.md)).
+  Nothing is stored and nobody is pinged, so they see it only while they
+  have fuwa open. `ctx.replyEphemeral(content)` answers a message's author
+  that way, and on an interaction whoever used it (counting toward its five
+  answers). Needs Send Messages in the channel, at most 60 a minute, and an
+  instance with the `ephemeral-messages` feature.
+
 ### Reports and Mod View
 
 `agent.report(message, ModReportReason.SPAM, "note")` reports a message to

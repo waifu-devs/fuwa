@@ -23,6 +23,13 @@
   "messages.copyId": "Copia ID del messaggio",
   "messages.edit": "Modifica",
   "messages.hidePreviews": "Rimuovi le anteprime dei link",
+  "ephemeral.onlyYou": "Solo tu puoi vedere questo messaggio",
+  "ephemeral.dismiss": "Ignora messaggio",
+  "ephemeral.minutesLeft": {
+    "one": "Scompare tra {count} minuto",
+    "other": "Scompare tra {count} minuti"
+  },
+  "ephemeral.underAMinute": "Scompare tra meno di un minuto",
   "spoiler.reveal": "Spoiler, premi per mostrare",
   "leaving.title": "Stai lasciando fuwa",
   "leaving.about": "Il testo di questo link non dice dove porta. In realtà apre:",

@@ -277,6 +277,9 @@ pub struct Msg {
     pub enc: Option<Rc<crate::ui::dm_view::EncBits>>,
     /// Its reactions, where messages here can have them (`ui::reactions`).
     pub reactions: Option<Rc<crate::ui::reactions::ReactBits>>,
+    /// Only you see it, until then (unix ms): an agent's ephemeral message,
+    /// kept by the core in memory and never sent anything about.
+    pub ephemeral: Option<i64>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
     /// What it was built from, as far as can be told before building its
@@ -571,8 +574,10 @@ impl FuwaApp {
                 }),
             });
         }
+        // Agents' messages for your eyes only, among the rest by time (not in threads).
+        let extra = if thread.is_none() { self.core.shared.ephemeral_in(&key, &channel, &me) } else { Vec::new() };
         let mut days = crate::ui::text::Days::default();
-        for m in parent.into_iter().chain(&loaded.items) {
+        for m in parent.into_iter().chain(crate::core::ephemeral::merge(&loaded.items, &extra)) {
             let is_parent = parent.is_some_and(|p| std::ptr::eq(p, m));
             // A divider for each day (not between a thread's message and its replies).
             let at = ms_of(m.created_at.as_ref());
@@ -610,6 +615,9 @@ impl FuwaApp {
                 }
                 continue;
             }
+            // Ephemeral: nothing on it acts on the instance, which doesn't keep it.
+            let ephemeral = m.ephemeral.as_ref().map(|_| crate::core::ephemeral::expires_ms(m));
+            let lasting = ephemeral.is_none();
             let hook = m.webhook.as_ref();
             let who: Author = match hook {
                 Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)), None)),
@@ -620,9 +628,9 @@ impl FuwaApp {
             let from = shared::foreign_server(m, &server).cloned();
             let keep_out = keeps_out && from.is_some() && hook.is_none();
             let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
-            let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
+            let can_delete = lasting && (m.author_id == me || (manage && !(guest_side && from.is_some())));
             let pinned = m.pinned_at.is_some();
-            let can_pin = pins_here && m.kind == pb::MessageKind::Unspecified as i32;
+            let can_pin = lasting && pins_here && m.kind == pb::MessageKind::Unspecified as i32;
             // Everything a plain message's row is built from, hashed before building any of it:
             // unchanged, the row from last time stands. Polls, threads and agents' buttons read
             // more than the message (votes being cast, unread replies, presses) and are built.
@@ -676,10 +684,11 @@ impl FuwaApp {
                     .map(Rc::new),
                 also_in: (thread.is_none() && !m.thread_id.is_empty()).then(|| m.thread_id.clone()),
                 also_sent: thread.is_some() && !is_parent && m.also_in_channel,
-                can_thread: m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
+                can_thread: lasting && m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
             };
-            let agent = crate::ui::commands::AgentBits::of(i, &server, m, can_vote, &self.commands).map(Rc::new);
-            let reactions = (reactions_here && m.kind == pb::MessageKind::Unspecified as i32)
+            let agent =
+                crate::ui::commands::AgentBits::of(i, &server, m, can_vote && lasting, &self.commands).map(Rc::new);
+            let reactions = (lasting && reactions_here && m.kind == pb::MessageKind::Unspecified as i32)
                 .then(|| Rc::new(crate::ui::reactions::ReactBits::server(m, can_react, manage && !guest_side)));
             let mut h = DefaultHasher::new();
             bits.digest(&mut h);
@@ -713,7 +722,7 @@ impl FuwaApp {
             (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
             (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
             let landed = if m.author_id == me { crate::core::store::landed_from(i, &m.id) } else { 0 };
-            (pinned, can_pin, landed).hash(&mut h);
+            (pinned, can_pin, landed, ephemeral).hash(&mut h);
             crate::ui::spoilers::revealed_in(&m.id).hash(&mut h);
             if let Some(r) = &reactions {
                 r.digest(&mut h);
@@ -753,7 +762,7 @@ impl FuwaApp {
                         content: m.content.clone(),
                         // Worked out once the store's lock is let go (`Draft::finish`).
                         shown: String::new(),
-                        mentions_me: i.pings_me(&server, m, suppress),
+                        mentions_me: lasting && i.pings_me(&server, m, suppress),
                         editing,
                         can_delete,
                         at: ms_of(m.created_at.as_ref()),
@@ -787,6 +796,7 @@ impl FuwaApp {
                         decoration: decoration.clone(),
                         owner: !m.author_id.is_empty() && hook.is_none() && m.author_id == owner_id,
                         enc: None,
+                        ephemeral,
                         sig,
                         pre,
                     },
@@ -840,6 +850,7 @@ impl FuwaApp {
                 decoration: None,
                 owner: me == owner_id,
                 enc: None,
+                ephemeral: None,
                 sig: 0,
                 pre: 0,
             };
@@ -948,8 +959,10 @@ impl FuwaApp {
                 let changed = changed_rows(&list.rows, &digests, 0);
                 // New messages that came in while you read further up.
                 if self.scroller.read(cx).is_scrolled_up() {
-                    let new =
-                        rows[list.len.min(rows.len())..].iter().filter(|r| matches!(r, Row::Msg(m) if !m.mine)).count();
+                    let new = rows[list.len.min(rows.len())..]
+                        .iter()
+                        .filter(|r| matches!(r, Row::Msg(m) if !m.mine && m.ephemeral.is_none()))
+                        .count();
                     self.msg_ui.missed += new;
                 }
                 self.scroller.update(cx, |s, cx| {
@@ -1000,8 +1013,41 @@ impl FuwaApp {
             Rc::make_mut(&mut self.fresh).retain(|_, at| at.elapsed() < Duration::from_secs(2));
         }
         self.poll_tick(&rows, cx);
+        self.ephemeral_tick(&rows, cx);
         self.rows = Rc::new(rows);
         self.time_tick(cx);
+    }
+
+    /// Redraws when an ephemeral message's time left next reads differently,
+    /// and builds the list again once one runs out.
+    fn ephemeral_tick(&mut self, rows: &[Row], cx: &mut Context<Self>) {
+        let now = crate::core::dms::now_ms();
+        let wait = rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Msg(m) => m.ephemeral,
+                _ => None,
+            })
+            .map(|until| crate::core::ephemeral::next_change_ms(until, now))
+            .min();
+        let Some(wait) = wait else { return };
+        // One already coming soon enough does (a newer one may change sooner).
+        let at = now + wait;
+        if self.ephemeral_ticking.is_some_and(|coming| coming <= at) {
+            return;
+        }
+        self.ephemeral_ticking = Some(at);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(wait as u64 + 20)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.ephemeral_ticking == Some(at) {
+                    this.ephemeral_ticking = None;
+                }
+                this.sync_list(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1757,13 +1803,16 @@ pub(crate) fn group(rows: &mut [Row]) {
                 // An agent's answer starts its own group, under who used what; a reply, under its quote.
                 let used = m.agent.as_ref().is_some_and(|a| a.used.is_some());
                 let quoted = m.enc.as_ref().is_some_and(|e| e.quote.is_some());
+                // One only you see stands apart from what's around it.
+                let apart = m.ephemeral.is_some();
                 let head = used
                     || quoted
+                    || apart
                     || !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
                 if m.head != head {
                     Rc::make_mut(m).head = head;
                 }
-                last = Some((author, m.at));
+                last = (!apart).then_some((author, m.at));
             }
             _ => last = None,
         }
@@ -2344,6 +2393,9 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     if let Some(reason) = &m.failed {
         text = text.child(failed_line(m, reason, blocked.as_deref(), p, ctx));
     }
+    if let Some(until) = m.ephemeral {
+        text = text.child(ephemeral_line(&m.id, until, p, ctx));
+    }
     body = body.child(text);
 
     let lit = author.is_some();
@@ -2413,6 +2465,8 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     // The web's .mention-me: the primary at 12% and a 3px bar inside the left edge.
     let ping = alpha(p.primary, 0.12);
     let bar = p.primary;
+    // One only you see: a fainter wash of it, and a softer bar.
+    let only = alpha(p.primary, 0.05);
     let lit = ctx.lit.as_deref().and_then(|l| l.strip_prefix("msg|")) == Some(m.id.as_str());
     let menu_of = {
         let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
@@ -2433,6 +2487,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     let hover_of = {
         let (msg, thread, this) = (m.clone(), ctx.thread.clone(), ctx.this.clone());
         let key = crate::ui::chat_rows::hover_key(&m.id, ctx);
+        let menu = m.ephemeral.is_none();
         move |hovered: &bool, _: &mut Window, cx: &mut App| {
             let of = MenuOf::Message {
                 msg: msg.clone(),
@@ -2443,7 +2498,10 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
             };
             let id = key.clone();
             let _ = this.update(cx, |this, cx| {
-                this.set_hover_target(of, *hovered);
+                // One only you see has no menu (nothing in it would reach it).
+                if menu {
+                    this.set_hover_target(of, *hovered);
+                }
                 this.hover_row(&id, *hovered, false, cx);
             });
         }
@@ -2451,7 +2509,7 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
     div()
         .id(SharedString::from(format!("msg|{}", m.id)))
         .group("msg")
-        .map(|el| {
+        .when(m.ephemeral.is_none(), |el| {
             if links {
                 el.on_mouse_down(
                     MouseButton::Right,
@@ -2485,17 +2543,64 @@ fn message(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElem
                 el.bg(held)
             } else if m.mentions_me {
                 el.bg(ping).hover(move |s| s.bg(hover))
+            } else if m.ephemeral.is_some() {
+                el.bg(only).hover(move |s| s.bg(hover))
             } else {
                 el.hover(move |s| s.bg(hover))
             }
         })
         .when(m.mentions_me, |el| el.child(div().absolute().left_0().top_0().bottom_0().w(px(3.0)).bg(bar)))
+        .when(m.ephemeral.is_some(), |el| {
+            el.child(div().absolute().left_0().top_0().bottom_0().w(px(3.0)).bg(alpha(p.primary, 0.45)))
+        })
         .map(|el| match quote {
             // A reply's quote sits over the whole line, lined up with its text.
             Some(quote) => el.flex_col().child(quote).child(div().flex().gap(px(12.0)).children(left).child(body)),
             None => el.children(left).gap(px(12.0)).child(body),
         })
         .children(tools)
+        .into_any_element()
+}
+
+/// Under a message only you see: an eye, "Only you can see this", the time
+/// it has left, and Dismiss, which takes it away here (the instance never
+/// kept it).
+fn ephemeral_line(id: &str, until: i64, p: &Palette, ctx: &Rc<RowCtx>) -> AnyElement {
+    let left = match crate::core::ephemeral::minutes_left(until, crate::core::dms::now_ms()) {
+        Some(n) => crate::core::i18n::t_with("chat.ephemeral.minutesLeft", &[("count", Arg::Num(n))]),
+        None => t("chat.ephemeral.underAMinute"),
+    };
+    let (this, mid) = (ctx.this.clone(), id.to_owned());
+    div()
+        .mt(px(4.0))
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(6.0))
+        .text_xs()
+        .line_height(px(16.0))
+        .text_color(p.muted_foreground)
+        .child(icon("eye").size(px(14.0)))
+        .child(div().child(t("chat.ephemeral.onlyYou")))
+        .child(div().child("·"))
+        .child(div().child(left))
+        .child(div().child("·"))
+        .child(
+            div()
+                .id(SharedString::from(format!("ephemeral-dismiss|{id}")))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.primary)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .on_click(move |_, _, cx| {
+                    let _ = this.update(cx, |this, _| {
+                        if let Some(Target::Channel { key, channel, .. }) = this.target() {
+                            this.core.shared.ephemeral_dismiss(&key, &channel, &mid);
+                        }
+                    });
+                })
+                .child(t("chat.ephemeral.dismiss")),
+        )
         .into_any_element()
 }
 
@@ -2868,7 +2973,7 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
                 },
             ));
     }
-    if ctx.developer && ctx.server.is_some() {
+    if ctx.developer && ctx.server.is_some() && m.ephemeral.is_none() {
         let (this, mid) = (ctx.this.clone(), id.clone());
         frame = frame.child(
             tool(format!("copy-id|{id}"), "fingerprint-pattern", t("chat.messages.copyId"), false, p).on_click(
@@ -2878,7 +2983,7 @@ fn message_tools(m: &Rc<Msg>, p: &Palette, ctx: &Rc<RowCtx>) -> Option<AnyElemen
             ),
         );
     }
-    let can_edit = m.mine && m.poll.is_none() && m.voice.is_none();
+    let can_edit = m.mine && m.poll.is_none() && m.voice.is_none() && m.ephemeral.is_none();
     if can_edit {
         let (this, mid, in_thread) = (ctx.this.clone(), id.clone(), ctx.thread.is_some());
         frame = frame.child(tool(format!("edit|{id}"), "pencil", t("chat.messages.edit"), false, p).on_click(

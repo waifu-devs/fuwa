@@ -1133,6 +1133,19 @@ message Message {
   repeated Reaction reactions = 27;
   // A gacha pull its author shared (SendMessageRequest.gacha_pull_id).
   GachaShare gacha = 28;
+  // Set only on an ephemeral message (MessageService.SendEphemeralMessage):
+  // who sees it and until when. It isn't stored and never comes back from
+  // ListMessages; apps show it with "Only you can see this" until it runs
+  // out, or until they're closed.
+  EphemeralInfo ephemeral = 29;
+}
+
+// What makes a message ephemeral (docs/ephemeral-messages.md).
+message EphemeralInfo {
+  // The one person it was sent to.
+  string user_id = 1;
+  // When apps stop showing it.
+  google.protobuf.Timestamp expires_at = 2;
 }
 
 // One emoji people reacted to a message with, and how many did.
@@ -1543,7 +1556,16 @@ message Event {
     // (SoundboardService.PlaySound). Apps in that call play it; it's never
     // replayed.
     SoundPlayed sound_played = 57;
+    // Not stored either: an agent sent a message only one person sees
+    // (MessageService.SendEphemeralMessage). Only that person gets it, on
+    // every live connection, whatever its focus; never replayed.
+    EphemeralMessageCreated ephemeral_message_created = 58;
   }
+}
+
+// An ephemeral message: `message.ephemeral` says for whom and until when.
+message EphemeralMessageCreated {
+  Message message = 1;
 }
 
 // Someone started typing in a channel, or in a thread's reply box, or is

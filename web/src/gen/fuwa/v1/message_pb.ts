@@ -12,7 +12,83 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiTQoRU2VuZFR5cGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJIhQKElNlbmRUeXBpbmdSZXNwb25zZSKYAwoSU2VuZE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg8KB2NvbnRlbnQYAyABKAkSKAoLYXR0YWNobWVudHMYBCADKAsyEy5mdXdhLnYxLkF0dGFjaG1lbnQSHgoGZW1iZWRzGAUgAygLMg4uZnV3YS52MS5FbWJlZBITCgtyZXBseV90b19pZBgGIAEoCRIeCgZlbW9qaXMYByADKAsyDi5mdXdhLnYxLkVtb2ppEhEKCXRocmVhZF9pZBgIIAEoCRIcChRhbHNvX3NlbmRfdG9fY2hhbm5lbBgJIAEoCBIeCgRwb2xsGAogASgLMhAuZnV3YS52MS5OZXdQb2xsEiAKA2dpZhgLIAEoCzITLmZ1d2EudjEuTWVzc2FnZUdpZhIWCg5pbnRlcmFjdGlvbl9pZBgMIAEoCRIpCgpjb21wb25lbnRzGA0gAygLMhUuZnV3YS52MS5Db21wb25lbnRSb3cSFQoNZ2FjaGFfcHVsbF9pZBgOIAEoCSKBAQoHTmV3UG9sbBIQCghxdWVzdGlvbhgBIAEoCRInCgdhbnN3ZXJzGAIgAygLMhYuZnV3YS52MS5OZXdQb2xsQW5zd2VyEhAKCG11bHRpcGxlGAMgASgIEhEKCWFub255bW91cxgEIAEoCBIWCg5kdXJhdGlvbl9ob3VycxgFIAEoBSIsCg1OZXdQb2xsQW5zd2VyEgwKBHRleHQYASABKAkSDQoFZW1vamkYAiABKAkiOAoTU2VuZE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk4KEUdldE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiVgoSR2V0TWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2USHQoGYXV0aG9yGAIgASgLMg0uZnV3YS52MS5Vc2VyIoMBChNMaXN0TWVzc2FnZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg0KBWxpbWl0GAMgASgFEhEKCWJlZm9yZV9pZBgEIAEoCRIQCghhZnRlcl9pZBgFIAEoCRIRCgl0aHJlYWRfaWQYBiABKAkijgEKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgSIAoGcGFyZW50GAQgASgLMhAuZnV3YS52MS5NZXNzYWdlIoIBChRVcGRhdGVNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkSHgoGZW1vamlzGAUgAygLMg4uZnV3YS52MS5FbW9qaSI6ChVVcGRhdGVNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSJRChREZWxldGVNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJIhcKFURlbGV0ZU1lc3NhZ2VSZXNwb25zZSKEAQoSTGlzdFRocmVhZHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg0KBXF1ZXJ5GAMgASgJEhAKCGFyY2hpdmVkGAQgASgIEg0KBWxpbWl0GAUgASgFEhcKD2FmdGVyX3RocmVhZF9pZBgGIAEoCSKIAQoTTGlzdFRocmVhZHNSZXNwb25zZRIhCgd0aHJlYWRzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgSHAoUbmV4dF9hZnRlcl90aHJlYWRfaWQYBCABKAkibwoTVXBkYXRlVGhyZWFkUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgl0aHJlYWRfaWQYAyABKAkSEwoGbG9ja2VkGAQgASgISACIAQFCCQoHX2xvY2tlZCI+ChRVcGRhdGVUaHJlYWRSZXNwb25zZRImCgZ0aHJlYWQYASABKAsyFi5mdXdhLnYxLlRocmVhZFN1bW1hcnkiXwoTRm9sbG93VGhyZWFkUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgl0aHJlYWRfaWQYAyABKAkSDgoGZm9sbG93GAQgASgIIhYKFEZvbGxvd1RocmVhZFJlc3BvbnNlIi8KGkxpc3RGb2xsb3dlZFRocmVhZHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSIxChtMaXN0Rm9sbG93ZWRUaHJlYWRzUmVzcG9uc2USEgoKdGhyZWFkX2lkcxgBIAMoCSJgCg9Wb3RlUG9sbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKYW5zd2VyX2lkcxgDIAMoDRISCgpjaGFubmVsX2lkGAQgASgJIi8KEFZvdGVQb2xsUmVzcG9uc2USGwoEcG9sbBgBIAEoCzINLmZ1d2EudjEuUG9sbCJLCg5FbmRQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJIi4KD0VuZFBvbGxSZXNwb25zZRIbCgRwb2xsGAEgASgLMg0uZnV3YS52MS5Qb2xsIoYBChVMaXN0UG9sbFZvdGVyc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEQoJYW5zd2VyX2lkGAMgASgNEg0KBWxpbWl0GAQgASgFEhAKCGFmdGVyX2lkGAUgASgJEhIKCmNoYW5uZWxfaWQYBiABKAkiSAoWTGlzdFBvbGxWb3RlcnNSZXNwb25zZRIcCgV1c2VycxgBIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgCIAEoCCJeChFQaW5NZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRISCgptZXNzYWdlX2lkGAMgASgJEg4KBnBpbm5lZBgEIAEoCCI3ChJQaW5NZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSJsCg9MaXN0UGluc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJEg0KBWxpbWl0GAQgASgFEhAKCGFmdGVyX2lkGAUgASgJImgKEExpc3RQaW5zUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCCJ7CgxSZWFjdFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEgoKbWVzc2FnZV9pZBgDIAEoCRINCgVlbW9qaRgEIAEoCRIQCghlbW9qaV9pZBgFIAEoCRIPCgdyZWFjdGVkGAYgASgIIjQKDVJlYWN0UmVzcG9uc2USIwoIcmVhY3Rpb24YASABKAsyES5mdXdhLnYxLlJlYWN0aW9uIpIBChNMaXN0UmVhY3RvcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDQoFZW1vamkYBCABKAkSEAoIZW1vamlfaWQYBSABKAkSDQoFbGltaXQYBiABKAUSEAoIYWZ0ZXJfaWQYByABKAkiRgoUTGlzdFJlYWN0b3JzUmVzcG9uc2USHAoFdXNlcnMYASADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAiABKAgicwoVQ2xlYXJSZWFjdGlvbnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDQoFZW1vamkYBCABKAkSEAoIZW1vamlfaWQYBSABKAkiGAoWQ2xlYXJSZWFjdGlvbnNSZXNwb25zZSJAChdIaWRlTGlua1ByZXZpZXdzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCSI9ChhIaWRlTGlua1ByZXZpZXdzUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZTKmCwoOTWVzc2FnZVNlcnZpY2USSAoLU2VuZE1lc3NhZ2USGy5mdXdhLnYxLlNlbmRNZXNzYWdlUmVxdWVzdBocLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXNwb25zZRJFCgpHZXRNZXNzYWdlEhouZnV3YS52MS5HZXRNZXNzYWdlUmVxdWVzdBobLmZ1d2EudjEuR2V0TWVzc2FnZVJlc3BvbnNlEksKDExpc3RNZXNzYWdlcxIcLmZ1d2EudjEuTGlzdE1lc3NhZ2VzUmVxdWVzdBodLmZ1d2EudjEuTGlzdE1lc3NhZ2VzUmVzcG9uc2USTgoNVXBkYXRlTWVzc2FnZRIdLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZU1lc3NhZ2VSZXNwb25zZRJOCg1EZWxldGVNZXNzYWdlEh0uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuRGVsZXRlTWVzc2FnZVJlc3BvbnNlEkgKC0xpc3RUaHJlYWRzEhsuZnV3YS52MS5MaXN0VGhyZWFkc1JlcXVlc3QaHC5mdXdhLnYxLkxpc3RUaHJlYWRzUmVzcG9uc2USSwoMVXBkYXRlVGhyZWFkEhwuZnV3YS52MS5VcGRhdGVUaHJlYWRSZXF1ZXN0Gh0uZnV3YS52MS5VcGRhdGVUaHJlYWRSZXNwb25zZRJLCgxGb2xsb3dUaHJlYWQSHC5mdXdhLnYxLkZvbGxvd1RocmVhZFJlcXVlc3QaHS5mdXdhLnYxLkZvbGxvd1RocmVhZFJlc3BvbnNlEmAKE0xpc3RGb2xsb3dlZFRocmVhZHMSIy5mdXdhLnYxLkxpc3RGb2xsb3dlZFRocmVhZHNSZXF1ZXN0GiQuZnV3YS52MS5MaXN0Rm9sbG93ZWRUaHJlYWRzUmVzcG9uc2USPwoIVm90ZVBvbGwSGC5mdXdhLnYxLlZvdGVQb2xsUmVxdWVzdBoZLmZ1d2EudjEuVm90ZVBvbGxSZXNwb25zZRI8CgdFbmRQb2xsEhcuZnV3YS52MS5FbmRQb2xsUmVxdWVzdBoYLmZ1d2EudjEuRW5kUG9sbFJlc3BvbnNlElEKDkxpc3RQb2xsVm90ZXJzEh4uZnV3YS52MS5MaXN0UG9sbFZvdGVyc1JlcXVlc3QaHy5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVzcG9uc2USRQoKUGluTWVzc2FnZRIaLmZ1d2EudjEuUGluTWVzc2FnZVJlcXVlc3QaGy5mdXdhLnYxLlBpbk1lc3NhZ2VSZXNwb25zZRI/CghMaXN0UGlucxIYLmZ1d2EudjEuTGlzdFBpbnNSZXF1ZXN0GhkuZnV3YS52MS5MaXN0UGluc1Jlc3BvbnNlEjYKBVJlYWN0EhUuZnV3YS52MS5SZWFjdFJlcXVlc3QaFi5mdXdhLnYxLlJlYWN0UmVzcG9uc2USSwoMTGlzdFJlYWN0b3JzEhwuZnV3YS52MS5MaXN0UmVhY3RvcnNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0UmVhY3RvcnNSZXNwb25zZRJRCg5DbGVhclJlYWN0aW9ucxIeLmZ1d2EudjEuQ2xlYXJSZWFjdGlvbnNSZXF1ZXN0Gh8uZnV3YS52MS5DbGVhclJlYWN0aW9uc1Jlc3BvbnNlElcKEEhpZGVMaW5rUHJldmlld3MSIC5mdXdhLnYxLkhpZGVMaW5rUHJldmlld3NSZXF1ZXN0GiEuZnV3YS52MS5IaWRlTGlua1ByZXZpZXdzUmVzcG9uc2USRQoKU2VuZFR5cGluZxIaLmZ1d2EudjEuU2VuZFR5cGluZ1JlcXVlc3QaGy5mdXdhLnYxLlNlbmRUeXBpbmdSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiugEKG1NlbmRFcGhlbWVyYWxNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgd1c2VyX2lkGAMgASgJEg8KB2NvbnRlbnQYBCABKAkSHgoGZW1iZWRzGAUgAygLMg4uZnV3YS52MS5FbWJlZBIWCg5pbnRlcmFjdGlvbl9pZBgGIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYByABKA0iQQocU2VuZEVwaGVtZXJhbE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk0KEVNlbmRUeXBpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCSIUChJTZW5kVHlwaW5nUmVzcG9uc2UimAMKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaRIRCgl0aHJlYWRfaWQYCCABKAkSHAoUYWxzb19zZW5kX3RvX2NoYW5uZWwYCSABKAgSHgoEcG9sbBgKIAEoCzIQLmZ1d2EudjEuTmV3UG9sbBIgCgNnaWYYCyABKAsyEy5mdXdhLnYxLk1lc3NhZ2VHaWYSFgoOaW50ZXJhY3Rpb25faWQYDCABKAkSKQoKY29tcG9uZW50cxgNIAMoCzIVLmZ1d2EudjEuQ29tcG9uZW50Um93EhUKDWdhY2hhX3B1bGxfaWQYDiABKAkigQEKB05ld1BvbGwSEAoIcXVlc3Rpb24YASABKAkSJwoHYW5zd2VycxgCIAMoCzIWLmZ1d2EudjEuTmV3UG9sbEFuc3dlchIQCghtdWx0aXBsZRgDIAEoCBIRCglhbm9ueW1vdXMYBCABKAgSFgoOZHVyYXRpb25faG91cnMYBSABKAUiLAoNTmV3UG9sbEFuc3dlchIMCgR0ZXh0GAEgASgJEg0KBWVtb2ppGAIgASgJIjgKE1NlbmRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSJOChFHZXRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJIlYKEkdldE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlEh0KBmF1dGhvchgCIAEoCzINLmZ1d2EudjEuVXNlciKDAQoTTGlzdE1lc3NhZ2VzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVsaW1pdBgDIAEoBRIRCgliZWZvcmVfaWQYBCABKAkSEAoIYWZ0ZXJfaWQYBSABKAkSEQoJdGhyZWFkX2lkGAYgASgJIo4BChRMaXN0TWVzc2FnZXNSZXNwb25zZRIiCghtZXNzYWdlcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIEiAKBnBhcmVudBgEIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSKCAQoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJEh4KBmVtb2ppcxgFIAMoCzIOLmZ1d2EudjEuRW1vamkiOgoVVXBkYXRlTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiUQoURGVsZXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSIXChVEZWxldGVNZXNzYWdlUmVzcG9uc2UihAEKEkxpc3RUaHJlYWRzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVxdWVyeRgDIAEoCRIQCghhcmNoaXZlZBgEIAEoCBINCgVsaW1pdBgFIAEoBRIXCg9hZnRlcl90aHJlYWRfaWQYBiABKAkiiAEKE0xpc3RUaHJlYWRzUmVzcG9uc2USIQoHdGhyZWFkcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIEhwKFG5leHRfYWZ0ZXJfdGhyZWFkX2lkGAQgASgJIm8KE1VwZGF0ZVRocmVhZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJEhMKBmxvY2tlZBgEIAEoCEgAiAEBQgkKB19sb2NrZWQiPgoUVXBkYXRlVGhyZWFkUmVzcG9uc2USJgoGdGhyZWFkGAEgASgLMhYuZnV3YS52MS5UaHJlYWRTdW1tYXJ5Il8KE0ZvbGxvd1RocmVhZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJEg4KBmZvbGxvdxgEIAEoCCIWChRGb2xsb3dUaHJlYWRSZXNwb25zZSIvChpMaXN0Rm9sbG93ZWRUaHJlYWRzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiMQobTGlzdEZvbGxvd2VkVGhyZWFkc1Jlc3BvbnNlEhIKCnRocmVhZF9pZHMYASADKAkiYAoPVm90ZVBvbGxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmFuc3dlcl9pZHMYAyADKA0SEgoKY2hhbm5lbF9pZBgEIAEoCSIvChBWb3RlUG9sbFJlc3BvbnNlEhsKBHBvbGwYASABKAsyDS5mdXdhLnYxLlBvbGwiSwoORW5kUG9sbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSIuCg9FbmRQb2xsUmVzcG9uc2USGwoEcG9sbBgBIAEoCzINLmZ1d2EudjEuUG9sbCKGAQoVTGlzdFBvbGxWb3RlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhEKCWFuc3dlcl9pZBgDIAEoDRINCgVsaW1pdBgEIAEoBRIQCghhZnRlcl9pZBgFIAEoCRISCgpjaGFubmVsX2lkGAYgASgJIkgKFkxpc3RQb2xsVm90ZXJzUmVzcG9uc2USHAoFdXNlcnMYASADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAiABKAgiXgoRUGluTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEgoKbWVzc2FnZV9pZBgDIAEoCRIOCgZwaW5uZWQYBCABKAgiNwoSUGluTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UibAoPTGlzdFBpbnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXRocmVhZF9pZBgDIAEoCRINCgVsaW1pdBgEIAEoBRIQCghhZnRlcl9pZBgFIAEoCSJoChBMaXN0UGluc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgiewoMUmVhY3RSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCm1lc3NhZ2VfaWQYAyABKAkSDQoFZW1vamkYBCABKAkSEAoIZW1vamlfaWQYBSABKAkSDwoHcmVhY3RlZBgGIAEoCCI0Cg1SZWFjdFJlc3BvbnNlEiMKCHJlYWN0aW9uGAEgASgLMhEuZnV3YS52MS5SZWFjdGlvbiKSAQoTTGlzdFJlYWN0b3JzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRISCgptZXNzYWdlX2lkGAMgASgJEg0KBWVtb2ppGAQgASgJEhAKCGVtb2ppX2lkGAUgASgJEg0KBWxpbWl0GAYgASgFEhAKCGFmdGVyX2lkGAcgASgJIkYKFExpc3RSZWFjdG9yc1Jlc3BvbnNlEhwKBXVzZXJzGAEgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAIgASgIInMKFUNsZWFyUmVhY3Rpb25zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRISCgptZXNzYWdlX2lkGAMgASgJEg0KBWVtb2ppGAQgASgJEhAKCGVtb2ppX2lkGAUgASgJIhgKFkNsZWFyUmVhY3Rpb25zUmVzcG9uc2UiQAoXSGlkZUxpbmtQcmV2aWV3c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkiPQoYSGlkZUxpbmtQcmV2aWV3c1Jlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UyiwwKDk1lc3NhZ2VTZXJ2aWNlEkgKC1NlbmRNZXNzYWdlEhsuZnV3YS52MS5TZW5kTWVzc2FnZVJlcXVlc3QaHC5mdXdhLnYxLlNlbmRNZXNzYWdlUmVzcG9uc2USRQoKR2V0TWVzc2FnZRIaLmZ1d2EudjEuR2V0TWVzc2FnZVJlcXVlc3QaGy5mdXdhLnYxLkdldE1lc3NhZ2VSZXNwb25zZRJLCgxMaXN0TWVzc2FnZXMSHC5mdXdhLnYxLkxpc3RNZXNzYWdlc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RNZXNzYWdlc1Jlc3BvbnNlEk4KDVVwZGF0ZU1lc3NhZ2USHS5mdXdhLnYxLlVwZGF0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVzcG9uc2USTgoNRGVsZXRlTWVzc2FnZRIdLmZ1d2EudjEuRGVsZXRlTWVzc2FnZVJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXNwb25zZRJICgtMaXN0VGhyZWFkcxIbLmZ1d2EudjEuTGlzdFRocmVhZHNSZXF1ZXN0GhwuZnV3YS52MS5MaXN0VGhyZWFkc1Jlc3BvbnNlEksKDFVwZGF0ZVRocmVhZBIcLmZ1d2EudjEuVXBkYXRlVGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlVGhyZWFkUmVzcG9uc2USSwoMRm9sbG93VGhyZWFkEhwuZnV3YS52MS5Gb2xsb3dUaHJlYWRSZXF1ZXN0Gh0uZnV3YS52MS5Gb2xsb3dUaHJlYWRSZXNwb25zZRJgChNMaXN0Rm9sbG93ZWRUaHJlYWRzEiMuZnV3YS52MS5MaXN0Rm9sbG93ZWRUaHJlYWRzUmVxdWVzdBokLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1Jlc3BvbnNlEj8KCFZvdGVQb2xsEhguZnV3YS52MS5Wb3RlUG9sbFJlcXVlc3QaGS5mdXdhLnYxLlZvdGVQb2xsUmVzcG9uc2USPAoHRW5kUG9sbBIXLmZ1d2EudjEuRW5kUG9sbFJlcXVlc3QaGC5mdXdhLnYxLkVuZFBvbGxSZXNwb25zZRJRCg5MaXN0UG9sbFZvdGVycxIeLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXF1ZXN0Gh8uZnV3YS52MS5MaXN0UG9sbFZvdGVyc1Jlc3BvbnNlEkUKClBpbk1lc3NhZ2USGi5mdXdhLnYxLlBpbk1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5QaW5NZXNzYWdlUmVzcG9uc2USPwoITGlzdFBpbnMSGC5mdXdhLnYxLkxpc3RQaW5zUmVxdWVzdBoZLmZ1d2EudjEuTGlzdFBpbnNSZXNwb25zZRI2CgVSZWFjdBIVLmZ1d2EudjEuUmVhY3RSZXF1ZXN0GhYuZnV3YS52MS5SZWFjdFJlc3BvbnNlEksKDExpc3RSZWFjdG9ycxIcLmZ1d2EudjEuTGlzdFJlYWN0b3JzUmVxdWVzdBodLmZ1d2EudjEuTGlzdFJlYWN0b3JzUmVzcG9uc2USUQoOQ2xlYXJSZWFjdGlvbnMSHi5mdXdhLnYxLkNsZWFyUmVhY3Rpb25zUmVxdWVzdBofLmZ1d2EudjEuQ2xlYXJSZWFjdGlvbnNSZXNwb25zZRJXChBIaWRlTGlua1ByZXZpZXdzEiAuZnV3YS52MS5IaWRlTGlua1ByZXZpZXdzUmVxdWVzdBohLmZ1d2EudjEuSGlkZUxpbmtQcmV2aWV3c1Jlc3BvbnNlEkUKClNlbmRUeXBpbmcSGi5mdXdhLnYxLlNlbmRUeXBpbmdSZXF1ZXN0GhsuZnV3YS52MS5TZW5kVHlwaW5nUmVzcG9uc2USYwoUU2VuZEVwaGVtZXJhbE1lc3NhZ2USJC5mdXdhLnYxLlNlbmRFcGhlbWVyYWxNZXNzYWdlUmVxdWVzdBolLmZ1d2EudjEuU2VuZEVwaGVtZXJhbE1lc3NhZ2VSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+
+/**
+ * @generated from message fuwa.v1.SendEphemeralMessageRequest
+ */
+export type SendEphemeralMessageRequest = Message<"fuwa.v1.SendEphemeralMessageRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * Who sees it: a person (not an agent) in the server. With
+   * interaction_id it may be empty: whoever used the command or button.
+   *
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+
+  /**
+   * Up to 4000 characters, like a message's.
+   *
+   * @generated from field: string content = 4;
+   */
+  content: string;
+
+  /**
+   * @generated from field: repeated fuwa.v1.Embed embeds = 5;
+   */
+  embeds: Embed[];
+
+  /**
+   * Answers this interaction privately, within 15 minutes; it counts toward
+   * its 5 answers. The message shows who used what, like SendMessage's.
+   *
+   * @generated from field: string interaction_id = 6;
+   */
+  interactionId: string;
+
+  /**
+   * How long apps show it, in seconds: up to 3600. 0 is 900 (15 minutes).
+   *
+   * @generated from field: uint32 expires_in_seconds = 7;
+   */
+  expiresInSeconds: number;
+};
+
+/**
+ * Describes the message fuwa.v1.SendEphemeralMessageRequest.
+ * Use `create(SendEphemeralMessageRequestSchema)` to create a new message.
+ */
+export const SendEphemeralMessageRequestSchema: GenMessage<SendEphemeralMessageRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 0);
+
+/**
+ * @generated from message fuwa.v1.SendEphemeralMessageResponse
+ */
+export type SendEphemeralMessageResponse = Message<"fuwa.v1.SendEphemeralMessageResponse"> & {
+  /**
+   * The message as its recipient got it.
+   *
+   * @generated from field: fuwa.v1.Message message = 1;
+   */
+  message?: Message$1 | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SendEphemeralMessageResponse.
+ * Use `create(SendEphemeralMessageResponseSchema)` to create a new message.
+ */
+export const SendEphemeralMessageResponseSchema: GenMessage<SendEphemeralMessageResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 1);
 
 /**
  * @generated from message fuwa.v1.SendTypingRequest
@@ -43,7 +119,7 @@ export type SendTypingRequest = Message<"fuwa.v1.SendTypingRequest"> & {
  * Use `create(SendTypingRequestSchema)` to create a new message.
  */
 export const SendTypingRequestSchema: GenMessage<SendTypingRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 0);
+  messageDesc(file_fuwa_v1_message, 2);
 
 /**
  * @generated from message fuwa.v1.SendTypingResponse
@@ -56,7 +132,7 @@ export type SendTypingResponse = Message<"fuwa.v1.SendTypingResponse"> & {
  * Use `create(SendTypingResponseSchema)` to create a new message.
  */
 export const SendTypingResponseSchema: GenMessage<SendTypingResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 1);
+  messageDesc(file_fuwa_v1_message, 3);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -171,7 +247,7 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
  * Use `create(SendMessageRequestSchema)` to create a new message.
  */
 export const SendMessageRequestSchema: GenMessage<SendMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 2);
+  messageDesc(file_fuwa_v1_message, 4);
 
 /**
  * A poll as its creator writes it.
@@ -224,7 +300,7 @@ export type NewPoll = Message<"fuwa.v1.NewPoll"> & {
  * Use `create(NewPollSchema)` to create a new message.
  */
 export const NewPollSchema: GenMessage<NewPoll> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 3);
+  messageDesc(file_fuwa_v1_message, 5);
 
 /**
  * @generated from message fuwa.v1.NewPollAnswer
@@ -248,7 +324,7 @@ export type NewPollAnswer = Message<"fuwa.v1.NewPollAnswer"> & {
  * Use `create(NewPollAnswerSchema)` to create a new message.
  */
 export const NewPollAnswerSchema: GenMessage<NewPollAnswer> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 4);
+  messageDesc(file_fuwa_v1_message, 6);
 
 /**
  * @generated from message fuwa.v1.SendMessageResponse
@@ -265,7 +341,7 @@ export type SendMessageResponse = Message<"fuwa.v1.SendMessageResponse"> & {
  * Use `create(SendMessageResponseSchema)` to create a new message.
  */
 export const SendMessageResponseSchema: GenMessage<SendMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 5);
+  messageDesc(file_fuwa_v1_message, 7);
 
 /**
  * @generated from message fuwa.v1.GetMessageRequest
@@ -295,7 +371,7 @@ export type GetMessageRequest = Message<"fuwa.v1.GetMessageRequest"> & {
  * Use `create(GetMessageRequestSchema)` to create a new message.
  */
 export const GetMessageRequestSchema: GenMessage<GetMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 6);
+  messageDesc(file_fuwa_v1_message, 8);
 
 /**
  * @generated from message fuwa.v1.GetMessageResponse
@@ -317,7 +393,7 @@ export type GetMessageResponse = Message<"fuwa.v1.GetMessageResponse"> & {
  * Use `create(GetMessageResponseSchema)` to create a new message.
  */
 export const GetMessageResponseSchema: GenMessage<GetMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 7);
+  messageDesc(file_fuwa_v1_message, 9);
 
 /**
  * @generated from message fuwa.v1.ListMessagesRequest
@@ -367,7 +443,7 @@ export type ListMessagesRequest = Message<"fuwa.v1.ListMessagesRequest"> & {
  * Use `create(ListMessagesRequestSchema)` to create a new message.
  */
 export const ListMessagesRequestSchema: GenMessage<ListMessagesRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 8);
+  messageDesc(file_fuwa_v1_message, 10);
 
 /**
  * @generated from message fuwa.v1.ListMessagesResponse
@@ -405,7 +481,7 @@ export type ListMessagesResponse = Message<"fuwa.v1.ListMessagesResponse"> & {
  * Use `create(ListMessagesResponseSchema)` to create a new message.
  */
 export const ListMessagesResponseSchema: GenMessage<ListMessagesResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 9);
+  messageDesc(file_fuwa_v1_message, 11);
 
 /**
  * @generated from message fuwa.v1.UpdateMessageRequest
@@ -448,7 +524,7 @@ export type UpdateMessageRequest = Message<"fuwa.v1.UpdateMessageRequest"> & {
  * Use `create(UpdateMessageRequestSchema)` to create a new message.
  */
 export const UpdateMessageRequestSchema: GenMessage<UpdateMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 10);
+  messageDesc(file_fuwa_v1_message, 12);
 
 /**
  * @generated from message fuwa.v1.UpdateMessageResponse
@@ -465,7 +541,7 @@ export type UpdateMessageResponse = Message<"fuwa.v1.UpdateMessageResponse"> & {
  * Use `create(UpdateMessageResponseSchema)` to create a new message.
  */
 export const UpdateMessageResponseSchema: GenMessage<UpdateMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 11);
+  messageDesc(file_fuwa_v1_message, 13);
 
 /**
  * @generated from message fuwa.v1.DeleteMessageRequest
@@ -495,7 +571,7 @@ export type DeleteMessageRequest = Message<"fuwa.v1.DeleteMessageRequest"> & {
  * Use `create(DeleteMessageRequestSchema)` to create a new message.
  */
 export const DeleteMessageRequestSchema: GenMessage<DeleteMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 12);
+  messageDesc(file_fuwa_v1_message, 14);
 
 /**
  * @generated from message fuwa.v1.DeleteMessageResponse
@@ -508,7 +584,7 @@ export type DeleteMessageResponse = Message<"fuwa.v1.DeleteMessageResponse"> & {
  * Use `create(DeleteMessageResponseSchema)` to create a new message.
  */
 export const DeleteMessageResponseSchema: GenMessage<DeleteMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 13);
+  messageDesc(file_fuwa_v1_message, 15);
 
 /**
  * @generated from message fuwa.v1.ListThreadsRequest
@@ -559,7 +635,7 @@ export type ListThreadsRequest = Message<"fuwa.v1.ListThreadsRequest"> & {
  * Use `create(ListThreadsRequestSchema)` to create a new message.
  */
 export const ListThreadsRequestSchema: GenMessage<ListThreadsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 14);
+  messageDesc(file_fuwa_v1_message, 16);
 
 /**
  * @generated from message fuwa.v1.ListThreadsResponse
@@ -598,7 +674,7 @@ export type ListThreadsResponse = Message<"fuwa.v1.ListThreadsResponse"> & {
  * Use `create(ListThreadsResponseSchema)` to create a new message.
  */
 export const ListThreadsResponseSchema: GenMessage<ListThreadsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 15);
+  messageDesc(file_fuwa_v1_message, 17);
 
 /**
  * @generated from message fuwa.v1.UpdateThreadRequest
@@ -632,7 +708,7 @@ export type UpdateThreadRequest = Message<"fuwa.v1.UpdateThreadRequest"> & {
  * Use `create(UpdateThreadRequestSchema)` to create a new message.
  */
 export const UpdateThreadRequestSchema: GenMessage<UpdateThreadRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 16);
+  messageDesc(file_fuwa_v1_message, 18);
 
 /**
  * @generated from message fuwa.v1.UpdateThreadResponse
@@ -649,7 +725,7 @@ export type UpdateThreadResponse = Message<"fuwa.v1.UpdateThreadResponse"> & {
  * Use `create(UpdateThreadResponseSchema)` to create a new message.
  */
 export const UpdateThreadResponseSchema: GenMessage<UpdateThreadResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 17);
+  messageDesc(file_fuwa_v1_message, 19);
 
 /**
  * @generated from message fuwa.v1.FollowThreadRequest
@@ -681,7 +757,7 @@ export type FollowThreadRequest = Message<"fuwa.v1.FollowThreadRequest"> & {
  * Use `create(FollowThreadRequestSchema)` to create a new message.
  */
 export const FollowThreadRequestSchema: GenMessage<FollowThreadRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 18);
+  messageDesc(file_fuwa_v1_message, 20);
 
 /**
  * @generated from message fuwa.v1.FollowThreadResponse
@@ -694,7 +770,7 @@ export type FollowThreadResponse = Message<"fuwa.v1.FollowThreadResponse"> & {
  * Use `create(FollowThreadResponseSchema)` to create a new message.
  */
 export const FollowThreadResponseSchema: GenMessage<FollowThreadResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 19);
+  messageDesc(file_fuwa_v1_message, 21);
 
 /**
  * @generated from message fuwa.v1.ListFollowedThreadsRequest
@@ -711,7 +787,7 @@ export type ListFollowedThreadsRequest = Message<"fuwa.v1.ListFollowedThreadsReq
  * Use `create(ListFollowedThreadsRequestSchema)` to create a new message.
  */
 export const ListFollowedThreadsRequestSchema: GenMessage<ListFollowedThreadsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 20);
+  messageDesc(file_fuwa_v1_message, 22);
 
 /**
  * @generated from message fuwa.v1.ListFollowedThreadsResponse
@@ -730,7 +806,7 @@ export type ListFollowedThreadsResponse = Message<"fuwa.v1.ListFollowedThreadsRe
  * Use `create(ListFollowedThreadsResponseSchema)` to create a new message.
  */
 export const ListFollowedThreadsResponseSchema: GenMessage<ListFollowedThreadsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 21);
+  messageDesc(file_fuwa_v1_message, 23);
 
 /**
  * @generated from message fuwa.v1.VotePollRequest
@@ -769,7 +845,7 @@ export type VotePollRequest = Message<"fuwa.v1.VotePollRequest"> & {
  * Use `create(VotePollRequestSchema)` to create a new message.
  */
 export const VotePollRequestSchema: GenMessage<VotePollRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 22);
+  messageDesc(file_fuwa_v1_message, 24);
 
 /**
  * @generated from message fuwa.v1.VotePollResponse
@@ -788,7 +864,7 @@ export type VotePollResponse = Message<"fuwa.v1.VotePollResponse"> & {
  * Use `create(VotePollResponseSchema)` to create a new message.
  */
 export const VotePollResponseSchema: GenMessage<VotePollResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 23);
+  messageDesc(file_fuwa_v1_message, 25);
 
 /**
  * @generated from message fuwa.v1.EndPollRequest
@@ -817,7 +893,7 @@ export type EndPollRequest = Message<"fuwa.v1.EndPollRequest"> & {
  * Use `create(EndPollRequestSchema)` to create a new message.
  */
 export const EndPollRequestSchema: GenMessage<EndPollRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 24);
+  messageDesc(file_fuwa_v1_message, 26);
 
 /**
  * @generated from message fuwa.v1.EndPollResponse
@@ -834,7 +910,7 @@ export type EndPollResponse = Message<"fuwa.v1.EndPollResponse"> & {
  * Use `create(EndPollResponseSchema)` to create a new message.
  */
 export const EndPollResponseSchema: GenMessage<EndPollResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 25);
+  messageDesc(file_fuwa_v1_message, 27);
 
 /**
  * @generated from message fuwa.v1.ListPollVotersRequest
@@ -882,7 +958,7 @@ export type ListPollVotersRequest = Message<"fuwa.v1.ListPollVotersRequest"> & {
  * Use `create(ListPollVotersRequestSchema)` to create a new message.
  */
 export const ListPollVotersRequestSchema: GenMessage<ListPollVotersRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 26);
+  messageDesc(file_fuwa_v1_message, 28);
 
 /**
  * @generated from message fuwa.v1.ListPollVotersResponse
@@ -904,7 +980,7 @@ export type ListPollVotersResponse = Message<"fuwa.v1.ListPollVotersResponse"> &
  * Use `create(ListPollVotersResponseSchema)` to create a new message.
  */
 export const ListPollVotersResponseSchema: GenMessage<ListPollVotersResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 27);
+  messageDesc(file_fuwa_v1_message, 29);
 
 /**
  * @generated from message fuwa.v1.PinMessageRequest
@@ -938,7 +1014,7 @@ export type PinMessageRequest = Message<"fuwa.v1.PinMessageRequest"> & {
  * Use `create(PinMessageRequestSchema)` to create a new message.
  */
 export const PinMessageRequestSchema: GenMessage<PinMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 28);
+  messageDesc(file_fuwa_v1_message, 30);
 
 /**
  * @generated from message fuwa.v1.PinMessageResponse
@@ -955,7 +1031,7 @@ export type PinMessageResponse = Message<"fuwa.v1.PinMessageResponse"> & {
  * Use `create(PinMessageResponseSchema)` to create a new message.
  */
 export const PinMessageResponseSchema: GenMessage<PinMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 29);
+  messageDesc(file_fuwa_v1_message, 31);
 
 /**
  * @generated from message fuwa.v1.ListPinsRequest
@@ -998,7 +1074,7 @@ export type ListPinsRequest = Message<"fuwa.v1.ListPinsRequest"> & {
  * Use `create(ListPinsRequestSchema)` to create a new message.
  */
 export const ListPinsRequestSchema: GenMessage<ListPinsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 30);
+  messageDesc(file_fuwa_v1_message, 32);
 
 /**
  * @generated from message fuwa.v1.ListPinsResponse
@@ -1029,7 +1105,7 @@ export type ListPinsResponse = Message<"fuwa.v1.ListPinsResponse"> & {
  * Use `create(ListPinsResponseSchema)` to create a new message.
  */
 export const ListPinsResponseSchema: GenMessage<ListPinsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 31);
+  messageDesc(file_fuwa_v1_message, 33);
 
 /**
  * @generated from message fuwa.v1.ReactRequest
@@ -1076,7 +1152,7 @@ export type ReactRequest = Message<"fuwa.v1.ReactRequest"> & {
  * Use `create(ReactRequestSchema)` to create a new message.
  */
 export const ReactRequestSchema: GenMessage<ReactRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 32);
+  messageDesc(file_fuwa_v1_message, 34);
 
 /**
  * @generated from message fuwa.v1.ReactResponse
@@ -1095,7 +1171,7 @@ export type ReactResponse = Message<"fuwa.v1.ReactResponse"> & {
  * Use `create(ReactResponseSchema)` to create a new message.
  */
 export const ReactResponseSchema: GenMessage<ReactResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 33);
+  messageDesc(file_fuwa_v1_message, 35);
 
 /**
  * @generated from message fuwa.v1.ListReactorsRequest
@@ -1148,7 +1224,7 @@ export type ListReactorsRequest = Message<"fuwa.v1.ListReactorsRequest"> & {
  * Use `create(ListReactorsRequestSchema)` to create a new message.
  */
 export const ListReactorsRequestSchema: GenMessage<ListReactorsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 34);
+  messageDesc(file_fuwa_v1_message, 36);
 
 /**
  * @generated from message fuwa.v1.ListReactorsResponse
@@ -1170,7 +1246,7 @@ export type ListReactorsResponse = Message<"fuwa.v1.ListReactorsResponse"> & {
  * Use `create(ListReactorsResponseSchema)` to create a new message.
  */
 export const ListReactorsResponseSchema: GenMessage<ListReactorsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 35);
+  messageDesc(file_fuwa_v1_message, 37);
 
 /**
  * @generated from message fuwa.v1.ClearReactionsRequest
@@ -1210,7 +1286,7 @@ export type ClearReactionsRequest = Message<"fuwa.v1.ClearReactionsRequest"> & {
  * Use `create(ClearReactionsRequestSchema)` to create a new message.
  */
 export const ClearReactionsRequestSchema: GenMessage<ClearReactionsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 36);
+  messageDesc(file_fuwa_v1_message, 38);
 
 /**
  * @generated from message fuwa.v1.ClearReactionsResponse
@@ -1223,7 +1299,7 @@ export type ClearReactionsResponse = Message<"fuwa.v1.ClearReactionsResponse"> &
  * Use `create(ClearReactionsResponseSchema)` to create a new message.
  */
 export const ClearReactionsResponseSchema: GenMessage<ClearReactionsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 37);
+  messageDesc(file_fuwa_v1_message, 39);
 
 /**
  * @generated from message fuwa.v1.HideLinkPreviewsRequest
@@ -1245,7 +1321,7 @@ export type HideLinkPreviewsRequest = Message<"fuwa.v1.HideLinkPreviewsRequest">
  * Use `create(HideLinkPreviewsRequestSchema)` to create a new message.
  */
 export const HideLinkPreviewsRequestSchema: GenMessage<HideLinkPreviewsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 38);
+  messageDesc(file_fuwa_v1_message, 40);
 
 /**
  * @generated from message fuwa.v1.HideLinkPreviewsResponse
@@ -1262,7 +1338,7 @@ export type HideLinkPreviewsResponse = Message<"fuwa.v1.HideLinkPreviewsResponse
  * Use `create(HideLinkPreviewsResponseSchema)` to create a new message.
  */
 export const HideLinkPreviewsResponseSchema: GenMessage<HideLinkPreviewsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 39);
+  messageDesc(file_fuwa_v1_message, 41);
 
 /**
  * Messages in a channel.
@@ -1486,6 +1562,22 @@ export const MessageService: GenService<{
     methodKind: "unary";
     input: typeof SendTypingRequestSchema;
     output: typeof SendTypingResponseSchema;
+  },
+  /**
+   * Agents only: a message only one person in the channel sees, for a while
+   * (docs/ephemeral-messages.md), like an answer to a command nobody else
+   * needs. It isn't stored: it goes out once, as EphemeralMessageCreated, to
+   * that person's open apps, which show it until it runs out. Needs
+   * SEND_MESSAGES in the channel (and EMBED_LINKS for embeds); the person
+   * must be a member who can see it. Pings nobody. Not in secure channels,
+   * nor channels shared between servers. At most 60 a minute from one agent.
+   *
+   * @generated from rpc fuwa.v1.MessageService.SendEphemeralMessage
+   */
+  sendEphemeralMessage: {
+    methodKind: "unary";
+    input: typeof SendEphemeralMessageRequestSchema;
+    output: typeof SendEphemeralMessageResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_message, 0);

@@ -22,6 +22,12 @@
   "messages.copyId": "複製訊息 ID",
   "messages.edit": "編輯",
   "messages.hidePreviews": "移除連結預覽",
+  "ephemeral.onlyYou": "只有你能看到這則訊息",
+  "ephemeral.dismiss": "關閉訊息",
+  "ephemeral.minutesLeft": {
+    "other": "{count} 分鐘後消失"
+  },
+  "ephemeral.underAMinute": "不到一分鐘後消失",
   "spoiler.reveal": "劇透內容，按一下以顯示",
   "leaving.title": "即將離開 fuwa",
   "leaving.about": "此連結的文字並未顯示它的實際目的地。它實際上會開啟：",

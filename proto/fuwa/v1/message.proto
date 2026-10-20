@@ -73,6 +73,35 @@ service MessageService {
   // what's typed, so secure channels have it too. In a channel shared
   // between servers it reaches the caller's own server's members.
   rpc SendTyping(SendTypingRequest) returns (SendTypingResponse);
+  // Agents only: a message only one person in the channel sees, for a while
+  // (docs/ephemeral-messages.md), like an answer to a command nobody else
+  // needs. It isn't stored: it goes out once, as EphemeralMessageCreated, to
+  // that person's open apps, which show it until it runs out. Needs
+  // SEND_MESSAGES in the channel (and EMBED_LINKS for embeds); the person
+  // must be a member who can see it. Pings nobody. Not in secure channels,
+  // nor channels shared between servers. At most 60 a minute from one agent.
+  rpc SendEphemeralMessage(SendEphemeralMessageRequest) returns (SendEphemeralMessageResponse);
+}
+
+message SendEphemeralMessageRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // Who sees it: a person (not an agent) in the server. With
+  // interaction_id it may be empty: whoever used the command or button.
+  string user_id = 3;
+  // Up to 4000 characters, like a message's.
+  string content = 4;
+  repeated Embed embeds = 5;
+  // Answers this interaction privately, within 15 minutes; it counts toward
+  // its 5 answers. The message shows who used what, like SendMessage's.
+  string interaction_id = 6;
+  // How long apps show it, in seconds: up to 3600. 0 is 900 (15 minutes).
+  uint32 expires_in_seconds = 7;
+}
+
+message SendEphemeralMessageResponse {
+  // The message as its recipient got it.
+  Message message = 1;
 }
 
 message SendTypingRequest {

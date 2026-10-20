@@ -657,6 +657,15 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             core.shared.typing_started(typing::Place::channel(key, &t.channel_id, &t.thread_id), &t.user_id);
             return;
         }
+        // An agent's message for you alone: sequence 0 too, kept in memory until it runs
+        // out; never unread, notified or written down, and it moves no read mark.
+        Some(Payload::EphemeralMessageCreated(created)) => {
+            if let Some(m) = &created.message {
+                core.shared.typing_stopped(&typing::Place::channel(key, &m.channel_id, &m.thread_id), &m.author_id);
+                core.shared.ephemeral_arrived(key, m.clone());
+            }
+            return;
+        }
         // A sound played in a voice channel: sequence 0 too, played here if you're in that call.
         Some(Payload::SoundPlayed(played)) => {
             core.sound_played(key, &sid, played);
