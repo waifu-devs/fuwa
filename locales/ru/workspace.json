@@ -294,6 +294,8 @@
   "userPanel.sharing": "Ваша активность видна",
   "userPanel.notSharing": "Ваша активность скрыта",
   "userPanel.settings": "Настройки",
+  "userPanel.micDevices": "Сменить микрофон",
+  "userPanel.speakerDevices": "Сменить динамики",
   "instanceSidebar.settings": "Настройки инстанса",
   "instanceSidebar.browse": "Каталог серверов",
   "instanceSidebar.yourServers": "Ваши серверы",

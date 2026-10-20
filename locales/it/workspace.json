@@ -278,6 +278,8 @@
   "userPanel.sharing": "Condividi cosa stai facendo",
   "userPanel.notSharing": "Non condividi cosa stai facendo",
   "userPanel.settings": "Impostazioni",
+  "userPanel.micDevices": "Cambia microfono",
+  "userPanel.speakerDevices": "Cambia altoparlanti",
   "instanceSidebar.settings": "Impostazioni dell'istanza",
   "instanceSidebar.browse": "Esplora i server",
   "instanceSidebar.yourServers": "I tuoi server",

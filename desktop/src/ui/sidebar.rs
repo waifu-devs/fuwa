@@ -1947,16 +1947,58 @@ impl FuwaApp {
                     cx.notify();
                 },
             )))
+            .child(self.device_arrow(true, &p, window, cx))
             .child(panel_toggle("me-deafen", if deaf { "headphone-off" } else { "headphones" }, deaf, &p).on_click(
                 cx.listener(move |this, _, _, cx| {
                     this.core.set_self_deaf(!deaf);
                     cx.notify();
                 }),
             ))
+            .child(self.device_arrow(false, &p, window, cx))
             .child(
                 gear.child(motion::posed(div(), gear_turn).child(icon("settings").size(px(18.0))))
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
+    }
+}
+
+impl FuwaApp {
+    /// The little arrow after mute (`input`) or deafen, opening the microphones
+    /// or speakers to switch to (the web's `DeviceMenu`). It turns over while open.
+    fn device_arrow(&mut self, input: bool, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let id = if input { "me-mic-devices" } else { "me-speaker-devices" };
+        let open = matches!(&self.menu, Some(Menu::Devices { input: i, .. }) if *i == input);
+        let turn = motion::follow_pose(
+            &SharedString::from(format!("{id}|turn")),
+            if open { motion::Pose::turn(180.0) } else { motion::Pose::REST },
+            window,
+            cx,
+        );
+        let (hover_bg, hover_fg) = (p.muted, p.foreground);
+        div()
+            .id(id)
+            .ml(px(-2.0))
+            .w(px(16.0))
+            .h(px(32.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(crate::ui::theme::radius_md())
+            .cursor_pointer()
+            .text_color(p.muted_foreground)
+            .when(open, |el| el.bg(hover_bg).text_color(hover_fg))
+            .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+            .child(motion::posed(div(), turn).child(icon("chevron-down").size(px(14.0))))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.menu = if open {
+                    None
+                } else {
+                    Some(Menu::Devices { input, names: crate::core::sounds::device_names(input) })
+                };
+                cx.notify();
+            }))
+            .into_any_element()
     }
 }
 

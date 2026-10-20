@@ -278,6 +278,8 @@
   "userPanel.sharing": "Du zeigst, was du gerade machst",
   "userPanel.notSharing": "Du zeigst nicht, was du gerade machst",
   "userPanel.settings": "Einstellungen",
+  "userPanel.micDevices": "Mikrofon wechseln",
+  "userPanel.speakerDevices": "Lautsprecher wechseln",
   "instanceSidebar.settings": "Instanzeinstellungen",
   "instanceSidebar.browse": "Server entdecken",
   "instanceSidebar.yourServers": "Deine Server",

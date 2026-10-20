@@ -125,10 +125,28 @@ fn run(
         }
     };
     let open_input = || open_input(&crate::core::sounds::picked_input()?, microphone.clone());
-    let output = crate::core::sounds::picked_output().and_then(|device| open_output(&device, speakers.clone()));
+    let open_speakers =
+        || crate::core::sounds::picked_output().and_then(|device| open_output(&device, speakers.clone()));
+    let mut picked = crate::core::sounds::picked();
+    let mut output = open_speakers();
     report(Trouble::NoSpeakers, output.is_none());
     let mut input = None;
     while !stop.load(Ordering::Relaxed) {
+        // Other devices picked mid-call (the arrows by mute and deafen) take over at once.
+        let now = crate::core::sounds::picked();
+        if now != picked {
+            if now.1 != picked.1 {
+                // The old speakers close before the new ones open.
+                drop(output.take());
+                output = open_speakers();
+                report(Trouble::NoSpeakers, output.is_none());
+            }
+            if now.0 != picked.0 {
+                // Opened again on the new microphone just below, if it's meant to be open.
+                input = None;
+            }
+            picked = now;
+        }
         let want = listening.load(Ordering::Relaxed);
         if want && input.is_none() {
             // While the system's prompt is up, look again in a moment.

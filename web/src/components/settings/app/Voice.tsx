@@ -1,6 +1,7 @@
 import { AudioLinesIcon, CheckIcon, ChevronDownIcon, HeadphonesIcon, KeyboardIcon, MicIcon, PlayIcon, SquareIcon, VideoIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { type Device, useDevices } from "@/hooks/use-devices";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
 import { cameraProblem, openCamera } from "@/calls/video";
 import { VideoView } from "@/components/calls/Video";
@@ -18,29 +19,6 @@ import { cue, play } from "@/lib/sounds";
 import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { Keycaps, PrefSetting } from "./common";
-
-/** A device; `label` is empty until the browser has been allowed to name it, so it goes by its place in the list. */
-type Device = { id: string; label: string; n: number };
-
-/** The microphones, speakers and cameras this browser can use. Names show once it's been allowed them. */
-function useDevices() {
-  const [devices, setDevices] = useState<{ inputs: Device[]; outputs: Device[]; cameras: Device[] }>({ inputs: [], outputs: [], cameras: [] });
-  useEffect(() => {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
-    const read = () =>
-      void navigator.mediaDevices.enumerateDevices().then((list) => {
-        const pick = (kind: MediaDeviceKind) =>
-          list
-            .filter((d) => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications")
-            .map((d, n) => ({ id: d.deviceId, label: d.label, n: n + 1 }));
-        setDevices({ inputs: pick("audioinput"), outputs: pick("audiooutput"), cameras: pick("videoinput") });
-      });
-    read();
-    navigator.mediaDevices.addEventListener("devicechange", read);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", read);
-  }, []);
-  return devices;
-}
 
 function DevicePicker({
   icon: Icon,

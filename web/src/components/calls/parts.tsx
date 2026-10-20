@@ -1,9 +1,10 @@
 import * as Popover from "@radix-ui/react-popover";
-import { CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, VideoOffIcon, SettingsIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
 import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type { User, VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
+import { canPickOutput } from "@/calls/audio";
 import { applyVolumes, toggleDeafen, toggleMute } from "@/calls/engine";
 import { useCalls } from "@/calls/state";
 import { toFuwaError } from "@/fuwa/errors";
@@ -11,13 +12,15 @@ import { byId, useAccess, useMember, useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { engine } from "@/fuwa/sync";
 import { UserAvatar } from "@/components/Icons";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useDevices } from "@/hooks/use-devices";
 import { SPRING } from "@/lib/motion";
 import { Slider } from "@/components/ui/slider";
 import { displayName, memberName } from "@/lib/format";
 import { actionById, bindingOf, comboLabel } from "@/lib/keybinds";
 import { hasIn, outranks, standing } from "@/lib/permissions";
 import { setPrefs, usePrefs } from "@/lib/prefs";
-import { toast } from "@/lib/ui";
+import { openSettings, toast } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
@@ -89,8 +92,11 @@ export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "self
 }
 
 
-/** Mute and deafen, for the user panel and the call controls. They work in and out of calls, as Discord's do. */
-export function MuteButtons({ size = "sm" }: { size?: "sm" | "lg" }) {
+/**
+ * Mute and deafen, for the user panel and the call controls. They work in and out of calls, as Discord's do.
+ * With `pickers` (the user panel), each has a little arrow beside it to switch microphones or speakers.
+ */
+export function MuteButtons({ size = "sm", pickers = false }: { size?: "sm" | "lg"; pickers?: boolean }) {
   const selfMute = useCalls((s) => s.selfMute);
   const selfDeaf = useCalls((s) => s.selfDeaf);
   const muteKey = usePrefs((p) => bindingOf(actionById("toggleMute")!, p));
@@ -98,25 +104,93 @@ export function MuteButtons({ size = "sm" }: { size?: "sm" | "lg" }) {
   const { t } = useI18n();
   /** A button's name, with its keyboard shortcut when it has one. */
   const named = (action: Key, combo: string | null) => (combo ? t("dms-calls.calls.controls.withShortcut", { action: t(action), keys: comboLabel(combo) }) : t(action));
+  const mute = (
+    <ToggleIcon
+      size={size}
+      on={selfMute}
+      onClick={toggleMute}
+      label={named(selfMute ? "dms-calls.calls.controls.unmute" : "dms-calls.calls.controls.mute", muteKey)}
+      icon={selfMute ? MicOffIcon : MicIcon}
+      wiggle="mic"
+    />
+  );
+  const deafen = (
+    <ToggleIcon
+      size={size}
+      on={selfDeaf}
+      onClick={toggleDeafen}
+      label={named(selfDeaf ? "dms-calls.calls.controls.undeafen" : "dms-calls.calls.controls.deafen", deafKey)}
+      icon={selfDeaf ? HeadphoneOffIcon : HeadphonesIcon}
+      wiggle="phones"
+    />
+  );
+  if (!pickers) {
+    return (
+      <>
+        {mute}
+        {deafen}
+      </>
+    );
+  }
   return (
     <>
-      <ToggleIcon
-        size={size}
-        on={selfMute}
-        onClick={toggleMute}
-        label={named(selfMute ? "dms-calls.calls.controls.unmute" : "dms-calls.calls.controls.mute", muteKey)}
-        icon={selfMute ? MicOffIcon : MicIcon}
-        wiggle="mic"
-      />
-      <ToggleIcon
-        size={size}
-        on={selfDeaf}
-        onClick={toggleDeafen}
-        label={named(selfDeaf ? "dms-calls.calls.controls.undeafen" : "dms-calls.calls.controls.deafen", deafKey)}
-        icon={selfDeaf ? HeadphoneOffIcon : HeadphonesIcon}
-        wiggle="phones"
-      />
+      <span className="flex shrink-0 items-center">
+        {mute}
+        <DeviceMenu kind="input" />
+      </span>
+      <span className="flex shrink-0 items-center">
+        {deafen}
+        <DeviceMenu kind="output" />
+      </span>
     </>
+  );
+}
+
+/** The arrow beside mute or deafen: the microphones or speakers there are, to switch to at once (in a call too), and Voice & video settings. */
+function DeviceMenu({ kind }: { kind: "input" | "output" }) {
+  const { t } = useI18n();
+  const devices = useDevices();
+  const input = kind === "input";
+  const value = usePrefs((p) => (input ? p.inputDevice : p.outputDevice));
+  const list = input ? devices.inputs : devices.outputs;
+  // Browsers without `setSinkId` play calls through the system's speakers, whatever is picked.
+  const fixed = !input && !canPickOutput();
+  const pick = (id: string) => setPrefs(input ? { inputDevice: id } : { outputDevice: id });
+  const label = t(input ? "workspace.userPanel.micDevices" : "workspace.userPanel.speakerDevices");
+  const name = (label: string, n: number) => label || t(input ? "appsettings.voice.unnamedMic" : "appsettings.voice.unnamedSpeakers", { number: n });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          className="group -ml-0.5 grid h-8 w-4 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+        >
+          <ChevronDownIcon className="size-3.5 transition-transform duration-300 group-data-[state=open]:rotate-180" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" className="w-64">
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+          {input ? <MicIcon className="size-3.5" /> : <HeadphonesIcon className="size-3.5" />}
+          {t(input ? "appsettings.voice.mic" : "appsettings.voice.speakers")}
+        </DropdownMenuLabel>
+        {fixed ? (
+          <p className="px-2 pb-1.5 text-xs text-muted-foreground">{t("appsettings.voice.systemSpeakers")}</p>
+        ) : (
+          [{ id: "", label: t("appsettings.voice.systemDefault"), n: 0 }, ...list].map((d) => (
+            <DropdownMenuItem key={d.id || "default"} onSelect={() => pick(d.id)}>
+              <span className="min-w-0 flex-1 truncate">{name(d.label, d.n)}</span>
+              {(d.id === value || (!d.id && !list.some((x) => x.id === value))) && <CheckIcon className="text-primary" />}
+            </DropdownMenuItem>
+          ))
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openSettings("voice")}>
+          <SettingsIcon /> {t("settings.nav.voice")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

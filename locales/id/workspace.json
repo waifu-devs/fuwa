@@ -270,6 +270,8 @@
   "userPanel.sharing": "Membagikan aktivitas Anda",
   "userPanel.notSharing": "Tidak membagikan aktivitas Anda",
   "userPanel.settings": "Pengaturan",
+  "userPanel.micDevices": "Ganti mikrofon",
+  "userPanel.speakerDevices": "Ganti speaker",
   "instanceSidebar.settings": "Pengaturan instans",
   "instanceSidebar.browse": "Jelajahi server",
   "instanceSidebar.yourServers": "Server Anda",

@@ -270,6 +270,8 @@
   "userPanel.sharing": "Đang chia sẻ hoạt động của bạn",
   "userPanel.notSharing": "Không chia sẻ hoạt động của bạn",
   "userPanel.settings": "Cài đặt",
+  "userPanel.micDevices": "Đổi micrô",
+  "userPanel.speakerDevices": "Đổi loa",
   "instanceSidebar.settings": "Cài đặt instance",
   "instanceSidebar.browse": "Khám phá máy chủ",
   "instanceSidebar.yourServers": "Máy chủ của bạn",

@@ -279,6 +279,8 @@
   "userPanel.sharing": "Tu partages ce que tu fais",
   "userPanel.notSharing": "Tu ne partages pas ce que tu fais",
   "userPanel.settings": "Paramètres",
+  "userPanel.micDevices": "Changer de micro",
+  "userPanel.speakerDevices": "Changer de haut-parleurs",
   "instanceSidebar.settings": "Paramètres de l’instance",
   "instanceSidebar.browse": "Parcourir les serveurs",
   "instanceSidebar.yourServers": "Tes serveurs",

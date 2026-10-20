@@ -270,6 +270,8 @@
   "userPanel.sharing": "กำลังแชร์สิ่งที่คุณทำ",
   "userPanel.notSharing": "ไม่ได้แชร์สิ่งที่คุณทำ",
   "userPanel.settings": "การตั้งค่า",
+  "userPanel.micDevices": "เปลี่ยนไมโครโฟน",
+  "userPanel.speakerDevices": "เปลี่ยนลำโพง",
   "instanceSidebar.settings": "การตั้งค่าอินสแตนซ์",
   "instanceSidebar.browse": "เรียกดูเซิร์ฟเวอร์",
   "instanceSidebar.yourServers": "เซิร์ฟเวอร์ของคุณ",
