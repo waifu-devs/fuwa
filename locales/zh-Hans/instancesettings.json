@@ -549,5 +549,13 @@
   "nav.profileDecorations": "头像装饰",
   "nav.profileItemsAbout": "此实例上所有人都能使用的特效和头像装饰。",
   "signUps.decorationsLabel": "大家可以为头像添加装饰",
-  "signUps.decorationsHint": "来自实例和服务器个人资料装饰的图片。关闭后，所有人的装饰都不会显示；重新开启后，每个人的选择会恢复。"
+  "signUps.decorationsHint": "来自实例和服务器个人资料装饰的图片。关闭后，所有人的装饰都不会显示；重新开启后，每个人的选择会恢复。",
+  "nav.featuredAgents": "精选智能体",
+  "nav.featuredAgentsAbout": "“浏览”中优先显示的公开智能体",
+  "featuredAgents.intro": "这里的每个公开智能体都会出现在“浏览”中，所在服务器最多的排在前面。你精选的智能体会按你的顺序以大卡片排在最前。",
+  "featuredAgents.none": "还没有公开智能体",
+  "featuredAgents.noneHint": "智能体的所有者将其设为公开后，它就会显示在这里。",
+  "featuredAgents.feature": "在“浏览”中精选",
+  "featuredAgents.featuredNow": "已在“浏览”中精选 {agent}",
+  "featuredAgents.unfeaturedNow": "{agent} 已不再精选"
 }

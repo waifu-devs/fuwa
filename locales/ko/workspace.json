@@ -432,5 +432,37 @@
   "calls.cantRecord": "이 브라우저는 녹음할 수 없어요.",
   "calls.noServerRecord": "이 인스턴스는 서버에서 음성 채널을 녹음하지 않아요.",
   "calls.serverRecordStopped": "중지했어요. 녹음은 이 채널의 녹음 목록에 있어요.",
-  "calls.fileName": "fuwa 통화 {when}"
+  "calls.fileName": "fuwa 통화 {when}",
+  "agents.addToServer": "서버에 추가",
+  "agents.addedTo": "{server}에 추가했어요",
+  "agents.managed": "내가 관리하는 서버",
+  "agents.noManagedTitle": "추가할 서버가 없어요",
+  "agents.noManaged": "서버에 에이전트를 추가하려면 그 서버에서 서버 관리 권한이 필요해요.",
+  "agents.here": "추가됨",
+  "agents.add": "추가",
+  "agents.servers": {
+    "other": "서버 {count}개에 있음"
+  },
+  "agents.madeBy": "만든 사람: {name}",
+  "agents.copyLink": "초대 링크 복사",
+  "agents.copied": "복사됨",
+  "agents.copyFailed": "링크를 복사하지 못했어요",
+  "agents.browse": "에이전트 둘러보기",
+  "agents.browseAbout": "이 fuwa 서버의 공개 에이전트예요. 내가 관리하는 서버에 추가해 보세요.",
+  "agents.browseAboutNoServers": "이 fuwa 서버의 공개 에이전트예요. 서버를 관리하는 사람이면 누구나 추가할 수 있어요.",
+  "agents.open": "에이전트 보기",
+  "agentPage.signIn": "내가 관리하는 서버에 추가하려면 이 fuwa 서버에 로그인하거나 계정을 만드세요.",
+  "agentPage.private": "비공개: 나만 추가할 수 있어요",
+  "agentPage.gone": "이 에이전트는 여기 없어요",
+  "agentPage.failed": "에이전트를 열지 못했어요",
+  "agentPage.goneAbout": "삭제되었거나 비공개로 바뀌었거나, 링크에 오타가 있을 수 있어요. 보낸 사람에게 물어보세요.",
+  "agentPage.elsewhere.title": "다른 fuwa에서 이 에이전트를 열까요?",
+  "agentPage.elsewhere.about": "이 에이전트는 아직 추가하지 않은 {host}에 있어요. 열면 그 인스턴스에 연결되며, 인스턴스에 IP 주소가 표시돼요. 링크를 보낸 사람을 신뢰하는 경우에만 계속하세요.",
+  "agents.rolesTitle": "{agent}을(를) {server}에 추가",
+  "agents.rolesAbout": "처음부터 제 역할을 할 수 있도록 참여할 때 받을 역할을 고르세요. 역할이 없으면 모두가 가진 권한만 받아요.",
+  "agents.cancel": "취소",
+  "agents.addWithRoles": {
+    "other": "역할 {count}개와 함께 추가"
+  },
+  "agents.addWithoutRoles": "역할 없이 추가"
 }

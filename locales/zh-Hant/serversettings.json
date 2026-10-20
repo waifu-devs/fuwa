@@ -829,7 +829,7 @@
   "recordings.changedSound": "進行中的錄製會結束；下次有人按下「錄製」時，只會保留聲音。",
   "recordings.preview": "一人一小時的錄製：",
   "agents.intro": "由程式操作的帳號。它們像成員一樣發言，擁有你賦予的身分組。",
-  "agents.username": "代理的使用者名稱",
+  "agents.username": "代理的使用者名稱或連結",
   "agents.yours": "你的代理：",
   "agents.none": "這裡還沒有代理。你可以在 {settings} 中建立自己的代理。",
   "agents.settingsAgents": "「設定」>「代理」",

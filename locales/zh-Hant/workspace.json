@@ -432,5 +432,37 @@
   "calls.cantRecord": "此瀏覽器無法錄音。",
   "calls.noServerRecord": "此執行個體不會在伺服器上錄製語音頻道。",
   "calls.serverRecordStopped": "已停止。錄音已存放在此頻道的錄音中。",
-  "calls.fileName": "fuwa 通話 {when}"
+  "calls.fileName": "fuwa 通話 {when}",
+  "agents.addToServer": "加入伺服器",
+  "agents.addedTo": "已加入 {server}",
+  "agents.managed": "你管理的伺服器",
+  "agents.noManagedTitle": "沒有可加入的伺服器",
+  "agents.noManaged": "你需要在伺服器中擁有「管理伺服器」權限，才能把代理加入那裡。",
+  "agents.here": "已加入",
+  "agents.add": "加入",
+  "agents.servers": {
+    "other": "在 {count} 個伺服器中"
+  },
+  "agents.madeBy": "由 {name} 建立",
+  "agents.copyLink": "複製邀請連結",
+  "agents.copied": "已複製",
+  "agents.copyFailed": "無法複製連結",
+  "agents.browse": "探索代理",
+  "agents.browseAbout": "此 fuwa 伺服器上的公開代理。將其中一個加入你管理的伺服器。",
+  "agents.browseAboutNoServers": "此 fuwa 伺服器上的公開代理。任何管理伺服器的人都能將它們加入。",
+  "agents.open": "查看代理",
+  "agentPage.signIn": "登入或在此 fuwa 伺服器上建立帳號，即可將它加入你管理的伺服器。",
+  "agentPage.private": "私人：只有你可以加入它",
+  "agentPage.gone": "此代理不在這裡",
+  "agentPage.failed": "無法開啟此代理",
+  "agentPage.goneAbout": "它可能已被刪除或設為私人，也可能是連結有錯字。請詢問傳送者。",
+  "agentPage.elsewhere.title": "要在其他 fuwa 開啟此代理嗎？",
+  "agentPage.elsewhere.about": "此代理位於 {host}，你尚未新增該處。開啟後會連線到該執行個體，因此它將能看到你的 IP 位址。請只在你信任傳送連結的人時繼續。",
+  "agents.rolesTitle": "將 {agent} 加入 {server}",
+  "agents.rolesAbout": "選擇它加入時帶有的身分組，讓它從一開始就能工作。若不選，它只會擁有所有人都有的權限。",
+  "agents.cancel": "取消",
+  "agents.addWithRoles": {
+    "other": "帶 {count} 個身分組加入"
+  },
+  "agents.addWithoutRoles": "不帶身分組加入"
 }

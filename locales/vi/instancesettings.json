@@ -549,5 +549,13 @@
   "nav.profileDecorations": "Trang trí ảnh đại diện",
   "nav.profileItemsAbout": "Hiệu ứng và trang trí ảnh đại diện mà mọi người trên instance này có thể dùng.",
   "signUps.decorationsLabel": "Mọi người có thể đặt trang trí quanh ảnh đại diện",
-  "signUps.decorationsHint": "Ảnh từ vật phẩm hồ sơ của instance và các máy chủ. Khi tắt, không trang trí của ai hiển thị, và lựa chọn của mọi người sẽ trở lại khi bật lại."
+  "signUps.decorationsHint": "Ảnh từ vật phẩm hồ sơ của instance và các máy chủ. Khi tắt, không trang trí của ai hiển thị, và lựa chọn của mọi người sẽ trở lại khi bật lại.",
+  "nav.featuredAgents": "Tác tử nổi bật",
+  "nav.featuredAgentsAbout": "Các tác tử công khai mà Khám phá hiển thị trước",
+  "featuredAgents.intro": "Mọi tác tử công khai ở đây đều hiện trong Khám phá, tác tử có mặt ở nhiều máy chủ nhất đứng trước. Những tác tử bạn làm nổi bật sẽ đứng đầu, hiển thị lớn, theo thứ tự của bạn.",
+  "featuredAgents.none": "Chưa có tác tử công khai nào",
+  "featuredAgents.noneHint": "Tác tử sẽ hiện ở đây khi chủ sở hữu đặt nó thành công khai.",
+  "featuredAgents.feature": "Làm nổi bật trong Khám phá",
+  "featuredAgents.featuredNow": "Đang làm nổi bật {agent} trong Khám phá",
+  "featuredAgents.unfeaturedNow": "{agent} không còn được làm nổi bật"
 }

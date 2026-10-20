@@ -443,5 +443,39 @@
   "calls.cantRecord": "Dieser Browser kann nicht aufnehmen.",
   "calls.noServerRecord": "Diese Instanz nimmt Sprachkanäle nicht auf dem Server auf.",
   "calls.serverRecordStopped": "Beendet. Die Aufnahme liegt in den Aufnahmen dieses Kanals.",
-  "calls.fileName": "fuwa-Anruf {when}"
+  "calls.fileName": "fuwa-Anruf {when}",
+  "agents.addToServer": "Zu Server hinzufügen",
+  "agents.addedTo": "Zu {server} hinzugefügt",
+  "agents.managed": "Server, die du verwaltest",
+  "agents.noManagedTitle": "Keine Server zum Hinzufügen",
+  "agents.noManaged": "Du brauchst „Server verwalten“ in einem Server, um dort Agenten hinzuzufügen.",
+  "agents.here": "Hinzugefügt",
+  "agents.add": "Hinzufügen",
+  "agents.servers": {
+    "one": "in {count} Server",
+    "other": "in {count} Servern"
+  },
+  "agents.madeBy": "Erstellt von {name}",
+  "agents.copyLink": "Einladungslink kopieren",
+  "agents.copied": "Kopiert",
+  "agents.copyFailed": "Link konnte nicht kopiert werden",
+  "agents.browse": "Agenten entdecken",
+  "agents.browseAbout": "Öffentliche Agenten auf diesem fuwa-Server. Füge einen zu einem Server hinzu, den du verwaltest.",
+  "agents.browseAboutNoServers": "Öffentliche Agenten auf diesem fuwa-Server. Wer einen Server verwaltet, kann sie dort hinzufügen.",
+  "agents.open": "Agent ansehen",
+  "agentPage.signIn": "Melde dich an oder erstelle ein Konto auf diesem fuwa-Server, um ihn zu einem Server hinzuzufügen, den du verwaltest.",
+  "agentPage.private": "Privat: Nur du kannst ihn hinzufügen",
+  "agentPage.gone": "Diesen Agenten gibt es hier nicht",
+  "agentPage.failed": "Dieser Agent konnte nicht geöffnet werden",
+  "agentPage.goneAbout": "Vielleicht wurde er gelöscht oder auf privat gestellt, oder der Link hat einen Tippfehler. Frag die Person, die ihn geschickt hat.",
+  "agentPage.elsewhere.title": "Diesen Agenten auf einem anderen fuwa öffnen?",
+  "agentPage.elsewhere.about": "Dieser Agent lebt auf {host}, das du noch nicht hinzugefügt hast. Beim Öffnen verbindest du dich mit dieser Instanz, die dann deine IP-Adresse sieht. Mach nur weiter, wenn du der Person vertraust, die dir den Link geschickt hat.",
+  "agents.rolesTitle": "{agent} zu {server} hinzufügen",
+  "agents.rolesAbout": "Wähle die Rollen, mit denen er beitritt, damit er seine Arbeit von Anfang an machen kann. Ohne Rollen bekommt er nur, was alle haben.",
+  "agents.cancel": "Abbrechen",
+  "agents.addWithRoles": {
+    "one": "Mit {count} Rolle hinzufügen",
+    "other": "Mit {count} Rollen hinzufügen"
+  },
+  "agents.addWithoutRoles": "Ohne Rollen hinzufügen"
 }

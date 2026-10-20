@@ -829,7 +829,7 @@
   "recordings.changedSound": "진행 중인 녹화는 종료되고, 다음에 누군가 녹화를 누르면 소리만 남아요.",
   "recordings.preview": "한 사람의 1시간 녹화 기준:",
   "agents.intro": "프로그램이 조작하는 계정이에요. 부여한 역할에 따라 멤버처럼 대화해요.",
-  "agents.username": "에이전트 사용자 이름",
+  "agents.username": "에이전트 사용자 이름 또는 링크",
   "agents.yours": "내 에이전트:",
   "agents.none": "아직 에이전트가 없어요. {settings}에서 직접 만들어 보세요.",
   "agents.settingsAgents": "설정 > 에이전트",

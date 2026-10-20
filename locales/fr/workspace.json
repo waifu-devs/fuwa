@@ -446,5 +446,41 @@
   "calls.cantRecord": "Ce navigateur ne peut pas enregistrer.",
   "calls.noServerRecord": "Cette instance n’enregistre pas les salons vocaux sur le serveur.",
   "calls.serverRecordStopped": "Arrêté. L’enregistrement se trouve dans les enregistrements de ce salon.",
-  "calls.fileName": "appel fuwa {when}"
+  "calls.fileName": "appel fuwa {when}",
+  "agents.addToServer": "Ajouter à un serveur",
+  "agents.addedTo": "Ajouté à {server}",
+  "agents.managed": "Serveurs que tu gères",
+  "agents.noManagedTitle": "Aucun serveur où l’ajouter",
+  "agents.noManaged": "Il te faut Gérer le serveur dans un serveur pour y ajouter des agents.",
+  "agents.here": "Ajouté",
+  "agents.add": "Ajouter",
+  "agents.servers": {
+    "one": "dans {count} serveur",
+    "many": "dans {count} de serveurs",
+    "other": "dans {count} serveurs"
+  },
+  "agents.madeBy": "Créé par {name}",
+  "agents.copyLink": "Copier le lien d’invitation",
+  "agents.copied": "Copié",
+  "agents.copyFailed": "Impossible de copier le lien",
+  "agents.browse": "Parcourir les agents",
+  "agents.browseAbout": "Les agents publics de ce serveur fuwa. Ajoutes-en un à un serveur que tu gères.",
+  "agents.browseAboutNoServers": "Les agents publics de ce serveur fuwa. Toute personne qui gère un serveur peut les y ajouter.",
+  "agents.open": "Voir l’agent",
+  "agentPage.signIn": "Connecte-toi, ou crée un compte sur ce serveur fuwa, pour l’ajouter à un serveur que tu gères.",
+  "agentPage.private": "Privé : toi seul peux l’ajouter",
+  "agentPage.gone": "Cet agent n’est pas ici",
+  "agentPage.failed": "Impossible d’ouvrir cet agent",
+  "agentPage.goneAbout": "Il a peut-être été supprimé ou rendu privé, ou le lien contient une faute de frappe. Demande à la personne qui te l’a envoyé.",
+  "agentPage.elsewhere.title": "Ouvrir cet agent sur un autre fuwa ?",
+  "agentPage.elsewhere.about": "Cet agent se trouve sur {host}, que tu n’as pas encore ajouté. L’ouvrir te connecte à cette instance, qui verra donc ton adresse IP. Ne continue que si tu fais confiance à la personne qui a envoyé le lien.",
+  "agents.rolesTitle": "Ajouter {agent} à {server}",
+  "agents.rolesAbout": "Choisis les rôles avec lesquels il arrive, pour qu’il puisse faire son travail dès le départ. Sans aucun, il n’a que ce que tout le monde a.",
+  "agents.cancel": "Annuler",
+  "agents.addWithRoles": {
+    "one": "Ajouter avec {count} rôle",
+    "many": "Ajouter avec {count} de rôles",
+    "other": "Ajouter avec {count} rôles"
+  },
+  "agents.addWithoutRoles": "Ajouter sans rôle"
 }

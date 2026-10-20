@@ -549,5 +549,13 @@
   "nav.profileDecorations": "Dekorasi avatar",
   "nav.profileItemsAbout": "Efek dan dekorasi avatar yang bisa dipakai semua orang di instans ini.",
   "signUps.decorationsLabel": "Orang bisa memakai dekorasi di sekeliling avatar mereka",
-  "signUps.decorationsHint": "Gambar dari item profil instans dan server. Jika dimatikan, dekorasi siapa pun tidak tampil, dan pilihan semua orang kembali saat dinyalakan lagi."
+  "signUps.decorationsHint": "Gambar dari item profil instans dan server. Jika dimatikan, dekorasi siapa pun tidak tampil, dan pilihan semua orang kembali saat dinyalakan lagi.",
+  "nav.featuredAgents": "Agen unggulan",
+  "nav.featuredAgentsAbout": "Agen publik yang ditampilkan pertama di Jelajahi",
+  "featuredAgents.intro": "Setiap agen publik di sini tampil di Jelajahi, yang ada di paling banyak server lebih dulu. Agen yang Anda unggulkan tampil paling depan, dalam ukuran besar, sesuai urutan Anda.",
+  "featuredAgents.none": "Belum ada agen publik",
+  "featuredAgents.noneHint": "Agen akan tampil di sini setelah pemiliknya menjadikannya publik.",
+  "featuredAgents.feature": "Unggulkan di Jelajahi",
+  "featuredAgents.featuredNow": "Mengunggulkan {agent} di Jelajahi",
+  "featuredAgents.unfeaturedNow": "{agent} tidak lagi diunggulkan"
 }

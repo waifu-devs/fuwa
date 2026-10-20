@@ -563,5 +563,13 @@
   "nav.profileDecorations": "Décorations d’avatar",
   "nav.profileItemsAbout": "Effets et décorations d’avatar que tout le monde sur cette instance peut porter.",
   "signUps.decorationsLabel": "Les gens peuvent porter une décoration autour de leur avatar",
-  "signUps.decorationsHint": "Des images issues des éléments de profil de l’instance et des serveurs. Si c’est désactivé, aucune ne s’affiche, et le choix de chacun revient quand c’est réactivé."
+  "signUps.decorationsHint": "Des images issues des éléments de profil de l’instance et des serveurs. Si c’est désactivé, aucune ne s’affiche, et le choix de chacun revient quand c’est réactivé.",
+  "nav.featuredAgents": "Agents à la une",
+  "nav.featuredAgentsAbout": "Les agents publics que Parcourir montre en premier",
+  "featuredAgents.intro": "Chaque agent public d’ici apparaît dans Parcourir, ceux présents dans le plus de serveurs en premier. Ceux que tu mets à la une passent devant, en grand, dans ton ordre.",
+  "featuredAgents.none": "Pas encore d’agents publics",
+  "featuredAgents.noneHint": "Un agent apparaît ici dès que son propriétaire le rend public.",
+  "featuredAgents.feature": "Mettre à la une dans Parcourir",
+  "featuredAgents.featuredNow": "{agent} est à la une dans Parcourir",
+  "featuredAgents.unfeaturedNow": "{agent} n’est plus à la une"
 }

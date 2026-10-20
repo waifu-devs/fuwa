@@ -829,7 +829,7 @@
   "recordings.changedSound": "進行中の録音は終了し、次に誰かが「録音」を押したときから音声のみが保存されます。",
   "recordings.preview": "1人分、1時間の録音：",
   "agents.intro": "プログラムが操作するアカウントです。付与したロールで、メンバーと同じように発言します。",
-  "agents.username": "エージェントのユーザー名",
+  "agents.username": "エージェントのユーザー名またはリンク",
   "agents.yours": "あなたのエージェント：",
   "agents.none": "まだエージェントはいません。{settings}で作成できます。",
   "agents.settingsAgents": "設定 → エージェント",

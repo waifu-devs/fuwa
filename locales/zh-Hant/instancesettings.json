@@ -549,5 +549,13 @@
   "nav.profileDecorations": "大頭貼裝飾",
   "nav.profileItemsAbout": "這個執行個體上所有人都能使用的效果和大頭貼裝飾。",
   "signUps.decorationsLabel": "大家可以在大頭貼周圍加上裝飾",
-  "signUps.decorationsHint": "來自執行個體和伺服器個人檔案物品的圖片。關閉後不會顯示任何人的裝飾，重新開啟時大家的選擇會恢復。"
+  "signUps.decorationsHint": "來自執行個體和伺服器個人檔案物品的圖片。關閉後不會顯示任何人的裝飾，重新開啟時大家的選擇會恢復。",
+  "nav.featuredAgents": "精選代理",
+  "nav.featuredAgentsAbout": "「探索」優先顯示的公開代理",
+  "featuredAgents.intro": "這裡的每個公開代理都會出現在「探索」中，所在伺服器最多的排在前面。你精選的代理會依你的順序以大卡片排在最前。",
+  "featuredAgents.none": "還沒有公開代理",
+  "featuredAgents.noneHint": "代理的擁有者將它設為公開後，它就會顯示在這裡。",
+  "featuredAgents.feature": "在「探索」中精選",
+  "featuredAgents.featuredNow": "已在「探索」中精選 {agent}",
+  "featuredAgents.unfeaturedNow": "{agent} 已不再精選"
 }

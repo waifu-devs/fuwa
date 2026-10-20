@@ -432,5 +432,37 @@
   "calls.cantRecord": "此浏览器无法录制。",
   "calls.noServerRecord": "此实例不支持在服务器上录制语音频道。",
   "calls.serverRecordStopped": "已停止。录音已保存在此频道的录音中。",
-  "calls.fileName": "fuwa 通话 {when}"
+  "calls.fileName": "fuwa 通话 {when}",
+  "agents.addToServer": "添加到服务器",
+  "agents.addedTo": "已添加到 {server}",
+  "agents.managed": "你管理的服务器",
+  "agents.noManagedTitle": "没有可添加到的服务器",
+  "agents.noManaged": "你需要在服务器中拥有“管理服务器”权限，才能把智能体添加到那里。",
+  "agents.here": "已添加",
+  "agents.add": "添加",
+  "agents.servers": {
+    "other": "在 {count} 个服务器中"
+  },
+  "agents.madeBy": "由 {name} 创建",
+  "agents.copyLink": "复制邀请链接",
+  "agents.copied": "已复制",
+  "agents.copyFailed": "无法复制链接",
+  "agents.browse": "浏览智能体",
+  "agents.browseAbout": "此 fuwa 服务器上的公开智能体。可以将其添加到你管理的服务器。",
+  "agents.browseAboutNoServers": "此 fuwa 服务器上的公开智能体。任何管理服务器的人都可以将它们添加到服务器。",
+  "agents.open": "查看智能体",
+  "agentPage.signIn": "登录或在此 fuwa 服务器上创建账号，即可将它添加到你管理的服务器。",
+  "agentPage.private": "私密：只有你可以添加它",
+  "agentPage.gone": "此智能体不在这里",
+  "agentPage.failed": "无法打开此智能体",
+  "agentPage.goneAbout": "它可能已被删除或设为私密，也可能是链接有误。请询问发送者。",
+  "agentPage.elsewhere.title": "在其他 fuwa 上打开此智能体？",
+  "agentPage.elsewhere.about": "此智能体位于 {host}，你尚未添加该实例。打开后会连接到该实例，它将能看到你的 IP 地址。只有在你信任发送链接的人时才继续。",
+  "agents.rolesTitle": "将 {agent} 添加到 {server}",
+  "agents.rolesAbout": "选择它加入时带有的身份组，让它从一开始就能工作。如果不选，它只拥有所有人都有的权限。",
+  "agents.cancel": "取消",
+  "agents.addWithRoles": {
+    "other": "带 {count} 个身份组添加"
+  },
+  "agents.addWithoutRoles": "不带身份组添加"
 }
