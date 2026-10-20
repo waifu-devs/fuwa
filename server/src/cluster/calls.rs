@@ -104,7 +104,7 @@ impl App {
     /// Takes a deleted server out of the index, and tells its members who
     /// they no longer share a server with.
     fn forget_server_presence(&self, server_id: &str) {
-        let members = self.index.members_where(server_id, |_| true);
+        let members = self.presence.kept_members(&self.index, server_id);
         self.index.remove(server_id);
         self.presence.server_gone(&self.index, server_id, &members);
     }

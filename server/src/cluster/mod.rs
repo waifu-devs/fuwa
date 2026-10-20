@@ -379,6 +379,11 @@ pub type ShardClient = cpb::shard_service_client::ShardServiceClient<Keyed>;
 /// an export piece).
 const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 
+/// Member ids in one message between parts (a piece of a registration, a
+/// page of a moved server's members): about 1.4 MB, far under
+/// [`MAX_MESSAGE`] however many members a server has.
+pub const MEMBER_PAGE: usize = 50_000;
+
 pub fn directory_client(url: &str, key: AsciiMetadataValue) -> Result<DirectoryClient> {
     Ok(cpb::directory_service_client::DirectoryServiceClient::with_interceptor(channel(url)?, WithKey(key))
         .max_decoding_message_size(MAX_MESSAGE)

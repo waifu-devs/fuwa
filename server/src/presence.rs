@@ -745,28 +745,56 @@ impl Presence {
         inner.drop_streams(&behind);
     }
 
-    /// A server went away; `members` were its members, now out of the index.
+    /// The members of a server this keeps anything about (online, or
+    /// watching), each once: all [`server_gone`](Self::server_gone) needs, at
+    /// the cost of the smaller of the two, not the server's size.
+    pub fn kept_members(&self, index: &Index, server_id: &str) -> Vec<String> {
+        let inner = self.lock();
+        let (people, watchers) = (&inner.people, &inner.watchers);
+        let candidates =
+            people.keys().chain(watchers.keys().filter(|id| !people.contains_key(*id))).map(String::as_str);
+        let kept = |id: &str| people.contains_key(id) || watchers.contains_key(id);
+        index.members_among(server_id, candidates, people.len() + watchers.len(), kept)
+    }
+
+    /// A server went away; `members` were its members (or the ones this keeps
+    /// anything about, [`kept_members`](Self::kept_members)), now out of the index.
     pub fn server_gone(&self, index: &Index, server_id: &str, members: &[String]) {
         let mut inner = self.lock();
         let mut behind = Vec::new();
         let watching: Vec<&String> = members.iter().filter(|id| inner.watchers.contains_key(*id)).collect();
         let online: Vec<&String> =
             members.iter().filter(|id| inner.people.get(*id).is_some_and(|p| p.looks_online(id))).collect();
+        let online_set: HashSet<&str> = online.iter().map(|id| id.as_str()).collect();
         for to in &watching {
-            for from in &online {
-                let shared = index.shared_servers(to, from);
-                let focused = |w: &Watcher| inner.focus.get(&w.id).is_some_and(|people| people.contains(*from));
-                // Still shown on screen through a server it follows, or for
-                // being in focus, while they share one.
-                let still = |w: &Watcher| !shared.is_empty() && (w.sees_through(&shared) || focused(w));
-                let gone = |w: &Watcher| match w.on_screen {
-                    false => shared.is_empty(),
-                    true => !still(w) && (w.shown.contains_key(server_id) || focused(w)),
+            for stream in &inner.watchers[*to] {
+                let focus = inner.focus.get(&stream.id);
+                let focused = |from: &str| focus.is_some_and(|people| people.contains(from));
+                // An on-screen stream showed the server's members only if it
+                // followed it; otherwise only those in focus. Either way that's
+                // far fewer than a big server's members.
+                let froms: Vec<&str> = if !stream.on_screen || stream.shown.contains_key(server_id) {
+                    online.iter().map(|id| id.as_str()).collect()
+                } else {
+                    focus.into_iter().flatten().map(String::as_str).filter(|id| online_set.contains(id)).collect()
                 };
-                if to == from {
-                    continue;
+                for from in froms {
+                    if from == to.as_str() {
+                        continue;
+                    }
+                    let gone = if stream.on_screen {
+                        // Still shown on screen through a server it follows, or
+                        // for being in focus, while they share one.
+                        let shared = index.shared_servers(to, from);
+                        let still = !shared.is_empty() && (stream.sees_through(&shared) || focused(from));
+                        !still && (stream.shown.contains_key(server_id) || focused(from))
+                    } else {
+                        !index.share_a_server(to, from)
+                    };
+                    if gone {
+                        send_where(std::slice::from_ref(stream), &offline(from), &mut behind, |_| true);
+                    }
                 }
-                send_where(&inner.watchers[*to], &offline(from), &mut behind, gone);
             }
         }
         let watching: Vec<String> = watching.into_iter().cloned().collect();
@@ -1332,6 +1360,39 @@ mod tests {
         presence.left(&index, "bo", "big");
         assert!(drain(&mut on_screen.rx).is_empty(), "bo was never on screen");
         assert_eq!(ids(drain(&mut everyone.rx)).len(), 3);
+    }
+
+    #[test]
+    fn a_large_server_going_shows_on_screen_only_who_was_in_focus() {
+        let index = Index::default();
+        index.insert(server("big"), vec!["ann".into(), "bo".into(), "cy".into(), "far".into()], vec![], None);
+        let presence = Presence::with_large(3, ON_SCREEN_MEMBERS);
+        for (who, session) in [("bo", "t2"), ("cy", "t3")] {
+            presence.update(&index, who, session, "web", false, vec![], Some(default_settings()));
+        }
+        let mut everyone = presence.watch(&index, "ann", Some(default_settings()));
+        let mut on_screen = presence.watch_on_screen(&index, "ann", None);
+        presence.focus(&index, "ann", on_screen.id, vec!["bo".into()]);
+        drain(&mut everyone.rx);
+        drain(&mut on_screen.rx);
+
+        // Only those online or watching are asked about, not "far".
+        let mut members = presence.kept_members(&index, "big");
+        members.sort();
+        assert_eq!(members, ["ann", "bo", "cy"]);
+        index.remove("big");
+        presence.server_gone(&index, "big", &members);
+        let gone = |list: Vec<pb::Presence>| -> Vec<String> {
+            let mut ids: Vec<String> = list
+                .into_iter()
+                .filter(|p| p.status == pb::PresenceStatus::Offline as i32)
+                .map(|p| p.user_id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(gone(drain(&mut on_screen.rx)), ["bo"], "cy was never on screen");
+        assert_eq!(gone(drain(&mut everyone.rx)), ["bo", "cy"]);
     }
 
     #[test]

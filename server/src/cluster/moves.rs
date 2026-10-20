@@ -108,14 +108,19 @@ async fn move_to(
     }
     tracing::info!(%from, %to, region = %shards.region_of(&to).unwrap_or_default(), keep_calls, "moving a server");
 
-    let request = cpb::AdoptServerRequest { server_id: server_id.clone(), from_url, keep_calls };
-    let entry = match to_client.adopt_server(request).await.map(|r| r.into_inner().entry) {
-        Ok(Some(entry)) => entry,
-        failed => {
-            let err = match failed {
-                Err(status) => Error::from(status),
-                _ => Error::internal("the new shard didn't say what it took"),
-            };
+    let request = cpb::AdoptServerRequest { server_id: server_id.clone(), from_url, keep_calls, pages_members: true };
+    let adopted = async {
+        let answer = to_client.adopt_server(request).await?.into_inner();
+        let mut entry = answer.entry.ok_or_else(|| Error::internal("the new shard didn't say what it took"))?;
+        if answer.members_left_out {
+            entry.member_ids = members_of(&mut to_client, &server_id).await?;
+        }
+        Ok::<_, Error>(entry)
+    }
+    .await;
+    let entry = match adopted {
+        Ok(entry) => entry,
+        Err(err) => {
             tracing::warn!(%from, %to, "a move failed; undoing it");
             undo(app, shards, &moved, keep_calls).await;
             return Err(err);
@@ -469,13 +474,37 @@ pub async fn after_registering(app: &App, answer: &cpb::RegisterShardResponse) {
     }
 }
 
+/// Every member of a server on a shard, a page at a time.
+async fn members_of(client: &mut super::ShardClient, server_id: &str) -> Result<Vec<String>> {
+    let mut members: Vec<String> = Vec::new();
+    loop {
+        let after = members.last().cloned().unwrap_or_default();
+        let request = cpb::ServerMembersRequest { server_id: server_id.to_string(), after, limit: 0 };
+        let page = client.server_members(request).await?.into_inner().member_ids;
+        if page.is_empty() {
+            return Ok(members);
+        }
+        members.extend(page);
+    }
+}
+
 // ─────────────── The new shard ───────────────
 
 /// Takes a server from the shard at `from_url`: copies its files and checks
 /// them, puts them in place, opens it and replicates it, and with
 /// `keep_calls` takes the places in its calls. Anything left over from a try
 /// that failed is replaced.
-pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str, keep_calls: bool) -> Result<cpb::ServerEntry> {
+///
+/// Returns its entry, and whether its members were left out of it: they are
+/// when the directory `pages` them (ServerMembers), so a big server's never
+/// have to fit in one message.
+pub async fn adopt(
+    app: &Arc<App>,
+    server_id: &str,
+    from_url: &str,
+    keep_calls: bool,
+    pages: bool,
+) -> Result<(cpb::ServerEntry, bool)> {
     let id = parse_id("server_id", server_id)?;
     if app.servers.holds(&id) {
         return Err(Error::AlreadyExists(format!("server {id} is already on this shard")));
@@ -521,7 +550,7 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str, keep_calls: 
     // copies (which may be in the same bucket): see [`release`] with `keep`.
     let opened = async {
         app.servers.adopt(&id).await?;
-        app.servers.entry(&id).await
+        Ok::<_, Error>((app.servers.entry(&id, !pages).await?, pages))
     }
     .await;
     match opened {

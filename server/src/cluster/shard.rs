@@ -260,10 +260,6 @@ async fn register(app: &App, link: &Link) {
     link.dirty.store(true, Ordering::SeqCst);
 }
 
-/// Member ids in one piece of a registration: about 1.4 MB, far under the
-/// cluster's message limit however many members the shard's servers have.
-const PIECE_IDS: usize = 50_000;
-
 /// Tells the directory every server here and who's in it, in pieces
 /// (RegisterShardInPieces), or in one message to a directory from before
 /// pieces. Returns how many servers went, and the directory's answer.
@@ -274,7 +270,7 @@ async fn send_registration(app: &App, link: &Link) -> Result<(usize, cpb::Regist
     let (entries_tx, mut entries_rx) = mpsc::channel::<Vec<cpb::ServerEntry>>(2);
     let (pieces_tx, pieces_rx) = mpsc::channel(2);
     let read = async {
-        let sent = app.servers.send_entries(PIECE_IDS, &entries_tx).await;
+        let sent = app.servers.send_entries(super::MEMBER_PAGE, &entries_tx).await;
         if let Ok(Some(_)) = sent {
             let _ = entries_tx.send(Vec::new()).await;
         }
@@ -750,9 +746,28 @@ impl ShardService for Internal {
     ) -> Result<Response<cpb::AdoptServerResponse>, Status> {
         let req = request.into_inner();
         respond(
-            super::moves::adopt(&self.app, &req.server_id, &req.from_url, req.keep_calls)
+            super::moves::adopt(&self.app, &req.server_id, &req.from_url, req.keep_calls, req.pages_members)
                 .await
-                .map(|entry| cpb::AdoptServerResponse { entry: Some(entry) }),
+                .map(|(entry, members_left_out)| cpb::AdoptServerResponse { entry: Some(entry), members_left_out }),
+        )
+    }
+
+    async fn server_members(
+        &self,
+        request: Request<cpb::ServerMembersRequest>,
+    ) -> Result<Response<cpb::ServerMembersResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            async {
+                let id = crate::id::parse_id("server_id", &req.server_id)?;
+                let limit = match req.limit as usize {
+                    0 => super::MEMBER_PAGE,
+                    limit => limit.min(super::MEMBER_PAGE),
+                };
+                let member_ids = self.app.servers.member_page(&id, &req.after, limit).await?;
+                Ok(cpb::ServerMembersResponse { member_ids })
+            }
+            .await,
         )
     }
 

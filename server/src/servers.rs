@@ -1014,6 +1014,12 @@ pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
     }
 }
 
+/// Up to `limit` member ids after `after`, in id order.
+async fn member_page(conn: &Connection, after: &str, limit: usize) -> Result<Vec<String>> {
+    let sql = "SELECT user_id FROM members WHERE user_id > ?1 ORDER BY user_id LIMIT ?2";
+    query_all(conn, sql, (after, limit as i64), |r| r.get::<String>(0)).await
+}
+
 pub async fn sso_signed_in_at(conn: &Connection, user_id: &str) -> Result<Option<i64>> {
     query_one(conn, "SELECT signed_in_at FROM sso_identities WHERE user_id = ?1", [user_id], |r| r.get::<i64>(0)).await
 }
@@ -1166,14 +1172,25 @@ impl Servers {
         Ok(true)
     }
 
-    /// Every server here and who's in it, for one server.
-    pub async fn entry(&self, id: &str) -> Result<cpb::ServerEntry> {
+    /// Every server here and who's in it, for one server; without its
+    /// members unless `members` (they're paged with [`member_page`](Self::member_page)).
+    pub async fn entry(&self, id: &str, members: bool) -> Result<cpb::ServerEntry> {
         let sdb = self.get(id).await?;
         let conn = sdb.read()?;
         let server = load_server(&conn).await?;
-        let member_ids = query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?;
+        let member_ids = match members {
+            true => query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?,
+            false => Vec::new(),
+        };
         let invite_codes = query_all(&conn, "SELECT code FROM invites", (), |r| r.get::<String>(0)).await?;
         Ok(cpb::ServerEntry { server: Some(server), member_ids, invite_codes })
+    }
+
+    /// Up to `limit` of a server's member ids after `after`, in id order.
+    pub async fn member_page(&self, id: &str, after: &str, limit: usize) -> Result<Vec<String>> {
+        let sdb = self.get(id).await?;
+        let conn = sdb.read()?;
+        member_page(&conn, after, limit).await
     }
 
     pub fn replica(&self) -> Option<&Arc<Replica>> {
@@ -1307,13 +1324,7 @@ impl Servers {
             let mut entry = cpb::ServerEntry { server: Some(server.clone()), member_ids: Vec::new(), invite_codes };
             let (mut after, mut continued) = (String::new(), false);
             loop {
-                let page = query_all(
-                    &conn,
-                    "SELECT user_id FROM members WHERE user_id > ?1 ORDER BY user_id LIMIT ?2",
-                    (after.as_str(), room as i64),
-                    |r| r.get::<String>(0),
-                )
-                .await?;
+                let page = member_page(&conn, &after, room).await?;
                 let more = page.len() == room;
                 if let Some(last) = page.last() {
                     after = last.clone();
