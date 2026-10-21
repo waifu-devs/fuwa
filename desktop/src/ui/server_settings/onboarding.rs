@@ -20,9 +20,8 @@ use crate::ui::text::{WIDE, tracked};
 use crate::ui::theme::{radius_2xl, radius_lg, radius_xl};
 
 /// The shapes a banner is shown in, as the web lists them: a name, and its width and height.
-fn crops() -> [(String, f32, f32); 4] {
+fn crops() -> [(String, f32, f32); 3] {
     [
-        (t("serversettings.welcome.cropSidebar"), crate::ui::sidebar::SIDEBAR, crate::ui::sidebar::BANNER),
         (t("serversettings.welcome.cropPhone"), 390.0, 128.0),
         (t("serversettings.welcome.cropBrowse"), 300.0, 80.0),
         (t("serversettings.welcome.cropDialog"), 672.0, 160.0),

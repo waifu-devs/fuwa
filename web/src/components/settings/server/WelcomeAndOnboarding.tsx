@@ -296,7 +296,7 @@ function Swatch({ label, selected, onSelect, children }: { label: string; select
 
 /**
  * Where the banner keeps its focus: drag the dot (or use the arrow keys) on
- * the whole banner, and see how the channel list, a phone header and a Browse card crop it.
+ * the whole banner, and see how a phone header and a Browse card crop it.
  */
 function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x: number, y: number) => void }) {
   const { t } = useI18n();
@@ -354,7 +354,6 @@ function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x:
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        <Crop label={t("serversettings.welcome.cropSidebar")} ratio="aspect-video max-w-48" server={server} />
         <Crop label={t("serversettings.welcome.cropPhone")} ratio="aspect-[390/128]" server={server} />
         <Crop label={t("serversettings.welcome.cropBrowse")} ratio="aspect-[300/80]" server={server} />
         <Crop label={t("serversettings.welcome.cropDialog")} ratio="aspect-[672/160]" server={server} />

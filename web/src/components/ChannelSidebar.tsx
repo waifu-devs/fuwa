@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, UserPlusIcon } from "lucide-react";
-import { AnimatePresence, m as motion, useMotionValueEvent, useScroll } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel, type Server } from "@/gen/fuwa/v1/types_pb";
 import { ModViewItem, useModViewHere } from "@/components/modview/ModViewItem";
@@ -13,7 +13,6 @@ import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { useServerSettingsTabs } from "@/components/dialogs/serverSettingsTabs";
 import { intent, lazyComponent } from "@/components/lazy";
-import { ServerBanner } from "@/components/join/Banner";
 import { RulesDialog } from "@/components/join/Rules";
 import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
@@ -47,7 +46,6 @@ import { T, useI18n } from "@/i18n/react";
 import { isMuted, MUTE_FOR, muteForLabel, mutedHint, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { has, hasIn, isPrivate, type Access } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
-import { shownPicture } from "@/lib/shown";
 import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -114,13 +112,6 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const groups = useMemo(() => groupChannels(channels ?? []), [channels]);
   const layout = useMemo(() => layoutOf(channels ?? []), [channels]);
   const list = useRef<HTMLDivElement>(null);
-  // A server with a banner wears it across the top of its channels, Discord-style: the name sits
-  // over the picture until the channels scroll it away, then the header turns solid again.
-  const decorated = !!shownPicture(server?.bannerUrl);
-  const banner = useRef<HTMLDivElement>(null);
-  const { scrollY } = useScroll({ container: list });
-  const [scrolledPast, setScrolledPast] = useState(false);
-  useMotionValueEvent(scrollY, "change", (y) => setScrolledPast(y >= (banner.current?.offsetHeight ?? 0) - HEADER));
   // Whoever can manage the server's channels drags them into order, Discord-style.
   useArrange({
     container: list,
@@ -157,70 +148,61 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   if (!known) return null;
   return (
     <>
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <ServerMenu
-          instanceKey={instanceKey}
-          serverId={serverId}
-          server={server}
-          nodeName={nodeName}
-          owner={owner}
-          inviteTo={inviteTo}
-          settingsTabs={settingsTabs}
-          reviews={reviews}
-          waiting={waiting}
-          usage={usage}
-          canCreate={canCreate}
-          moderates={moderates}
-          manage={has(access, Permission.MANAGE_SERVER)}
-          decorated={decorated}
-          overBanner={decorated && !scrolledPast}
-          onInvite={setInviting}
-          onSettings={setSettings}
-          onCreate={() => setCreating({ parentId: "" })}
-          onRules={() => setReading(true)}
-          onWelcome={() => setWelcoming(true)}
-        />
+      <ServerMenu
+        instanceKey={instanceKey}
+        serverId={serverId}
+        server={server}
+        nodeName={nodeName}
+        owner={owner}
+        inviteTo={inviteTo}
+        settingsTabs={settingsTabs}
+        reviews={reviews}
+        waiting={waiting}
+        usage={usage}
+        canCreate={canCreate}
+        moderates={moderates}
+        manage={has(access, Permission.MANAGE_SERVER)}
+        onInvite={setInviting}
+        onSettings={setSettings}
+        onCreate={() => setCreating({ parentId: "" })}
+        onRules={() => setReading(true)}
+        onWelcome={() => setWelcoming(true)}
+      />
 
-        <div ref={list} className={cn("scroll-thin relative flex-1 overflow-y-auto px-2 pb-4", !decorated && "pt-3")}>
-          {decorated && server && (
-            <div ref={banner} className="-mx-2 mb-3 aspect-video max-h-48">
-              <ServerBanner server={server} scrollY={scrollY} pan={false} fade={false} className="size-full" />
-            </div>
+      <div ref={list} className="scroll-thin relative flex-1 overflow-y-auto px-2 pt-3 pb-4">
+        <ApplicationsNotice show={reviews && waiting > 0} waiting={waiting} onOpen={() => setSettings({ tab: "applications" })} />
+        <SsoNotice
+          server={ssoLocked ? server : undefined}
+          onOpen={() => {
+            navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: serverId } });
+            if (compact) setNavOpen(false);
+          }}
+        />
+        <LiveTilesGroup>
+          <LiveTiles instanceKey={instanceKey} serverId={serverId} />
+          {!synced && !channels?.length ? (
+          <div className="flex flex-col gap-2 px-2">
+            {[70, 55, 80, 45].map((w, n) => (
+              <div key={n} className="shimmer h-5 rounded-md" style={{ width: `${w}%` }} />
+            ))}
+          </div>
+        ) : (
+          <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-0.5">
+            <ChannelGroups
+              instanceKey={instanceKey}
+              groups={groups}
+              access={access}
+              activeId={params.channel}
+              collapsed={collapsed}
+              onCollapse={onCollapse}
+              onSettings={setSettings}
+              onInvite={setInviting}
+              onCreate={onCreateIn}
+              onMenuEdit={edit}
+            />
+          </motion.ul>
           )}
-          <ApplicationsNotice show={reviews && waiting > 0} waiting={waiting} onOpen={() => setSettings({ tab: "applications" })} />
-          <SsoNotice
-            server={ssoLocked ? server : undefined}
-            onOpen={() => {
-              navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: serverId } });
-              if (compact) setNavOpen(false);
-            }}
-          />
-          <LiveTilesGroup>
-            <LiveTiles instanceKey={instanceKey} serverId={serverId} />
-            {!synced && !channels?.length ? (
-            <div className="flex flex-col gap-2 px-2">
-              {[70, 55, 80, 45].map((w, n) => (
-                <div key={n} className="shimmer h-5 rounded-md" style={{ width: `${w}%` }} />
-              ))}
-            </div>
-          ) : (
-            <motion.ul layout="position" transition={SPRING} className="flex flex-col gap-0.5">
-              <ChannelGroups
-                instanceKey={instanceKey}
-                groups={groups}
-                access={access}
-                activeId={params.channel}
-                collapsed={collapsed}
-                onCollapse={onCollapse}
-                onSettings={setSettings}
-                onInvite={setInviting}
-                onCreate={onCreateIn}
-                onMenuEdit={edit}
-              />
-            </motion.ul>
-            )}
-          </LiveTilesGroup>
-        </div>
+        </LiveTilesGroup>
       </div>
       <WalletChip instanceKey={instanceKey} serverId={serverId} />
       <CallPanel />
@@ -277,8 +259,6 @@ function ServerMenu({
   onCreate,
   onRules,
   onWelcome,
-  decorated,
-  overBanner,
 }: {
   instanceKey: string;
   serverId: string;
@@ -301,10 +281,6 @@ function ServerMenu({
   onCreate: () => void;
   onRules: () => void;
   onWelcome: () => void;
-  /** The server's banner is across the top of its channels, under this header. */
-  decorated: boolean;
-  /** The banner is still under the header, not scrolled away: white text on the picture. */
-  overBanner: boolean;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -312,7 +288,7 @@ function ServerMenu({
   const developer = usePrefs((p) => p.developerMode);
   return (
     <DropdownMenu>
-      <ServerMenuTrigger instanceKey={instanceKey} server={server} nodeName={nodeName} decorated={decorated} overBanner={overBanner} />
+      <ServerMenuTrigger instanceKey={instanceKey} server={server} nodeName={nodeName} />
       <DropdownMenuContent align="start" className="w-60">
         <ManageItems
           inviteTo={inviteTo}
@@ -365,46 +341,20 @@ function ServerMenu({
   );
 }
 
-/** The header's height, 56px: what of the banner it covers. */
-const HEADER = 56;
-
-/**
- * The server's name and how many are in it, at the top of the sidebar. With
- * a banner it floats over the picture in white, and turns solid once the
- * channels have scrolled the banner away.
- */
-function ServerMenuTrigger({
-  instanceKey,
-  server,
-  nodeName,
-  decorated,
-  overBanner,
-}: {
-  instanceKey: string;
-  server: Server | undefined;
-  nodeName: string | undefined;
-  decorated: boolean;
-  overBanner: boolean;
-}) {
+/** The server's name and how many are in it, at the top of the sidebar. */
+function ServerMenuTrigger({ instanceKey, server, nodeName }: { instanceKey: string; server: Server | undefined; nodeName: string | undefined }) {
   return (
     <DropdownMenuTrigger asChild>
       <button
         type="button"
         {...intent(ServerSettingsDialog)}
-        className={cn(
-          "group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition",
-          decorated && "absolute inset-x-0 top-0 z-10",
-          decorated && !overBanner && "surface-side shadow-sm",
-          overBanner
-            ? "border-transparent text-white [text-shadow:0_1px_3px_rgb(0_0_0/0.6)] hover:bg-white/10 data-[state=open]:bg-white/10"
-            : "hover:bg-muted/60 data-[state=open]:bg-muted/60",
-        )}
+        className="group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition hover:bg-muted/60 data-[state=open]:bg-muted/60"
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate font-extrabold">
             <SwapText className="truncate align-bottom">{server?.name ?? "…"}</SwapText>
           </span>
-          <span className={cn("block truncate text-xs", overBanner ? "text-white/85" : "text-muted-foreground")}>
+          <span className="block truncate text-xs text-muted-foreground">
             {server ? (
               <T
                 k="workspace.sidebar.membersOn"

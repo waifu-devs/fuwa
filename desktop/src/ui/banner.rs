@@ -81,24 +81,6 @@ pub fn server_banner(
     cx: &mut App,
 ) -> AnyElement {
     let still = cx.reduce_motion();
-    banner_drawn(server, w, h, under, still, window, cx)
-}
-
-/// The banner held still, for where it stays on screen a long while: across
-/// the top of the channel list (the web's `pan={false}`).
-pub fn still_banner(server: &pb::Server, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
-    banner_drawn(server, w, h, None, true, window, cx)
-}
-
-fn banner_drawn(
-    server: &pb::Server,
-    w: f32,
-    h: f32,
-    under: Option<Hsla>,
-    still: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
     let mut el = div().relative().w(px(w)).h(px(h)).overflow_hidden().flex_none();
     let picture = (!server.banner_url.is_empty())
         .then(|| {
