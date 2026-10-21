@@ -433,9 +433,9 @@ async fn find_people(conn: &turso::Connection, query: &str, id: &str, limit: i64
         |r| {
             Ok(pb::ModPerson {
                 user: Some(store::user_row(r)?),
-                member: r.get::<i64>(8)? != 0,
-                nickname: r.get(9)?,
-                banned: r.get::<i64>(10)? != 0,
+                member: r.get::<i64>(store::USER_WIDTH)? != 0,
+                nickname: r.get(store::USER_WIDTH + 1)?,
+                banned: r.get::<i64>(store::USER_WIDTH + 2)? != 0,
             })
         },
     )

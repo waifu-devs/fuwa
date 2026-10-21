@@ -31,9 +31,10 @@ pub(crate) struct ServersForm {
     nickname: Option<Entity<InputState>>,
     /// The nickname the field was filled with, for the server it's for.
     filled: Option<(String, String)>,
-    /// The effect and decoration picked there, while they differ from what's saved.
+    /// The effect, decoration and nameplate picked there, while they differ from what's saved.
     effect: Option<String>,
     decoration: Option<String>,
+    nameplate: Option<String>,
     saving: bool,
     error: Option<String>,
     /// The server whose notifications are open.
@@ -149,9 +150,10 @@ impl SettingsView {
         let saved = member.as_ref().map(|m| m.nickname.clone()).unwrap_or_default();
         let saved_effect = member.as_ref().map(|m| m.effect.clone()).unwrap_or_default();
         let saved_decoration = member.as_ref().map(|m| m.decoration_id.clone()).unwrap_or_default();
+        let saved_nameplate = member.as_ref().map(|m| m.nameplate_id.clone()).unwrap_or_default();
         // Server profiles keep an effect and a decoration only on instances with profile items.
-        let (effects_on, decorations_on, items, locked) = self.core.shared.read(|s| {
-            let Some(i) = s.instance(&key) else { return (false, false, Vec::new(), Default::default()) };
+        let (effects_on, decorations_on, nameplates_here, items, locked) = self.core.shared.read(|s| {
+            let Some(i) = s.instance(&key) else { return (false, false, false, Vec::new(), Default::default()) };
             // Items the server's shop sells that you haven't bought (docs/economy.md).
             let locked = i.economy(&server_id).map(crate::ui::economy::lock_labels).unwrap_or_default();
             let here = crate::core::compat::instance_has(
@@ -159,7 +161,13 @@ impl SettingsView {
                 "profile-items",
                 &crate::core::compat::FEATURES,
             );
-            (i.effects_on() && here, i.decorations_on() && here, i.server_list(&server_id).to_vec(), locked)
+            (
+                i.effects_on() && here,
+                i.decorations_on() && here,
+                i.has("nameplates"),
+                i.server_list(&server_id).to_vec(),
+                locked,
+            )
         });
         let accent = self.saved_draft().accent;
         let state = match &self.servers.nickname {
@@ -175,6 +183,7 @@ impl SettingsView {
             self.servers.filled = Some((server_id.clone(), saved.clone()));
             self.servers.effect = None;
             self.servers.decoration = None;
+            self.servers.nameplate = None;
             let (saved, name) = (saved.clone(), user_name(&me));
             state.update(cx, |s, cx| {
                 s.set_value(saved, window, cx);
@@ -184,12 +193,17 @@ impl SettingsView {
         let value = state.read(cx).value().to_string();
         let effect = self.servers.effect.clone().unwrap_or_else(|| saved_effect.clone());
         let decoration = self.servers.decoration.clone().unwrap_or_else(|| saved_decoration.clone());
-        let patch = (
-            (value.trim() != saved).then(|| value.trim().to_owned()),
-            (effect != saved_effect).then(|| effect.clone()),
-            (decoration != saved_decoration).then(|| decoration.clone()),
-        );
-        let changed = usize::from(patch.0.is_some()) + usize::from(patch.1.is_some()) + usize::from(patch.2.is_some());
+        let nameplate = self.servers.nameplate.clone().unwrap_or_else(|| saved_nameplate.clone());
+        let patch = crate::core::profile_items::ServerLook {
+            nickname: (value.trim() != saved).then(|| value.trim().to_owned()),
+            effect: (effect != saved_effect).then(|| effect.clone()),
+            decoration_id: (decoration != saved_decoration).then(|| decoration.clone()),
+            nameplate_id: (nameplate != saved_nameplate).then(|| nameplate.clone()),
+        };
+        let changed = [&patch.nickname, &patch.effect, &patch.decoration_id, &patch.nameplate_id]
+            .iter()
+            .filter(|x| x.is_some())
+            .count();
         if changed > 0 {
             self.holding = true;
         }
@@ -321,6 +335,38 @@ impl SettingsView {
                     .into_any_element(),
             ));
         }
+        let nameplates: Vec<pb::ProfileItem> =
+            items.iter().filter(|i| i.kind == pb::ProfileItemKind::Nameplate as i32).cloned().collect();
+        if decorations_on && nameplates_here && member.is_some() && (!nameplates.is_empty() || !nameplate.is_empty()) {
+            let about = crate::core::profile_items::resolve_nameplate(&nameplate, &items)
+                .map(|i| i.description.clone())
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| t("accountsettings.serverProfiles.nameplateHint"));
+            let picker = self.nameplate_picker(
+                "server",
+                &nameplate,
+                &me,
+                &nameplates,
+                Some(t("accountsettings.serverProfiles.useMine")),
+                &locked,
+                true,
+                form_w,
+                p,
+                cx,
+                |this, id, cx| {
+                    this.servers.nameplate = Some(id);
+                    this.servers.error = None;
+                    cx.notify();
+                },
+            );
+            rows.push((
+                "server-nameplate",
+                t("accountsettings.nameplates.label"),
+                Some(hint(about, p)),
+                motion::slide_in(div().child(picker), SharedString::from(format!("nameplate-{server_id}")), 12.0)
+                    .into_any_element(),
+            ));
+        }
         let n_rows = rows.len();
         let mut form = div().flex().flex_col();
         for (n, (id, label, h, body)) in rows.into_iter().enumerate() {
@@ -347,11 +393,10 @@ impl SettingsView {
             window,
             cx,
             move |this, _, cx| {
-                let (nickname, effect, decoration) = patch.clone();
+                let look = patch.clone();
                 this.servers.saving = true;
                 let (core, k, sid) = (this.core.clone(), k.clone(), sid.clone());
-                let rx =
-                    this.core.spawn(async move { core.set_server_look(&k, &sid, nickname, effect, decoration).await });
+                let rx = this.core.spawn(async move { core.set_server_look(&k, &sid, look).await });
                 cx.spawn(async move |this, cx| {
                     let Ok(result) = rx.await else { return };
                     let _ = this.update(cx, |this, cx| {
@@ -361,6 +406,7 @@ impl SettingsView {
                                 this.servers.filled = None;
                                 this.servers.effect = None;
                                 this.servers.decoration = None;
+                                this.servers.nameplate = None;
                             }
                             Err(e) => this.servers.error = Some(e.message),
                         }
@@ -373,6 +419,7 @@ impl SettingsView {
                 this.servers.filled = None;
                 this.servers.effect = None;
                 this.servers.decoration = None;
+                this.servers.nameplate = None;
                 this.servers.error = None;
                 cx.notify();
             },

@@ -364,9 +364,12 @@
   "signIn.continueTo": "Lanjutkan ke {name}",
   "decorations.label": "Dekorasi avatar",
   "decorations.hint": "Gambar di sekeliling avatar Anda, di mana pun avatar tampil di instans ini. Ini pilihan yang tersedia.",
+  "nameplates.label": "Papan nama",
+  "nameplates.hint": "Gambar di belakang namamu di daftar anggota dan DM, di mana pun di instance ini. Ini yang ditawarkannya.",
   "serverProfiles.useMine": "Pakai dari profil saya",
   "serverProfiles.effectHint": "Diputar di kartu Anda di server ini, menggantikan efek profil Anda. Server mungkin menyediakan efeknya sendiri.",
   "serverProfiles.decorationHint": "Tampil di sekeliling avatar Anda di server ini, menggantikan dekorasi profil Anda.",
+  "serverProfiles.nameplateHint": "Muncul di belakang namamu di daftar anggota server ini, menggantikan yang ada di profilmu.",
   "serverProfiles.forSale": "{name} dijual di toko server",
   "serverProfiles.notForSale": "Tidak dijual"
 }

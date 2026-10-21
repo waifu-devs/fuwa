@@ -17,9 +17,10 @@ import { instanceHas } from "@/lib/compat";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Row } from "@/components/settings/account/common";
 import { DecorationPicker } from "@/components/settings/account/DecorationPicker";
+import { NameplatePicker } from "@/components/settings/account/NameplatePicker";
 import { EffectAbout, EffectPicker } from "@/components/settings/account/EffectPicker";
 import { useDecorationsOn, useEffectsOn, useOfferedEffects } from "@/components/ProfileDecoration";
-import { ITEM_DECORATION, itemsOfKind, resolveDecoration, resolveEffect } from "@/lib/profile-items";
+import { ITEM_DECORATION, ITEM_NAMEPLATE, itemsOfKind, resolveDecoration, resolveEffect, resolveNameplate } from "@/lib/profile-items";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { T, useI18n } from "@/i18n/react";
@@ -47,11 +48,11 @@ function usePickedServer(servers: Server[], target: string | null) {
 }
 
 /** What's being changed on the server profile picked; unset fields are as saved. */
-type Edits = { nickname?: string; effect?: string; decoration?: string };
+type Edits = { nickname?: string; effect?: string; decoration?: string; nameplate?: string };
 
 /**
  * A different profile in each server: pick a server, give yourself a
- * nickname there, an effect and a decoration (the fuwa ones and that
+ * nickname there, an effect, a decoration and a nameplate (the fuwa ones and that
  * server's), and see the card people in that server will open.
  */
 export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
@@ -69,6 +70,7 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   const itemsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "profile-items"));
   const effectsOn = useEffectsOn(instanceKey) && itemsHere;
   const decorationsOn = useDecorationsOn(instanceKey) && itemsHere;
+  const nameplatesHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "nameplates"));
   const items = useFuwa((s) => s.instances[instanceKey]?.serverProfileItems[serverId]);
   const offered = useOfferedEffects(items);
   // Items for sale in the server's shop (docs/economy.md) wait behind a padlock until bought.
@@ -87,23 +89,27 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
   if (!me) return null;
   if (!servers.length) return <NoServers />;
 
-  const saved = { nickname: member?.nickname ?? "", effect: member?.effect ?? "", decoration: member?.decorationId ?? "" };
+  const saved = { nickname: member?.nickname ?? "", effect: member?.effect ?? "", decoration: member?.decorationId ?? "", nameplate: member?.nameplateId ?? "" };
   const value = edits.nickname ?? saved.nickname;
   const effect = edits.effect ?? saved.effect;
   const decoration = edits.decoration ?? saved.decoration;
+  const nameplate = edits.nameplate ?? saved.nameplate;
   const patch: ServerProfilePatch = {};
   if (edits.nickname !== undefined && edits.nickname.trim() !== saved.nickname) patch.nickname = edits.nickname.trim();
   if (edits.effect !== undefined && edits.effect !== saved.effect) patch.effect = edits.effect;
   if (edits.decoration !== undefined && edits.decoration !== saved.decoration) patch.decorationId = edits.decoration;
+  if (edits.nameplate !== undefined && edits.nameplate !== saved.nameplate) patch.nameplateId = edits.nameplate;
   const changed = Object.keys(patch).length;
   const server = servers.find((s) => s.id === serverId);
   const decorations = itemsOfKind(items, ITEM_DECORATION);
+  const nameplates = itemsOfKind(items, ITEM_NAMEPLATE);
   const set = (next: Edits) => {
     setEdits((e) => ({ ...e, ...next }));
     save.setError(null);
   };
   const pickedEffect = resolveEffect(effect, items);
   const pickedDecoration = resolveDecoration(decoration, items);
+  const pickedNameplate = resolveNameplate(nameplate, items);
 
   function pick(id: string) {
     if (id === serverId) return;
@@ -125,7 +131,7 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
       instanceKey={instanceKey}
       user={me}
       profile={profile}
-      member={member ? { ...member, nickname: value.trim(), effect, decorationId: decoration } : undefined}
+      member={member ? { ...member, nickname: value.trim(), effect, decorationId: decoration, nameplateId: nameplate } : undefined}
     />
   );
 
@@ -204,6 +210,26 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
                     locks={locks}
                     onLocked={toShop}
                     onChange={(next) => set({ decoration: next })}
+                  />
+                </Row>
+              </motion.div>
+            )}
+            {decorationsOn && nameplatesHere && member && (nameplates.length > 0 || nameplate) && (
+              <motion.div key={`nameplate-${serverId}`} {...SLIDE_IN} transition={SPRING}>
+                <Row
+                  id="server-nameplate"
+                  label={t("accountsettings.nameplates.label")}
+                  hint={pickedNameplate?.description || t("accountsettings.serverProfiles.nameplateHint")}
+                >
+                  <NameplatePicker
+                    value={nameplate}
+                    user={me}
+                    items={nameplates}
+                    noneLabel={t("accountsettings.serverProfiles.useMine")}
+                    pickedId="server-nameplate-picked"
+                    locks={locks}
+                    onLocked={toShop}
+                    onChange={(next) => set({ nameplate: next })}
                   />
                 </Row>
               </motion.div>

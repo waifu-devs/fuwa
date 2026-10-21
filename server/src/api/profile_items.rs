@@ -43,7 +43,7 @@ impl Api {
         let upload = self
             .check_upload(account, pb::MediaPurpose::Decoration, new.picture_url.trim(), server_id)
             .await?
-            .ok_or_else(|| Error::invalid("upload the decoration's picture to this fuwa server first"))?;
+            .ok_or_else(|| Error::invalid("upload the item's picture to this fuwa server first"))?;
         item.picture_url = upload.url.clone();
         item.animated = upload.content_type == "image/gif";
         item.size = upload.size;
@@ -348,6 +348,11 @@ impl ProfileItemService for Api {
                         .await?;
                         conn.execute(
                             "UPDATE members SET profile_decoration = '' WHERE profile_decoration = ?1",
+                            [item.id.as_str()],
+                        )
+                        .await?;
+                        conn.execute(
+                            "UPDATE members SET profile_nameplate = '' WHERE profile_nameplate = ?1",
                             [item.id.as_str()],
                         )
                         .await?;

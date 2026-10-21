@@ -599,19 +599,24 @@ impl ServerService for Api {
                 let nickname = req.nickname.as_deref().map(|v| text("nickname", v, 0, 32)).transpose()?;
                 let effect = req.effect.as_deref().map(str::trim).map(str::to_string);
                 let decoration = req.decoration_id.as_deref().map(str::trim).map(str::to_string);
+                let nameplate = req.nameplate_id.as_deref().map(str::trim).map(str::to_string);
                 let theirs_too = target_id != account.id;
-                if nickname.is_some() || effect.is_some() || decoration.is_some() {
+                if nickname.is_some() || effect.is_some() || decoration.is_some() || nameplate.is_some() {
                     me.require(if theirs_too { Permission::ManageNicknames } else { Permission::ChangeNickname })?;
                 }
                 // Moderators can take someone's server profile off, never put one on.
-                if theirs_too && [&effect, &decoration].iter().any(|v| v.as_deref().is_some_and(|v| !v.is_empty())) {
+                if theirs_too
+                    && [&effect, &decoration, &nameplate].iter().any(|v| v.as_deref().is_some_and(|v| !v.is_empty()))
+                {
                     return Err(Error::denied("only they can pick their server profile; you can only clear it"));
                 }
                 let settings = self.app.settings();
                 if effect.as_deref().is_some_and(|v| !v.is_empty()) && !settings.profile_effects {
                     return Err(Error::FailedPrecondition("profile effects are off on this instance".into()));
                 }
-                if decoration.as_deref().is_some_and(|v| !v.is_empty()) && !settings.profile_decorations {
+                if [&decoration, &nameplate].iter().any(|v| v.as_deref().is_some_and(|v| !v.is_empty()))
+                    && !settings.profile_decorations
+                {
                     return Err(Error::FailedPrecondition("decorations are off on this instance".into()));
                 }
                 let member = sdb
@@ -631,8 +636,17 @@ impl ServerService for Api {
                         {
                             return Err(Error::NotFound("decoration"));
                         }
+                        if let Some(id) = nameplate.as_deref().filter(|v| !v.is_empty())
+                            && !crate::profile_items::has(conn, id, pb::ProfileItemKind::Nameplate).await?
+                        {
+                            return Err(Error::NotFound("nameplate"));
+                        }
                         // Items the shop sells only for those who bought them.
-                        for (id, worn) in [(&effect, &target.effect), (&decoration, &target.decoration_id)] {
+                        for (id, worn) in [
+                            (&effect, &target.effect),
+                            (&decoration, &target.decoration_id),
+                            (&nameplate, &target.nameplate_id),
+                        ] {
                             if let Some(id) = id.as_deref().filter(|v| !v.is_empty() && v != worn) {
                                 super::economy::may_wear(conn, id, &target_id).await?;
                             }
@@ -640,9 +654,16 @@ impl ServerService for Api {
                         conn.execute(
                             "UPDATE members SET nickname = coalesce(?2, nickname),
                                profile_effect = coalesce(?3, profile_effect),
-                               profile_decoration = coalesce(?4, profile_decoration)
+                               profile_decoration = coalesce(?4, profile_decoration),
+                               profile_nameplate = coalesce(?5, profile_nameplate)
                              WHERE user_id = ?1",
-                            (target_id.as_str(), nickname.as_deref(), effect.as_deref(), decoration.as_deref()),
+                            (
+                                target_id.as_str(),
+                                nickname.as_deref(),
+                                effect.as_deref(),
+                                decoration.as_deref(),
+                                nameplate.as_deref(),
+                            ),
                         )
                         .await?;
                         let member =
@@ -651,7 +672,8 @@ impl ServerService for Api {
                             let entry = Audit::new(pb::AuditAction::MemberUpdate, &target_id)
                                 .change("nickname", &target.nickname, &member.nickname)
                                 .change("effect", &target.effect, &member.effect)
-                                .change("decoration", &target.decoration_id, &member.decoration_id);
+                                .change("decoration", &target.decoration_id, &member.decoration_id)
+                                .change("nameplate", &target.nameplate_id, &member.nameplate_id);
                             if !entry.changes.is_empty() {
                                 store::audit(conn, &account.id, entry).await?;
                             }
@@ -922,9 +944,9 @@ impl ServerService for Api {
                     |r| {
                         Ok(pb::Ban {
                             user: Some(store::user_row(r)?),
-                            reason: r.get(8)?,
-                            banned_by_id: r.get(9)?,
-                            created_at: Some(timestamp(r.get(10)?)),
+                            reason: r.get(store::USER_WIDTH)?,
+                            banned_by_id: r.get(store::USER_WIDTH + 1)?,
+                            created_at: Some(timestamp(r.get(store::USER_WIDTH + 2)?)),
                         })
                     },
                 )

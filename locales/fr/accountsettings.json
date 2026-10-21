@@ -374,9 +374,12 @@
   "signIn.continueTo": "Continuer vers {name}",
   "decorations.label": "Décoration d’avatar",
   "decorations.hint": "Une image autour de ton avatar, partout où il s’affiche sur cette instance. Voici celles qu’elle propose.",
+  "nameplates.label": "Plaque de nom",
+  "nameplates.hint": "Une image derrière ton nom dans les listes de membres et les MP, partout sur cette instance. Voici celles qu'elle propose.",
   "serverProfiles.useMine": "Utiliser celui de mon profil",
   "serverProfiles.effectHint": "Se joue sur ta carte sur ce serveur à la place de l’effet de ton profil. Le serveur peut proposer les siens.",
   "serverProfiles.decorationHint": "S’affiche autour de ton avatar sur ce serveur à la place de celle de ton profil.",
+  "serverProfiles.nameplateHint": "S'affiche derrière ton nom dans la liste des membres de ce serveur à la place de celle de ton profil.",
   "serverProfiles.forSale": "{name} est en vente dans la boutique du serveur",
   "serverProfiles.notForSale": "Pas en vente"
 }

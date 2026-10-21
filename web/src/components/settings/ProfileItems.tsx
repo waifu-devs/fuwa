@@ -7,6 +7,7 @@ import {
   ImagePlusIcon,
   LoaderCircleIcon,
   PencilIcon,
+  RectangleHorizontalIcon,
   SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -24,7 +25,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SwapText } from "@/components/motion";
-import { DecorationImage } from "@/components/ProfileDecoration";
+import { DecorationImage, NameplateImage } from "@/components/ProfileDecoration";
 import { ProfileEffect } from "@/components/ProfileEffect";
 import { cardColor, MiniCard } from "@/components/settings/account/EffectPicker";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ import { shaderId, shaderProblem, STARTERS as SHADER_STARTERS } from "@/lib/effe
 import { BUILTIN_EFFECTS, MAX_PICTURES } from "@/lib/effects/profile";
 import { retryShader, useShaderStatus } from "@/lib/effects/status";
 import { effectKeys } from "@/lib/effects/text";
-import { formatBytes } from "@/lib/format";
+import { displayName, formatBytes } from "@/lib/format";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { instanceHas } from "@/lib/compat";
 import { PICTURE_TYPES } from "@/lib/pictures";
@@ -48,9 +49,14 @@ import {
   EFFECT_PROMPT,
   ITEM_DECORATION,
   ITEM_EFFECT,
+  ITEM_NAMEPLATE,
   itemEffect,
   itemsOfKind,
   joinShader,
+  NAMEPLATE_DOCS,
+  NAMEPLATE_HEIGHT,
+  NAMEPLATE_PROMPT,
+  NAMEPLATE_WIDTH,
   nameFromFile,
   splitShader,
   starterText,
@@ -70,13 +76,16 @@ const PROBLEM: Record<EffectProblem, Key> = {
   spec: "serversettings.profileItems.effectNothing",
 };
 
-type Draft = { kind: "decoration"; file: File } | { kind: "effect" };
+/** The kinds that are one picture dropped in. */
+type PictureKind = "decoration" | "nameplate";
+
+type Draft = { kind: PictureKind; file: File } | { kind: "effect" };
 
 /**
- * The profile effects and avatar decorations offered here
+ * The profile effects, avatar decorations and nameplates offered here
  * (docs/profile-items.md): the instance's (no `serverId`, for its admins)
- * or a server's (for those with Manage Server). Decorations are pictures
- * dropped in; effects are specs, a `.json` file or pasted, checked and
+ * or a server's (for those with Manage Server). Decorations and nameplates
+ * are pictures dropped in; effects are specs, a `.json` file or pasted, checked and
  * played before they're added. Each can be renamed, described, an effect
  * given a new spec, and deleted, which takes it off everyone wearing it.
  */
@@ -87,9 +96,13 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
   const me = inst?.me;
   const [loaded, setLoaded] = useState(!!serverId);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [dragging, setDragging] = useState<PictureKind | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const picking = useRef<PictureKind>("decoration");
   const shake = useAnimationControls();
+  const plateShake = useAnimationControls();
+  // Nameplates are offered only by instances that know them.
+  const nameplatesHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "nameplates"));
 
   // The instance's list is kept from sign-in; read it again here so an admin sees what's there now.
   useEffect(() => {
@@ -102,61 +115,67 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
 
   const decorations = itemsOfKind(items, ITEM_DECORATION);
   const effects = itemsOfKind(items, ITEM_EFFECT);
+  const nameplates = itemsOfKind(items, ITEM_NAMEPLATE);
 
-  function pickPicture(files: File[]) {
+  function pickPicture(files: File[], kind: PictureKind) {
     const file = files.find((f) => PICTURE_TYPES.includes(f.type));
     if (!file) {
       if (files.length) {
         toast(t("serversettings.profileItems.badType"));
-        void shake.start({ x: [0, -8, 7, -5, 3, 0], transition: { duration: 0.4 } });
+        void (kind === "nameplate" ? plateShake : shake).start({ x: [0, -8, 7, -5, 3, 0], transition: { duration: 0.4 } });
       }
       return;
     }
-    setDraft({ kind: "decoration", file });
+    setDraft({ kind, file });
   }
 
-  const drop = {
+  const choose = (kind: PictureKind) => {
+    picking.current = kind;
+    input.current?.click();
+  };
+
+  const drop = (kind: PictureKind) => ({
     onDragOver: (e: DragEvent) => {
       if (!e.dataTransfer.types.includes("Files")) return;
       e.preventDefault();
-      setDragging(true);
+      setDragging(kind);
     },
     onDragLeave: (e: DragEvent) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(null);
     },
     onDrop: (e: DragEvent) => {
       e.preventDefault();
-      setDragging(false);
-      pickPicture([...e.dataTransfer.files]);
+      setDragging(null);
+      pickPicture([...e.dataTransfer.files], kind);
     },
-  };
+  });
 
   if (!me) return null;
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted-foreground">{t(serverId ? "serversettings.profileItems.introServer" : "serversettings.profileItems.introInstance")}</p>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className={cn("grid gap-3 sm:grid-cols-2", nameplatesHere && "xl:grid-cols-3")}>
         <div className="flex flex-col gap-2">
           <motion.button
             type="button"
             animate={shake}
             whileHover={{ y: -2 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => input.current?.click()}
-            {...drop}
+            onClick={() => choose("decoration")}
+            {...drop("decoration")}
             className={cn(
               "group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed p-5 text-center transition-colors",
-              dragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5",
+              dragging === "decoration" ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5",
             )}
           >
             <motion.span
-              animate={dragging ? { scale: 1.2, rotate: -12, y: -4 } : { scale: 1, rotate: 0, y: 0 }}
+              animate={dragging === "decoration" ? { scale: 1.2, rotate: -12, y: -4 } : { scale: 1, rotate: 0, y: 0 }}
               transition={{ type: "spring", stiffness: 500, damping: 14 }}
               className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary"
             >
               <ImagePlusIcon className="size-5 transition group-hover:rotate-12" />
             </motion.span>
-            <span className="font-extrabold">{dragging ? t("serversettings.emoji.letGo") : t("serversettings.profileItems.addDecoration")}</span>
+            <span className="font-extrabold">{dragging === "decoration" ? t("serversettings.emoji.letGo") : t("serversettings.profileItems.addDecoration")}</span>
             <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addDecorationHint")}</span>
           </motion.button>
           <Helpers>
@@ -165,6 +184,37 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
             <GuideLink href={DECORATION_DOCS} />
           </Helpers>
         </div>
+        {nameplatesHere && (
+          <div className="flex flex-col gap-2">
+            <motion.button
+              type="button"
+              animate={plateShake}
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => choose("nameplate")}
+              {...drop("nameplate")}
+              className={cn(
+                "group relative flex flex-col items-center gap-2 overflow-hidden rounded-3xl border-2 border-dashed p-5 text-center transition-colors",
+                dragging === "nameplate" ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5",
+              )}
+            >
+              <motion.span
+                animate={dragging === "nameplate" ? { scale: 1.2, rotate: 8, y: -4 } : { scale: 1, rotate: 0, y: 0 }}
+                transition={{ type: "spring", stiffness: 500, damping: 14 }}
+                className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary"
+              >
+                <RectangleHorizontalIcon className="size-5 transition group-hover:scale-x-125" />
+              </motion.span>
+              <span className="font-extrabold">{dragging === "nameplate" ? t("serversettings.emoji.letGo") : t("serversettings.profileItems.addNameplate")}</span>
+              <span className="max-w-xs text-xs text-muted-foreground">{t("serversettings.profileItems.addNameplateHint")}</span>
+            </motion.button>
+            <Helpers>
+              <NameplateTemplateButton />
+              <CopyPrompt text={NAMEPLATE_PROMPT} hint={t("serversettings.profileItems.askAiNameplateHint")} />
+              <GuideLink href={NAMEPLATE_DOCS} />
+            </Helpers>
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           <motion.button
             type="button"
@@ -191,7 +241,7 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
         accept={PICTURE_TYPES.join(",")}
         className="hidden"
         onChange={(e) => {
-          pickPicture([...(e.target.files ?? [])]);
+          pickPicture([...(e.target.files ?? [])], picking.current);
           e.target.value = "";
         }}
       />
@@ -200,6 +250,11 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
         {draft?.kind === "decoration" && (
           <motion.div key={`decoration-${draft.file.name}-${draft.file.lastModified}`} {...SLIDE_IN} transition={SPRING}>
             <NewDecoration instanceKey={instanceKey} serverId={serverId} me={me} file={draft.file} onDone={() => setDraft(null)} />
+          </motion.div>
+        )}
+        {draft?.kind === "nameplate" && (
+          <motion.div key={`nameplate-${draft.file.name}-${draft.file.lastModified}`} {...SLIDE_IN} transition={SPRING}>
+            <NewNameplate instanceKey={instanceKey} serverId={serverId} me={me} file={draft.file} onDone={() => setDraft(null)} />
           </motion.div>
         )}
         {draft?.kind === "effect" && (
@@ -222,6 +277,13 @@ export function ProfileItems({ instanceKey, serverId = "" }: { instanceKey: stri
               <ItemRow key={item.id} instanceKey={instanceKey} serverId={serverId} item={item} me={me} />
             ))}
           </Section>
+          {(nameplatesHere || nameplates.length > 0) && (
+            <Section title={t("serversettings.profileItems.nameplates")} count={nameplates.length} empty={t("serversettings.profileItems.noNameplates")}>
+              {nameplates.map((item) => (
+                <ItemRow key={item.id} instanceKey={instanceKey} serverId={serverId} item={item} me={me} />
+              ))}
+            </Section>
+          )}
           <Section title={t("serversettings.profileItems.effects")} count={effects.length} empty={t("serversettings.profileItems.noEffects")}>
             {effects.map((item) => (
               <ItemRow key={item.id} instanceKey={instanceKey} serverId={serverId} item={item} me={me} />
@@ -283,7 +345,39 @@ function LocalDecoration({ me, file }: { me: User; file: File }) {
   );
 }
 
-/** Name and description fields, shared by both new kinds. */
+/** Your row in the member list with a nameplate behind it, as people will see it. */
+function NameplatePreview({ me, item, className }: { me: User; item: Pick<ProfileItem, "pictureUrl" | "animated">; className?: string }) {
+  return (
+    <span className={cn("group relative isolate flex h-11 w-40 shrink-0 items-center gap-2 overflow-hidden rounded-xl border bg-card px-2", className)}>
+      <NameplateImage item={item} />
+      <UserAvatar user={me} className="size-7 shrink-0 text-[0.6rem]" />
+      <span className="min-w-0 truncate text-xs font-bold">{displayName(me)}</span>
+    </span>
+  );
+}
+
+/** A nameplate not uploaded yet, drawn from the file the same way. */
+function LocalNameplate({ me, file }: { me: User; file: File }) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  return (
+    <span className="group relative isolate flex h-12 w-full max-w-64 shrink-0 items-center gap-2.5 overflow-hidden rounded-xl border bg-card px-2.5 shadow-sm">
+      {url && (
+        <span aria-hidden className="nameplate pointer-events-none absolute inset-0 -z-10 opacity-80 transition-opacity duration-300 group-hover:opacity-100">
+          <img src={url} alt="" draggable={false} className="size-full max-w-none object-cover object-right select-none" />
+        </span>
+      )}
+      <UserAvatar user={me} className="size-8 shrink-0 text-xs" />
+      <span className="min-w-0 truncate text-sm font-bold">{displayName(me)}</span>
+    </span>
+  );
+}
+
+/** Name and description fields, shared by every new kind. */
 function NameFields({ name, description, onName, onDescription, disabled }: { name: string; description: string; onName: (v: string) => void; onDescription: (v: string) => void; disabled?: boolean }) {
   const { t } = useI18n();
   return (
@@ -361,6 +455,51 @@ function NewDecoration({ instanceKey, serverId, me, file, onDone }: { instanceKe
     <DraftPanel title={t("serversettings.profileItems.newDecoration")} error={error} busy={busy} progress={sent} canAdd={!!name.trim()} onAdd={() => void add()} onCancel={onDone}>
       <div className="flex items-center gap-5 px-2">
         <LocalDecoration me={me} file={file} />
+        <NameFields
+          name={name}
+          description={description}
+          disabled={busy}
+          onName={(v) => {
+            setName(v);
+            setError(null);
+          }}
+          onDescription={setDescription}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">{t("serversettings.profileItems.decorationTip")}</p>
+    </DraftPanel>
+  );
+}
+
+/** A nameplate about to be added: your row with it behind, its name and line, then uploading it. */
+function NewNameplate({ instanceKey, serverId, me, file, onDone }: { instanceKey: string; serverId: string; me: User; file: File; onDone: () => void }) {
+  const { t } = useI18n();
+  const [name, setName] = useState(() => nameFromFile(file.name));
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<number | undefined>();
+  const [error, setError] = useState<string | null>(null);
+
+  async function add() {
+    setBusy(true);
+    setError(null);
+    try {
+      const url = await run(uploadPicture(instanceKey, MediaPurpose.DECORATION, file, (s) => setSent(s * 0.9), serverId));
+      await run(createProfileItem(instanceKey, serverId, { kind: ProfileItemKind.NAMEPLATE, name: name.trim(), description: description.trim(), pictureUrl: url }));
+      setSent(1);
+      onDone();
+    } catch (err) {
+      setError((err as FuwaError).message || t("serversettings.emoji.uploadFailed"));
+      setSent(undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <DraftPanel title={t("serversettings.profileItems.newNameplate")} error={error} busy={busy} progress={sent} canAdd={!!name.trim()} onAdd={() => void add()} onCancel={onDone}>
+      <div className="flex flex-col gap-3 px-2 sm:flex-row sm:items-center sm:gap-5">
+        <LocalNameplate me={me} file={file} />
         <NameFields
           name={name}
           description={description}
@@ -840,6 +979,8 @@ function ItemRow({ instanceKey, serverId, item, me }: { instanceKey: string; ser
           <span className="grid size-16 shrink-0 place-items-center">
             <DecorationPreview me={me} item={item} />
           </span>
+        ) : item.kind === ITEM_NAMEPLATE ? (
+          <NameplatePreview me={me} item={item} className="w-28" />
         ) : (
           <span className="w-14 shrink-0">
             <MiniCard userId={me.id} accent={-1}>
@@ -858,7 +999,7 @@ function ItemRow({ instanceKey, serverId, item, me }: { instanceKey: string; ser
             onSave={(description) => change({ description })}
           />
           <span className="truncate px-0.5 text-[0.7rem] text-muted-foreground">
-            {item.kind === ITEM_DECORATION
+            {item.kind === ITEM_DECORATION || item.kind === ITEM_NAMEPLATE
               ? [formatBytes(lang, Number(item.size)), item.animated && t("serversettings.emoji.moves")].filter(Boolean).join(" · ")
               : !spec
                 ? t("serversettings.profileItems.cantPlay")
@@ -1081,6 +1222,52 @@ function TemplateButton() {
       type="button"
       onClick={download}
       title={t("serversettings.profileItems.templateHint")}
+      whileTap={{ scale: 0.94 }}
+      className="flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+    >
+      <DownloadIcon className="size-3.5" /> {t("serversettings.profileItems.template")}
+    </motion.button>
+  );
+}
+
+/** Downloads a picture to draw a nameplate on: the size to make it, with where the avatar and name sit marked. */
+function NameplateTemplateButton() {
+  const { t } = useI18n();
+  const download = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = NAMEPLATE_WIDTH;
+    canvas.height = NAMEPLATE_HEIGHT;
+    const g = canvas.getContext("2d");
+    if (!g) return;
+    // The left fades out under the avatar and name; the right is seen in full.
+    const fade = g.createLinearGradient(0, 0, NAMEPLATE_WIDTH, 0);
+    fade.addColorStop(0, "rgba(128, 128, 128, 0.1)");
+    fade.addColorStop(0.8, "rgba(128, 128, 128, 0.35)");
+    g.fillStyle = fade;
+    g.fillRect(0, 0, NAMEPLATE_WIDTH, NAMEPLATE_HEIGHT);
+    const mid = NAMEPLATE_HEIGHT / 2;
+    g.setLineDash([12, 8]);
+    g.lineWidth = 3;
+    g.strokeStyle = "rgba(128, 128, 128, 0.9)";
+    g.beginPath();
+    g.arc(mid, mid, NAMEPLATE_HEIGHT * 0.3, 0, Math.PI * 2);
+    g.stroke();
+    g.strokeRect(NAMEPLATE_HEIGHT, mid - 22, NAMEPLATE_WIDTH * 0.4, 44);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "fuwa-nameplate-template.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  };
+  return (
+    <motion.button
+      type="button"
+      onClick={download}
+      title={t("serversettings.profileItems.nameplateTemplateHint")}
       whileTap={{ scale: 0.94 }}
       className="flex items-center gap-1 text-xs font-bold text-primary hover:underline"
     >

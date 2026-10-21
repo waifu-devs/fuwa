@@ -364,9 +364,12 @@
   "signIn.continueTo": "{name}(으)로 계속",
   "decorations.label": "아바타 장식",
   "decorations.hint": "이 인스턴스에서 아바타가 표시되는 모든 곳에 아바타를 둘러싸는 그림이에요. 이 인스턴스에서 제공하는 장식이에요.",
+  "nameplates.label": "네임플레이트",
+  "nameplates.hint": "이 인스턴스 어디서든 멤버 목록과 DM에서 이름 뒤에 보이는 그림이에요. 여기서 고를 수 있는 것들이에요.",
   "serverProfiles.useMine": "프로필 설정 사용",
   "serverProfiles.effectHint": "이 서버에서는 프로필 효과 대신 이 효과가 카드에 재생돼요. 서버가 자체 효과를 제공할 수도 있어요.",
   "serverProfiles.decorationHint": "이 서버에서는 프로필 장식 대신 이 장식이 아바타 주위에 표시돼요.",
+  "serverProfiles.nameplateHint": "이 서버의 멤버 목록에서 프로필의 것 대신 이름 뒤에 보여요.",
   "serverProfiles.forSale": "{name}은(는) 서버 상점에서 판매 중이에요",
   "serverProfiles.notForSale": "판매하지 않음"
 }

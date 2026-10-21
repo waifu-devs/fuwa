@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .build_client(true)
         .boxed(".fuwa.v1.OpenResponse.item.events")
+        .boxed(".fuwa.v1.FriendEvent.payload.changed")
         .file_descriptor_set_path(out_dir.join("fuwa_descriptor.bin"))
         .compile_with_config(config, &protos, &includes)?;
 

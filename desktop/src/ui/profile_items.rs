@@ -1,14 +1,14 @@
 //! The "Profile items" page, in a server's settings (Manage Server) and in
-//! an instance's (admins): the effects and avatar decorations it offers
-//! (docs/profile-items.md), as the web's `settings/ProfileItems.tsx`.
-//! Decorations are pictures dropped in or picked, shown around your avatar
-//! before they're added; effects are specs, pasted or from a `.json` file,
+//! an instance's (admins): the effects, avatar decorations and nameplates it
+//! offers (docs/profile-items.md), as the web's `settings/ProfileItems.tsx`.
+//! Decorations and nameplates are pictures dropped in or picked, shown around
+//! your avatar or behind your row before they're added; effects are specs, pasted or from a `.json` file,
 //! checked and played before they're added, with the pictures their layers
 //! draw and a shader under them where the instance has those (the WGSL
 //! edited apart from the JSON). Each one's name and line change
 //! in place, an effect can take a new spec, and deleting one asks first,
 //! since it takes it off everyone wearing it. Under each kind are the
-//! helpers for making one: a template to draw a decoration on, prompts to
+//! helpers for making one: a template to draw a decoration or nameplate on, prompts to
 //! copy for an AI and the guides; a new effect can start from a built-in.
 
 use std::collections::HashMap;
@@ -34,8 +34,9 @@ use crate::core::effects::status::{self, ShaderStatus};
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::profile_effects::{self as fx, Spec};
 use crate::core::profile_items::{
-    DECORATION_DOCS, DECORATION_PROMPT, DraftPicture, EFFECT_DOCS, EFFECT_PROMPT, NewItem, Scope, TEMPLATE_SIZE,
-    check_effect_text, item_effect, join_shader, name_from_file, split_shader, starter_text, template_pixels,
+    DECORATION_DOCS, DECORATION_PROMPT, DraftPicture, EFFECT_DOCS, EFFECT_PROMPT, NAMEPLATE_DOCS, NAMEPLATE_HEIGHT,
+    NAMEPLATE_PROMPT, NAMEPLATE_WIDTH, NewItem, Scope, TEMPLATE_SIZE, check_effect_text, item_effect, join_shader,
+    name_from_file, nameplate_template_pixels, split_shader, starter_text, template_pixels,
 };
 use crate::pb;
 use crate::ui::motion;
@@ -110,6 +111,10 @@ enum Draft {
     Decoration {
         path: PathBuf,
     },
+    /// A wide picture from this computer, the same way.
+    Nameplate {
+        path: PathBuf,
+    },
     Effect,
 }
 
@@ -146,8 +151,10 @@ pub struct ProfileItemsView {
     hovered: Option<String>,
     busy: bool,
     error: Option<String>,
-    /// When a file that isn't a picture was refused, to shake the drop card.
+    /// When a file that isn't a picture was refused, to shake the drop card,
+    /// and whether it was the nameplate's.
     refused: Option<Instant>,
+    refused_plate: bool,
     /// The prompt just copied (its button's id) and which copy it was, so only the latest clears.
     copied: Option<(&'static str, u64)>,
     copies: u64,
@@ -234,6 +241,7 @@ impl ProfileItemsView {
             busy: false,
             error: None,
             refused: None,
+            refused_plate: false,
             copied: None,
             copies: 0,
             inline: HashMap::new(),
@@ -306,15 +314,21 @@ impl ProfileItemsView {
     }
 
     /// A picture dropped or picked: the first one that is a picture.
-    fn take_pictures(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    fn take_pictures(&mut self, paths: Vec<PathBuf>, plate: bool, window: &mut Window, cx: &mut Context<Self>) {
         let picture = paths.iter().find(|p| p.file_name().and_then(|n| picture_type(&n.to_string_lossy())).is_some());
         match picture {
             Some(path) => {
                 let name = path.file_name().map(|n| name_from_file(&n.to_string_lossy())).unwrap_or_default();
-                self.start(Draft::Decoration { path: path.clone() }, name, window, cx);
+                let draft = if plate {
+                    Draft::Nameplate { path: path.clone() }
+                } else {
+                    Draft::Decoration { path: path.clone() }
+                };
+                self.start(draft, name, window, cx);
             }
             None if !paths.is_empty() => {
                 self.refused = Some(Instant::now());
+                self.refused_plate = plate;
                 self.error = Some(t("serversettings.profileItems.badType"));
                 cx.notify();
             }
@@ -322,7 +336,7 @@ impl ProfileItemsView {
         }
     }
 
-    fn pick_picture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn pick_picture(&mut self, plate: bool, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: true,
             directories: false,
@@ -331,7 +345,7 @@ impl ProfileItemsView {
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let _ = this.update_in(cx, |this, window, cx| this.take_pictures(paths, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.take_pictures(paths, plate, window, cx));
         })
         .detach();
     }
@@ -505,13 +519,18 @@ impl ProfileItemsView {
         cx.notify();
     }
 
-    /// Saves the decoration template where the person says.
-    fn save_template(&mut self, cx: &mut Context<Self>) {
+    /// Saves the decoration template, or the nameplate's, where the person says.
+    fn save_template(&mut self, plate: bool, cx: &mut Context<Self>) {
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
-        let path = cx.prompt_for_new_path(&dir, Some("fuwa-decoration-template.png"));
+        let name = if plate { "fuwa-nameplate-template.png" } else { "fuwa-decoration-template.png" };
+        let path = cx.prompt_for_new_path(&dir, Some(name));
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(path))) = path.await else { return };
-            let file = crate::ui::png::png(TEMPLATE_SIZE, TEMPLATE_SIZE, &template_pixels(), true);
+            let file = if plate {
+                crate::ui::png::png(NAMEPLATE_WIDTH, NAMEPLATE_HEIGHT, &nameplate_template_pixels(), true)
+            } else {
+                crate::ui::png::png(TEMPLATE_SIZE, TEMPLATE_SIZE, &template_pixels(), true)
+            };
             if std::fs::write(&path, file).is_err() {
                 let _ = this.update(cx, |this, cx| {
                     this.error = Some(t("desktop.profileItems.cantSaveTemplate"));
@@ -530,7 +549,8 @@ impl ProfileItemsView {
             return;
         }
         let new = match draft {
-            Draft::Decoration { path } => Err(path.clone()),
+            Draft::Decoration { path } => Err((path.clone(), false)),
+            Draft::Nameplate { path } => Err((path.clone(), true)),
             Draft::Effect => {
                 let text = self.effect_text(false, cx);
                 let pictures: Vec<fx::Picture> = self.fresh.pictures.iter().map(DraftPicture::picture).collect();
@@ -552,11 +572,14 @@ impl ProfileItemsView {
                         let urls = core.send_pictures(&key, &scope, pictures).await?;
                         (NewItem::Effect { spec, pictures: urls.clone() }, urls)
                     }
-                    Err(path) => {
+                    Err((path, plate)) => {
                         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        let new = NewItem::Decoration {
-                            content_type: picture_type(&file).unwrap_or("image/png").to_owned(),
-                            bytes: crate::core::account::read_picture(&path).await?,
+                        let content_type = picture_type(&file).unwrap_or("image/png").to_owned();
+                        let bytes = crate::core::account::read_picture(&path).await?;
+                        let new = if plate {
+                            NewItem::Nameplate { content_type, bytes }
+                        } else {
+                            NewItem::Decoration { content_type, bytes }
                         };
                         (new, Vec::new())
                     }
@@ -920,19 +943,23 @@ impl ProfileItemsView {
             )
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drag_bg).border_color(primary))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                this.take_pictures(paths.paths().to_vec(), window, cx)
+                this.take_pictures(paths.paths().to_vec(), false, window, cx)
             }))
-            .on_click(cx.listener(|this, _, window, cx| this.pick_picture(window, cx)));
-        let decoration: AnyElement = match self.refused.filter(|at| at.elapsed() < Duration::from_millis(500)) {
-            Some(at) => decoration
-                .with_animation(
-                    SharedString::from(format!("pi-refused-{at:?}")),
-                    gpui_kit::Animation::new(Duration::from_millis(400)),
-                    |el, t| el.left(px((t * std::f32::consts::TAU * 2.5).sin() * 8.0 * (1.0 - t))),
-                )
-                .into_any_element(),
-            None => decoration.into_any_element(),
+            .on_click(cx.listener(|this, _, window, cx| this.pick_picture(false, window, cx)));
+        let refused = self.refused.filter(|at| at.elapsed() < Duration::from_millis(500));
+        let shaken = |card: gpui_kit::Stateful<gpui_kit::Div>, plate: bool| -> AnyElement {
+            match refused.filter(|_| self.refused_plate == plate) {
+                Some(at) => card
+                    .with_animation(
+                        SharedString::from(format!("pi-refused-{at:?}")),
+                        gpui_kit::Animation::new(Duration::from_millis(400)),
+                        |el, t| el.left(px((t * std::f32::consts::TAU * 2.5).sin() * 8.0 * (1.0 - t))),
+                    )
+                    .into_any_element(),
+                None => card.into_any_element(),
+            }
         };
+        let decoration = shaken(decoration, false);
         let effect = self
             .add_card(
                 "pi-add-effect",
@@ -950,7 +977,7 @@ impl ProfileItemsView {
                 Some(t("serversettings.profileItems.templateHint")),
                 p.primary,
             )
-            .on_click(cx.listener(|this, _, _, cx| this.save_template(cx)))
+            .on_click(cx.listener(|this, _, _, cx| this.save_template(false, cx)))
             .into_any_element(),
             self.ask_ai(
                 "pi-ask-decoration",
@@ -968,12 +995,49 @@ impl ProfileItemsView {
         let column = |card: AnyElement, help: AnyElement| {
             div().flex_1().min_w_0().flex().flex_col().gap(px(8.0)).child(card).child(help)
         };
-        div()
+        let both = div()
             .flex()
             .gap(px(12.0))
             .child(column(decoration, decoration_help))
-            .child(column(effect.into_any_element(), effect_help))
-            .into_any_element()
+            .child(column(effect.into_any_element(), effect_help));
+        // Nameplates, on an instance that has them, take a line of their own: the card is as wide as they are.
+        if !self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("nameplates"))) {
+            return both.into_any_element();
+        }
+        let nameplate = self
+            .add_card(
+                "pi-add-nameplate",
+                "rectangle-horizontal",
+                t("serversettings.profileItems.addNameplate"),
+                t("serversettings.profileItems.addNameplateHint"),
+                p,
+            )
+            .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drag_bg).border_color(primary))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.take_pictures(paths.paths().to_vec(), true, window, cx)
+            }))
+            .on_click(cx.listener(|this, _, window, cx| this.pick_picture(true, window, cx)));
+        let nameplate = shaken(nameplate, true);
+        let nameplate_help = Self::helpers(vec![
+            Self::helper(
+                "pi-nameplate-template",
+                "download",
+                t("serversettings.profileItems.template"),
+                Some(t("serversettings.profileItems.nameplateTemplateHint")),
+                p.primary,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.save_template(true, cx)))
+            .into_any_element(),
+            self.ask_ai(
+                "pi-ask-nameplate",
+                NAMEPLATE_PROMPT,
+                t("serversettings.profileItems.askAiNameplateHint"),
+                p,
+                cx,
+            ),
+            Self::guide("pi-guide-nameplate", NAMEPLATE_DOCS, p),
+        ]);
+        div().flex().flex_col().gap(px(12.0)).child(both).child(column(nameplate, nameplate_help)).into_any_element()
     }
 
     /// A panel for something about to be added: its preview and fields, then Cancel or Add.
@@ -1026,7 +1090,7 @@ impl ProfileItemsView {
                 .bg(p.background)
                 .p(px(16.0))
                 .shadow(shadow_sm())
-                .when(busy && id == "pi-new-decoration", |el| {
+                .when(busy && (id == "pi-new-decoration" || id == "pi-new-nameplate"), |el| {
                     el.child(div().absolute().top_0().left_0().h(px(4.0)).bg(p.primary).with_animation(
                         SharedString::from(format!("{id}-progress")),
                         gpui_kit::Animation::new(Duration::from_millis(1600)).with_easing(gpui_kit::ease_out_quint()),
@@ -1650,6 +1714,87 @@ impl ProfileItemsView {
                     cx,
                 ))
             }
+            Draft::Nameplate { path } => {
+                let local =
+                    div()
+                        .id("nameplate-draft-row")
+                        .relative()
+                        .w(px(256.0))
+                        .h(px(48.0))
+                        .flex_none()
+                        .px(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .rounded(radius_xl())
+                        .border_1()
+                        .border_color(p.border)
+                        .bg(p.card)
+                        .overflow_hidden()
+                        .child(
+                            div().absolute().top_0().bottom_0().right_0().w(px(288.0)).opacity(0.8).child(
+                                img(path.clone()).id("nameplate-draft").size_full().object_fit(ObjectFit::Cover),
+                            ),
+                        )
+                        // The fade the member list draws (`widgets::nameplate`), over the card.
+                        .children([(0.0, 0.25, 1.0, 0.85), (0.25, 0.35, 0.85, 0.4), (0.6, 0.4, 0.4, 0.0)].map(
+                            |(at, w, from, to)| {
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .left(gpui_kit::relative(at))
+                                    .w(gpui_kit::relative(w))
+                                    .bg(gpui_kit::linear_gradient(
+                                        90.0,
+                                        gpui_kit::linear_color_stop(alpha(p.card, from), 0.0),
+                                        gpui_kit::linear_color_stop(alpha(p.card, to), 1.0),
+                                    ))
+                            },
+                        ))
+                        .child(avatar(Some(me), 32.0, p))
+                        .child(
+                            div()
+                                .relative()
+                                .min_w_0()
+                                .truncate()
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .child(crate::core::store::user_name(me)),
+                        )
+                        .into_any_element();
+                let body = vec![
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(20.0))
+                        .px(px(8.0))
+                        .child(local)
+                        .child(div().flex_1().min_w(px(200.0)).child(self.name_fields(p)))
+                        .into_any_element(),
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(t("serversettings.profileItems.decorationTip"))
+                        .into_any_element(),
+                ];
+                Some(self.panel(
+                    "pi-new-nameplate",
+                    t("serversettings.profileItems.newNameplate"),
+                    body,
+                    named,
+                    t("serversettings.profileItems.add"),
+                    p,
+                    |this, cx| this.add(cx),
+                    |this, cx| {
+                        this.draft = None;
+                        this.error = None;
+                        cx.notify();
+                    },
+                    cx,
+                ))
+            }
             Draft::Effect => {
                 let checked = self.checked(false, cx);
                 let ok = checked.is_ok();
@@ -1720,9 +1865,29 @@ impl ProfileItemsView {
     fn row(&mut self, item: &pb::ProfileItem, me: &pb::User, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let id = item.id.clone();
         let decoration = item.kind == pb::ProfileItemKind::Decoration as i32;
-        let spec = (!decoration).then(|| item_effect(item)).flatten();
+        let plate = item.kind == pb::ProfileItemKind::Nameplate as i32;
+        let spec = (!decoration && !plate).then(|| item_effect(item)).flatten();
         let lively = self.hovered.as_deref() == Some(id.as_str());
-        let face: AnyElement = if decoration {
+        let face: AnyElement = if plate {
+            let group = SharedString::from(format!("pi-row-{id}"));
+            div()
+                .id(SharedString::from(format!("pi-plate-{id}")))
+                .group(group.clone())
+                .relative()
+                .w(px(112.0))
+                .h(px(44.0))
+                .flex_none()
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .rounded(radius_xl())
+                .border_1()
+                .border_color(p.border)
+                .bg(p.card)
+                .child(crate::ui::widgets::nameplate(&item.picture_url, 44.0, radius_xl(), p.card, p.card, group))
+                .child(avatar(Some(me), 28.0, p))
+                .into_any_element()
+        } else if decoration {
             div()
                 .size(px(64.0))
                 .flex_none()
@@ -1747,7 +1912,7 @@ impl ProfileItemsView {
             }
             div().flex_none().w(px(56.0)).child(card).into_any_element()
         };
-        let meta = if decoration {
+        let meta = if decoration || plate {
             let size = crate::core::attachments::format_bytes(item.size);
             if item.animated { format!("{size} · {}", t("serversettings.emoji.moves")) } else { size }
         } else if let Some(spec) = &spec {
@@ -2051,9 +2216,13 @@ impl Render for ProfileItemsView {
         }
         let (decorations, effects): (Vec<_>, Vec<_>) =
             items.iter().partition(|i| i.kind == pb::ProfileItemKind::Decoration as i32);
+        let nameplates: Vec<&pb::ProfileItem> =
+            effects.iter().copied().filter(|i| i.kind == pb::ProfileItemKind::Nameplate as i32).collect();
         let effects: Vec<&pb::ProfileItem> =
             effects.into_iter().filter(|i| i.kind == pb::ProfileItemKind::Effect as i32).collect();
         let decoration_rows: Vec<AnyElement> = decorations.iter().map(|i| self.row(i, &me, &p, cx)).collect();
+        let nameplate_rows: Vec<AnyElement> = nameplates.iter().map(|i| self.row(i, &me, &p, cx)).collect();
+        let nameplates_here = self.core.shared.read(|s| s.instance(&self.key).is_some_and(|i| i.has("nameplates")));
         let effect_rows: Vec<AnyElement> = effects.iter().map(|i| self.row(i, &me, &p, cx)).collect();
         // An effect being replaced spans both columns: it goes on a line of its own.
         let effect_section =
@@ -2092,6 +2261,15 @@ impl Render for ProfileItemsView {
             decoration_rows,
             &p,
         ))
+        .when(nameplates_here || !nameplates.is_empty(), |el| {
+            el.child(self.section(
+                t("serversettings.profileItems.nameplates"),
+                nameplates.len(),
+                t("serversettings.profileItems.noNameplates"),
+                nameplate_rows,
+                &p,
+            ))
+        })
         .child(effect_section)
         .into_any_element()
     }

@@ -19,6 +19,8 @@ import {
   TEMPLATE_SIZE,
   wornDecoration,
   wornEffect,
+  wornNameplate,
+  ITEM_NAMEPLATE,
   type Item,
 } from "./profile-items.ts";
 
@@ -84,6 +86,18 @@ test("a server profile's picks win in that server, from that server's list", () 
   assert.equal(wornEffect("01JINSTANCEEFFECT000000000", { effect: "01JSERVEREFFECT00000000000" }, lists)?.id, "01jservereffect00000000000");
   assert.equal(wornEffect("01JINSTANCEEFFECT000000000", { effect: BUILTIN_EFFECTS[1]!.id }, lists), BUILTIN_EFFECTS[1]);
   assert.equal(wornEffect("", undefined, lists), undefined);
+});
+
+test("nameplates are worn like decorations, and only as nameplates", () => {
+  const plate = (id: string): Item => ({ ...decoration(id), kind: ITEM_NAMEPLATE, name: `Nameplate ${id}` });
+  const lists = { instance: [...INSTANCE, plate("01JINSTANCEPLATE0000000000")], server: [...SERVER, plate("01JSERVERPLATE000000000000")] };
+  const user = { nameplateId: "01JINSTANCEPLATE0000000000" };
+  assert.equal(wornNameplate(user, undefined, lists)?.id, "01JINSTANCEPLATE0000000000");
+  assert.equal(wornNameplate(user, { nameplateId: "" }, lists)?.id, "01JINSTANCEPLATE0000000000");
+  assert.equal(wornNameplate(user, { nameplateId: "01JSERVERPLATE000000000000" }, lists)?.id, "01JSERVERPLATE000000000000");
+  // A decoration's id isn't a nameplate.
+  assert.equal(wornNameplate({ nameplateId: "01JINSTANCEDECOR0000000000" }, undefined, lists), undefined);
+  assert.equal(wornDecoration({ decorationId: "01JINSTANCEPLATE0000000000" }, undefined, lists), undefined);
 });
 
 test("checks effects someone is about to add", () => {
