@@ -16,14 +16,16 @@ import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
 import { DecorationPicker } from "@/components/settings/account/DecorationPicker";
+import { NameplatePicker } from "@/components/settings/account/NameplatePicker";
 import { EffectAbout, EffectPicker } from "@/components/settings/account/EffectPicker";
 import { useDecorationsOn, useEffectsOn, useOfferedEffects } from "@/components/ProfileDecoration";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { type I18n, useI18n } from "@/i18n/react";
-import { ITEM_DECORATION, itemsOfKind, resolveDecoration, resolveEffect } from "@/lib/profile-items";
+import { ITEM_DECORATION, ITEM_NAMEPLATE, itemsOfKind, resolveDecoration, resolveEffect, resolveNameplate } from "@/lib/profile-items";
 import { colorCss, shownStatus } from "@/lib/format";
+import { instanceHas } from "@/lib/compat";
 import { reportUsage } from "@/lib/reports";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +81,8 @@ type Draft = {
   effect: string;
   /** One of the instance's decorations, or "" for none. */
   decoration: string;
+  /** One of the instance's nameplates, or "" for none. */
+  nameplate: string;
 };
 
 const isUrl = (value: string) => !value.trim() || /^https?:\/\/\S+$/i.test(value.trim());
@@ -115,6 +119,10 @@ function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string;
   const offered = useOfferedEffects(items);
   const decorations = itemsOfKind(items, ITEM_DECORATION);
   const decoration = resolveDecoration(draft.decoration, items);
+  // Nameplates only where the instance knows them.
+  const nameplatesHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "nameplates"));
+  const nameplates = itemsOfKind(items, ITEM_NAMEPLATE);
+  const nameplate = resolveNameplate(draft.nameplate, items);
 
   const preview = (
     <ProfileCard
@@ -229,6 +237,19 @@ function ProfileForm({ instanceKey, me, profile, ready }: { instanceKey: string;
                 </Row>
               </motion.div>
             )}
+            {decorationsOn && nameplatesHere && (nameplates.length > 0 || draft.nameplate) && (
+              <motion.div key="nameplate" {...SLIDE_IN} transition={SPRING}>
+                <Row id="nameplate" label={t("accountsettings.nameplates.label")} hint={nameplate?.description || t("accountsettings.nameplates.hint")}>
+                  <NameplatePicker
+                    value={draft.nameplate}
+                    user={{ ...me, displayName: draft.displayName.trim() || me.displayName }}
+                    items={nameplates}
+                    disabled={!ready}
+                    onChange={(nameplate) => set({ nameplate })}
+                  />
+                </Row>
+              </motion.div>
+            )}
           </AnimatePresence>
           <Row id="status" label={t("settings.nav.status")} htmlFor="profile-status" hint={t("accountsettings.profile.statusHint")}>
             <StatusField draft={draft} canKeep={base.clear === "keep"} keptUntil={keptUntil} set={set} />
@@ -286,6 +307,7 @@ function savedDraft(me: User, profile: ProfileInfo | undefined): Draft {
     accent: profile?.accentColor ?? -1,
     effect: profile?.effect ?? "",
     decoration: me.decorationId,
+    nameplate: me.nameplateId,
   };
 }
 
@@ -311,6 +333,7 @@ function patchFor(draft: Draft, differs: (k: keyof Draft) => boolean, status: Da
   if (differs("accent")) patch.accentColor = draft.accent;
   if (differs("effect")) patch.effect = draft.effect;
   if (differs("decoration")) patch.decorationId = draft.decoration;
+  if (differs("nameplate")) patch.nameplateId = draft.nameplate;
   if (status !== undefined) {
     patch.status = draft.status.trim();
     patch.statusExpiresAt = draft.clear === "keep" ? status : clearsAt(draft.clear);
@@ -327,7 +350,7 @@ function useProfileDraft(instanceKey: string, me: User, profile: ProfileInfo | u
   const draft: Draft = { ...base, ...edits };
   const differs = (k: keyof Draft) => edits[k] !== undefined && edits[k] !== base[k];
   const statusChanged = differs("status") || (draft.status.trim() !== "" && differs("clear"));
-  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect", "decoration"] as const).filter(differs).length + (statusChanged ? 1 : 0);
+  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect", "decoration", "nameplate"] as const).filter(differs).length + (statusChanged ? 1 : 0);
   const set = (patch: Partial<Draft>) => {
     setEdits((e) => ({ ...e, ...patch }));
     save.setError(null);
@@ -343,6 +366,7 @@ function useProfileDraft(instanceKey: string, me: User, profile: ProfileInfo | u
     if (!(await save.go(instanceKey, patch))) return;
     if (patch.effect) reportUsage("profile-effect/picked");
     if (patch.decorationId) reportUsage("profile-decoration/picked");
+    if (patch.nameplateId) reportUsage("profile-nameplate/picked");
     setEdits({});
   }
 

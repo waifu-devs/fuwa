@@ -7766,6 +7766,134 @@ async fn server_profile_items_are_worn_in_that_server() {
 }
 
 #[tokio::test]
+async fn nameplates_are_worn_on_profiles_and_in_servers() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let nameplate = |name: &str, picture_url: &str| pb::NewProfileItem {
+        kind: pb::ProfileItemKind::Nameplate as i32,
+        name: name.into(),
+        picture_url: picture_url.into(),
+        ..Default::default()
+    };
+
+    // One picture, like a decoration.
+    let picture = upload(&mut c, &instance, &admin, pb::MediaPurpose::Decoration, png(240, 7)).await;
+    let create = |item| pb::CreateInstanceProfileItemRequest { item: Some(item) };
+    let two = pb::NewProfileItem { picture_urls: vec![picture.clone()], ..nameplate("Two", &picture) };
+    let refused = c.profile_items.create_instance_profile_item(authed(&admin, create(two))).await;
+    assert_eq!(refused.unwrap_err().code(), Code::InvalidArgument);
+    let sky = c
+        .profile_items
+        .create_instance_profile_item(authed(&admin, create(nameplate("Sky", &picture))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    assert_eq!(sky.kind, pb::ProfileItemKind::Nameplate as i32);
+    let ring_picture = upload(&mut c, &instance, &admin, pb::MediaPurpose::Decoration, png(240, 8)).await;
+    let ring = c
+        .profile_items
+        .create_instance_profile_item(authed(&admin, create(new_decoration("Ring", &ring_picture))))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+
+    // Worn on the profile, beside a decoration, and only as a nameplate.
+    let wear = pb::UpdateProfileRequest {
+        decoration_id: Some(ring.id.clone()),
+        nameplate_id: Some(sky.id.clone()),
+        ..Default::default()
+    };
+    let worn = c.auth.update_profile(authed(&mika, wear)).await.unwrap().into_inner().user.unwrap();
+    assert_eq!((worn.decoration_id.as_str(), worn.nameplate_id.as_str()), (ring.id.as_str(), sky.id.as_str()));
+    let wrong = pb::UpdateProfileRequest { nameplate_id: Some(ring.id.clone()), ..Default::default() };
+    assert_eq!(c.auth.update_profile(authed(&mika, wrong)).await.unwrap_err().code(), Code::NotFound);
+
+    // A server's members see it on the copy of mika it keeps, even after she changes it there.
+    let lounge = create_server(&mut c, &admin, "Lounge", true).await;
+    join(&mut c, &mika, &lounge.id).await;
+    let list = |c: &mut Clients| {
+        let mut servers = c.servers.clone();
+        let (admin, server_id, id) = (admin.clone(), lounge.id.clone(), mika_user.id.clone());
+        async move {
+            let members = servers
+                .list_members(authed(&admin, pb::ListMembersRequest { server_id }))
+                .await
+                .unwrap()
+                .into_inner()
+                .members;
+            members.into_iter().find(|m| m.user.as_ref().unwrap().id == id).unwrap()
+        }
+    };
+    assert_eq!(list(&mut c).await.user.unwrap().nameplate_id, sky.id);
+
+    // The server's own, worn there instead; the owner may only clear it.
+    let server_picture = upload(&mut c, &instance, &admin, pb::MediaPurpose::Decoration, png(240, 9)).await;
+    let dusk = c
+        .profile_items
+        .create_server_profile_item(authed(
+            &admin,
+            pb::CreateServerProfileItemRequest {
+                server_id: lounge.id.clone(),
+                item: Some(nameplate("Dusk", &server_picture)),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .item
+        .unwrap();
+    let wear = |id: &str| pb::UpdateMemberRequest {
+        server_id: lounge.id.clone(),
+        nameplate_id: Some(id.into()),
+        ..Default::default()
+    };
+    let member = c.servers.update_member(authed(&mika, wear(&dusk.id))).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(member.nameplate_id, dusk.id);
+    assert_eq!(c.servers.update_member(authed(&mika, wear(&sky.id))).await.unwrap_err().code(), Code::NotFound);
+    let mut theirs = wear(&dusk.id);
+    theirs.user_id = mika_user.id.clone();
+    assert_eq!(c.servers.update_member(authed(&admin, theirs)).await.unwrap_err().code(), Code::PermissionDenied);
+
+    // Deleting the server's takes it off mika there.
+    c.profile_items
+        .delete_server_profile_item(authed(
+            &admin,
+            pb::DeleteServerProfileItemRequest { server_id: lounge.id.clone(), item_id: dusk.id.clone() },
+        ))
+        .await
+        .unwrap();
+    let seen = list(&mut c).await;
+    assert_eq!((seen.nameplate_id.as_str(), seen.user.unwrap().nameplate_id.as_str()), ("", sky.id.as_str()));
+
+    // Decorations off hides nameplates too.
+    let off = pb::InstanceSettings { profile_decorations: false, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(off, &["profile_decorations"], &[]))).await.unwrap();
+    let get = || pb::GetProfileRequest { user_id: mika_user.id.clone() };
+    let hidden = c.auth.get_profile(authed(&mika, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(hidden.user.unwrap().nameplate_id.is_empty());
+    c.admin
+        .update_settings(authed(&admin, settings_update(Default::default(), &[], &["profile_decorations"])))
+        .await
+        .unwrap();
+
+    // Deleting the instance's takes it off her profile.
+    c.profile_items
+        .delete_instance_profile_item(authed(&admin, pb::DeleteInstanceProfileItemRequest { item_id: sky.id.clone() }))
+        .await
+        .unwrap();
+    let gone = c.auth.get_profile(authed(&mika, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(gone.user.unwrap().nameplate_id.is_empty());
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn effects_carry_their_own_pictures_and_shaders() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;

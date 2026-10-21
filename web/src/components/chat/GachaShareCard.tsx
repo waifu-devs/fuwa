@@ -8,7 +8,7 @@ import { useI18n } from "@/i18n/react";
 import { displayName } from "@/lib/format";
 import { bestCard, cardsOfShare, chipKey, type ShareCard, type ShareCards } from "@/lib/gacha-share";
 import { cssColor } from "@/lib/permissions";
-import { ITEM_DECORATION } from "@/lib/profile-items";
+import { ITEM_DECORATION, ITEM_NAMEPLATE } from "@/lib/profile-items";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +88,7 @@ function SharedCard({ card, item, author }: { card: ShareCard; item: ProfileItem
         {"★".repeat(card.stars)}
       </span>
       {item && author && hasArt(item) ? (
-        <span className={cn("grid place-items-center", item.kind === ITEM_DECORATION ? "mt-2 h-7" : "mt-1 h-9")}>
+        <span className={cn("grid place-items-center", item.kind === ITEM_DECORATION ? "mt-2 h-7" : item.kind === ITEM_NAMEPLATE ? "mt-3 h-6" : "mt-1 h-9")}>
           <ItemArt item={item} me={author} play={hover} />
         </span>
       ) : (

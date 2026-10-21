@@ -506,6 +506,9 @@ body {
 .surface-side { background: color-mix(in srgb, var(--card) 55%, var(--background)); }
 .surface-chat { background: var(--background); }
 
+/* A nameplate (components/ProfileDecoration.tsx) fades out towards the name on its left. */
+.nameplate { mask-image: linear-gradient(to right, transparent, rgb(0 0 0 / 0.15) 25%, rgb(0 0 0 / 0.6) 60%, black); }
+
 /* Switching themes (lib/theme-switch.ts): the new look spreads from the click. */
 :root[data-theme-switching] { transition: none !important; }
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }

@@ -46,6 +46,7 @@
     { "id": "soundboard", "date": "2026-10-17", "title": "Soundboard in voice channels" },
     { "id": "email-sign-in", "date": "2026-10-19", "title": "Signing in with a code sent by email" },
     { "id": "agent-discovery", "date": "2026-10-20", "title": "Agent invite links and agents in Browse" },
-    { "id": "ephemeral-messages", "date": "2026-10-20", "title": "Messages from agents only you can see" }
+    { "id": "ephemeral-messages", "date": "2026-10-20", "title": "Messages from agents only you can see" },
+    { "id": "nameplates", "date": "2026-10-21", "title": "Nameplates behind names in member lists" }
   ]
 }

@@ -73,6 +73,8 @@ struct Row {
     status_text: Option<String>,
     /// The decoration around their avatar, its picture's link (docs/profile-items.md).
     decoration: Option<SharedString>,
+    /// The nameplate behind their row, its picture's link.
+    nameplate: Option<SharedString>,
     /// Their dot; None on an instance without presence.
     status: Option<pb::PresenceStatus>,
     /// What they're doing, for under their name.
@@ -169,7 +171,7 @@ impl MembersView {
                 Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
                 Item::Member(r) => {
                     (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
-                    (r.owner, &r.status_text, &r.user.username, &r.decoration).hash(&mut h);
+                    (r.owner, &r.status_text, &r.user.username, &r.decoration, &r.nameplate).hash(&mut h);
                     (r.status.map(|s| s as i32), &r.activity).hash(&mut h);
                 }
             }
@@ -340,6 +342,7 @@ fn lines(i: &crate::core::store::InstanceState, server: &str, now: i64) -> (Vec<
             owner: !owner.is_empty() && user.id == owner,
             status_text: crate::ui::presence::custom_status(&user, now),
             decoration: i.decoration_url(Some(server), Some(m), Some(&user)).map(|u| SharedString::from(u.to_owned())),
+            nameplate: i.nameplate_url(Some(server), Some(m), Some(&user)).map(|u| SharedString::from(u.to_owned())),
             user,
         })
         .map(|row| (m, row))
@@ -523,6 +526,18 @@ fn member_row(
             move |on: &bool, _, cx| {
                 let _ = this.update(cx, |_, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }));
             }
+        })
+        .when_some(row.nameplate.as_ref(), |el, url| {
+            let under = opaque(p.side_surface);
+            let lit = opaque(crate::ui::theme::mix(under, p.muted, 0.7));
+            el.child(crate::ui::widgets::nameplate(
+                url,
+                ROW,
+                crate::ui::theme::radius_lg(),
+                under,
+                lit,
+                "member".into(),
+            ))
         })
         // The card opens beside the button inside the row (the web's `px-2`), 10px off.
         .child(

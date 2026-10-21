@@ -374,9 +374,12 @@
   "signIn.continueTo": "Continua su {name}",
   "decorations.label": "Decorazione dell'avatar",
   "decorations.hint": "Un'immagine intorno al tuo avatar, ovunque compaia su questa istanza. Queste sono quelle che offre.",
+  "nameplates.label": "Targhetta",
+  "nameplates.hint": "Un'immagine dietro il tuo nome negli elenchi dei membri e nei DM, ovunque su questa istanza. Queste sono quelle che offre.",
   "serverProfiles.useMine": "Usa quello del mio profilo",
   "serverProfiles.effectHint": "Viene riprodotto sulla tua scheda in questo server al posto dell'effetto del profilo. Il server potrebbe offrirne di suoi.",
   "serverProfiles.decorationHint": "Compare intorno al tuo avatar in questo server al posto di quella del profilo.",
+  "serverProfiles.nameplateHint": "Appare dietro il tuo nome nell'elenco dei membri di questo server al posto di quella del tuo profilo.",
   "serverProfiles.forSale": "{name} è in vendita nel negozio del server",
   "serverProfiles.notForSale": "Non in vendita"
 }

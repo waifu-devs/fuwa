@@ -364,9 +364,12 @@
   "signIn.continueTo": "繼續前往 {name}",
   "decorations.label": "大頭貼裝飾",
   "decorations.hint": "圍繞在你大頭貼周圍的圖案，會在此執行個體上所有顯示大頭貼的地方出現。以下是它提供的選項。",
+  "nameplates.label": "名牌",
+  "nameplates.hint": "在這個實例的任何地方，成員列表和私訊裡名字後面的圖片。這些是它提供的。",
   "serverProfiles.useMine": "使用我個人檔案的設定",
   "serverProfiles.effectHint": "在此伺服器中於你的卡片上播放，取代個人檔案的特效。伺服器可能提供自己的特效。",
   "serverProfiles.decorationHint": "在此伺服器中顯示於你的大頭貼周圍，取代個人檔案的裝飾。",
+  "serverProfiles.nameplateHint": "在這個伺服器的成員列表裡顯示在你的名字後面，取代個人檔案裡的那個。",
   "serverProfiles.forSale": "{name} 在伺服器商店中販售",
   "serverProfiles.notForSale": "非賣品"
 }

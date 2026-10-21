@@ -382,9 +382,12 @@
   "signIn.emailAdded": "You can sign in with codes sent to {address} now",
   "decorations.label": "Avatar decoration",
   "decorations.hint": "A picture around your avatar, wherever it shows on this instance. These are the ones it offers.",
+  "nameplates.label": "Nameplate",
+  "nameplates.hint": "A picture behind your name in member lists and DMs, wherever you go on this instance. These are the ones it offers.",
   "serverProfiles.useMine": "Use my profile's",
   "serverProfiles.effectHint": "Plays on your card in this server instead of your profile's effect. The server may offer its own.",
   "serverProfiles.decorationHint": "Shows around your avatar in this server instead of your profile's.",
+  "serverProfiles.nameplateHint": "Shows behind your name in this server's member list instead of your profile's.",
   "serverProfiles.forSale": "{name} is for sale in the server's shop",
   "serverProfiles.notForSale": "Not for sale"
 }

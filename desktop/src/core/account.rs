@@ -41,6 +41,8 @@ pub struct ProfilePatch {
     pub effect: Option<String>,
     /// The decoration around your avatar (docs/profile-items.md): an item's id, or "" for none.
     pub decoration_id: Option<String>,
+    /// The nameplate behind your name in member lists: an item's id, or "" for none.
+    pub nameplate_id: Option<String>,
 }
 
 /// A picture's type, from its name, as the instance wants it said.
@@ -308,6 +310,7 @@ impl Core {
                 }),
                 effect: patch.effect,
                 decoration_id: patch.decoration_id,
+                nameplate_id: patch.nameplate_id,
             })
         )
         .await?;

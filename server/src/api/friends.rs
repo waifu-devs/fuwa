@@ -36,7 +36,7 @@ pub(super) const NOT_TAKING_MESSAGES: &str = "they aren't taking direct messages
 type WatchStream = Pin<Box<dyn Stream<Item = Result<pb::WatchFriendsResponse, Status>> + Send>>;
 
 fn changed(friend: pb::Friend) -> pb::FriendEvent {
-    pb::FriendEvent { payload: Some(Payload::Changed(friend)) }
+    pb::FriendEvent { payload: Some(Payload::Changed(Box::new(friend))) }
 }
 
 fn removed(user_id: &str) -> pb::FriendEvent {

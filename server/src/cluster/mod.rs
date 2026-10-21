@@ -521,6 +521,7 @@ pub fn account_to_pb(account: &Account) -> cpb::Account {
         disabled: account.disabled,
         has_password: account.has_password(),
         decoration_id: account.decoration_id.clone(),
+        nameplate_id: account.nameplate_id.clone(),
     }
 }
 
@@ -540,6 +541,7 @@ pub fn account_from_pb(account: cpb::Account) -> Account {
         two_factor: account.two_factor,
         disabled: account.disabled,
         decoration_id: account.decoration_id,
+        nameplate_id: account.nameplate_id,
     }
 }
 

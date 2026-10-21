@@ -22,7 +22,7 @@ use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
 use crate::ui::rail::RAIL;
 use crate::ui::text::{WIDE, tracked};
-use crate::ui::theme::{Palette, alpha, corner};
+use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{avatar, badge, conn_dot, counted, going, icon, pal, popped, server_icon};
 
 pub const SIDEBAR: f32 = 256.0;
@@ -1279,6 +1279,8 @@ impl FuwaApp {
             unread: u32,
             calling: bool,
             dot: Option<pb::PresenceStatus>,
+            /// The nameplate behind their row, its picture's link.
+            nameplate: Option<String>,
         }
         let (name, url, connection, servers, admin, friends_on, waiting, dms, dm_status) =
             self.core.shared.read(|s| match s.instance(key) {
@@ -1296,6 +1298,7 @@ impl FuwaApp {
                         })
                         .map(|(c, other)| Dm {
                             id: c.id.clone(),
+                            nameplate: i.nameplate_url(None, None, other.as_ref()).map(str::to_owned),
                             dot: other.as_ref().and_then(|u| crate::ui::presence::partner_status(i, &u.id)),
                             other,
                             line: preview(i.dms.items.get(&c.id).map(|v| v.as_slice()), &me),
@@ -1633,6 +1636,23 @@ impl FuwaApp {
                     .when(lit && !active, |el| el.bg(hover))
                     .when(!active, |el| el.hover(move |s| s.bg(hover)))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
+                    .when_some(dm.nameplate.as_deref(), |el, url| {
+                        let side = opaque(p.side_surface);
+                        let under = match (active, lit) {
+                            (true, _) => opaque(mix(side, p.primary, 0.15)),
+                            (false, true) => p.muted,
+                            _ => side,
+                        };
+                        let over = if active { under } else { p.muted };
+                        el.child(crate::ui::widgets::nameplate(
+                            url,
+                            44.0,
+                            crate::ui::theme::radius_lg(),
+                            under,
+                            over,
+                            group.clone(),
+                        ))
+                    })
                     .child(
                         div()
                             .relative()
@@ -2321,4 +2341,9 @@ fn sidebar_scroll() -> gpui_kit::ScrollHandle {
         static SCROLL: gpui_kit::ScrollHandle = gpui_kit::ScrollHandle::new();
     }
     SCROLL.with(Clone::clone)
+}
+
+/// A color with nothing showing through, for laying over a picture.
+fn opaque(color: gpui_kit::Hsla) -> gpui_kit::Rgba {
+    gpui_kit::Rgba { a: 1.0, ..color.into() }
 }

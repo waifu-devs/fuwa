@@ -364,9 +364,12 @@
   "signIn.continueTo": "继续前往 {name}",
   "decorations.label": "头像装饰",
   "decorations.hint": "围绕在你头像周围的图案，在此实例上显示头像的地方都会出现。以下是它提供的装饰。",
+  "nameplates.label": "名牌",
+  "nameplates.hint": "在这个实例的任何地方，成员列表和私信里名字后面的图片。这些是它提供的。",
   "serverProfiles.useMine": "使用个人资料中的设置",
   "serverProfiles.effectHint": "在此服务器中代替你个人资料的特效，在你的资料卡上播放。服务器可能提供自己的特效。",
   "serverProfiles.decorationHint": "在此服务器中代替你个人资料的装饰，显示在你的头像周围。",
+  "serverProfiles.nameplateHint": "在这个服务器的成员列表里显示在你的名字后面，代替个人资料里的那个。",
   "serverProfiles.forSale": "{name} 正在服务器商店中出售",
   "serverProfiles.notForSale": "非卖品"
 }

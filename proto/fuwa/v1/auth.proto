@@ -143,6 +143,9 @@ message UpdateProfileRequest {
   // One of the instance's decorations (a profile item), or empty for none.
   // Refused while the instance has decorations off, except clearing it.
   optional string decoration_id = 10;
+  // One of the instance's nameplates (a profile item), or empty for none.
+  // Refused while the instance has decorations off, except clearing it.
+  optional string nameplate_id = 11;
 }
 
 message UpdateProfileResponse {

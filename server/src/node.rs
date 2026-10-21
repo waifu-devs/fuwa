@@ -43,6 +43,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0029_read_marks.sql"),
     include_str!("../migrations/node/0030_email_sign_in.sql"),
     include_str!("../migrations/node/0031_featured_agents.sql"),
+    include_str!("../migrations/node/0032_nameplates.sql"),
 ];
 
 /// The places one account's read marks are kept for, at most; past it the
@@ -110,6 +111,9 @@ pub struct Account {
     /// The decoration around their avatar: one of the instance's profile
     /// items, or empty.
     pub decoration_id: String,
+    /// The nameplate behind their name: one of the instance's profile
+    /// items, or empty.
+    pub nameplate_id: String,
 }
 
 impl Account {
@@ -123,6 +127,7 @@ impl Account {
             status: self.status.clone(),
             status_expires_at: self.status_expires_at.map(timestamp),
             decoration_id: self.decoration_id.clone(),
+            nameplate_id: self.nameplate_id.clone(),
         }
     }
 
@@ -131,14 +136,14 @@ impl Account {
     }
 }
 
-const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at, status, status_expires_at, totp_secret IS NOT NULL, disabled_at IS NOT NULL, profile_decoration";
+const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at, status, status_expires_at, totp_secret IS NOT NULL, disabled_at IS NOT NULL, profile_decoration, profile_nameplate";
 
 /// [`ACCOUNT_COLUMNS`] for a query that joins accounts to another table.
 fn account_columns_of(table: &str) -> String {
     ACCOUNT_COLUMNS.split(", ").map(|c| format!("{table}.{c}")).collect::<Vec<_>>().join(", ")
 }
 
-const ACCOUNT_COLUMN_COUNT: usize = 13;
+const ACCOUNT_COLUMN_COUNT: usize = 14;
 
 fn account(row: &Row) -> turso::Result<Account> {
     Ok(Account {
@@ -155,6 +160,7 @@ fn account(row: &Row) -> turso::Result<Account> {
         two_factor: row.get(10)?,
         disabled: row.get(11)?,
         decoration_id: row.get(12)?,
+        nameplate_id: row.get(13)?,
     })
 }
 
@@ -230,6 +236,8 @@ pub struct ProfileChange {
     pub effect: Option<String>,
     /// One of the instance's decorations; empty for none.
     pub decoration: Option<String>,
+    /// One of the instance's nameplates; empty for none.
+    pub nameplate: Option<String>,
 }
 
 /// A device signed in to an account.
@@ -683,6 +691,7 @@ impl NodeDb {
                 two_factor: false,
                 disabled: false,
                 decoration_id: String::new(),
+                nameplate_id: String::new(),
             })
         })
         .await;
@@ -763,6 +772,7 @@ impl NodeDb {
                 two_factor: false,
                 disabled: false,
                 decoration_id: String::new(),
+                nameplate_id: String::new(),
             })
         })
         .await?;
@@ -939,6 +949,7 @@ impl NodeDb {
                 two_factor: false,
                 disabled: false,
                 decoration_id: String::new(),
+                nameplate_id: String::new(),
             })
         })
         .await;
@@ -1109,7 +1120,8 @@ impl NodeDb {
                    status = coalesce(?8, status),
                    status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
                    updated_at = ?10, profile_effect = coalesce(?11, profile_effect),
-                   profile_decoration = coalesce(?12, profile_decoration)
+                   profile_decoration = coalesce(?12, profile_decoration),
+                   profile_nameplate = coalesce(?13, profile_nameplate)
                  WHERE id = ?1",
                 (
                     id,
@@ -1124,6 +1136,7 @@ impl NodeDb {
                     now_ms(),
                     change.effect.as_deref(),
                     change.decoration.as_deref(),
+                    change.nameplate.as_deref(),
                 ),
             )
             .await?;
@@ -2328,6 +2341,7 @@ impl NodeDb {
             crate::profile_items::delete(conn, id).await?;
             conn.execute("UPDATE accounts SET profile_effect = '' WHERE profile_effect = ?1", [id]).await?;
             conn.execute("UPDATE accounts SET profile_decoration = '' WHERE profile_decoration = ?1", [id]).await?;
+            conn.execute("UPDATE accounts SET profile_nameplate = '' WHERE profile_nameplate = ?1", [id]).await?;
             items_changed(conn).await?;
             Ok(Some(item))
         })
@@ -2754,6 +2768,7 @@ impl NodeDb {
                 two_factor: false,
                 disabled: false,
                 decoration_id: String::new(),
+                nameplate_id: String::new(),
             })
         })
         .await;
@@ -3047,7 +3062,7 @@ const AGENT_SELECT: &str =
     "SELECT accounts.id, accounts.kind, accounts.username, accounts.display_name, accounts.avatar_url,
     accounts.admin, accounts.created_at, accounts.last_seen_at, accounts.status, accounts.status_expires_at,
     accounts.totp_secret IS NOT NULL, accounts.disabled_at IS NOT NULL, accounts.profile_decoration,
-    coalesce(accounts.owner_id, ''), accounts.public, accounts.bio, sessions.last_active_at
+    accounts.profile_nameplate, coalesce(accounts.owner_id, ''), accounts.public, accounts.bio, sessions.last_active_at
     FROM accounts LEFT JOIN sessions ON sessions.account_id = accounts.id";
 
 fn agent_row(row: &Row) -> turso::Result<AgentRow> {

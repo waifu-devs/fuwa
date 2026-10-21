@@ -1,4 +1,4 @@
-//! Profile effects and avatar decorations an instance or a server offers
+//! Profile effects, avatar decorations and nameplates an instance or a server offers
 //! (docs/profile-items.md). The instance's are in node.db's `profile_items`,
 //! a server's in its own file's, in the same shape, so the reads and writes
 //! here serve both. `api/profile_items.rs` is `ProfileItemService`.
@@ -441,8 +441,10 @@ pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
 /// depends on who offers it.
 pub fn checked_new(new: &pb::NewProfileItem, id: &str) -> Result<pb::ProfileItem> {
     let kind = match pb::ProfileItemKind::try_from(new.kind) {
-        Ok(kind @ (pb::ProfileItemKind::Effect | pb::ProfileItemKind::Decoration)) => kind,
-        _ => return Err(Error::invalid("a profile item is an effect or a decoration")),
+        Ok(kind @ (pb::ProfileItemKind::Effect | pb::ProfileItemKind::Decoration | pb::ProfileItemKind::Nameplate)) => {
+            kind
+        }
+        _ => return Err(Error::invalid("a profile item is an effect, a decoration or a nameplate")),
     };
     let name = checked_name(&new.name)?;
     let description = checked_description(&new.description)?;
@@ -457,10 +459,10 @@ pub fn checked_new(new: &pb::NewProfileItem, id: &str) -> Result<pb::ProfileItem
         _ => String::new(),
     };
     if kind == pb::ProfileItemKind::Effect && !new.picture_url.is_empty() {
-        return Err(Error::invalid("only decorations have a picture"));
+        return Err(Error::invalid("only decorations and nameplates have a picture"));
     }
-    if kind == pb::ProfileItemKind::Decoration && !new.picture_urls.is_empty() {
-        return Err(Error::invalid("a decoration is one picture"));
+    if kind != pb::ProfileItemKind::Effect && !new.picture_urls.is_empty() {
+        return Err(Error::invalid("a decoration or a nameplate is one picture"));
     }
     Ok(pb::ProfileItem { id: id.to_string(), kind: kind as i32, name, description, effect, ..Default::default() })
 }
@@ -477,7 +479,7 @@ pub fn apply(item: &mut pb::ProfileItem, change: &pb::ProfileItemChange) -> Resu
     }
     let effect = item.kind == pb::ProfileItemKind::Effect as i32;
     if change.pictures.is_some() && !effect {
-        return Err(Error::invalid("only effects have pictures; a decoration's can't change"));
+        return Err(Error::invalid("only effects have pictures; a decoration's or a nameplate's can't change"));
     }
     match (&change.effect, effect) {
         (Some(_), false) => return Err(Error::invalid("only effects have a spec")),
@@ -607,7 +609,12 @@ mod tests {
         };
         assert!(checked_new(&decoration, "01A").is_ok());
         assert!(checked_new(&pb::NewProfileItem { effect: SAKURA.into(), ..decoration.clone() }, "01A").is_err());
-        assert!(checked_new(&pb::NewProfileItem { picture_urls: vec!["x".into()], ..decoration }, "01A").is_err());
+        assert!(
+            checked_new(&pb::NewProfileItem { picture_urls: vec!["x".into()], ..decoration.clone() }, "01A").is_err()
+        );
+        let nameplate = pb::NewProfileItem { kind: pb::ProfileItemKind::Nameplate as i32, ..decoration };
+        assert!(checked_new(&nameplate, "01A").is_ok());
+        assert!(checked_new(&pb::NewProfileItem { picture_urls: vec!["x".into()], ..nameplate }, "01A").is_err());
         let many = pb::NewProfileItem { picture_urls: vec!["x".into(); MAX_PICTURES + 1], ..effect.clone() };
         assert!(checked_new(&many, "01A").is_err());
         assert!(checked_new(&pb::NewProfileItem { name: " ".into(), ..effect }, "01A").is_err());
