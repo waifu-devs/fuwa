@@ -109,7 +109,7 @@ jobs:
           toolchain: 1.99.0 # rust-toolchain.toml
           targets: wasm32-unknown-unknown
       # The version e2ee-wasm/Cargo.toml pins.
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: wasm-bindgen@0.2.129
       - run: pnpm run wasm
