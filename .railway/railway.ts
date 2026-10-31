@@ -71,12 +71,6 @@ const HANDOFF = 240;
  */
 const FEEDBACK_CHANNEL = "01M3YTPEZBVSPZVWGFZ5AGGE6R/01M4ARF2YAS9698KE30AKZ2DG1";
 /**
- * The roadmap board @fuwafuwa builds approved cards from, in boat.dev sandboxes
- * (agents/fuwafuwa/README.md, "Roadmap builder"), as "<server id>/<channel id>". Empty,
- * it builds nothing. It needs two shared variables first; see @fuwafuwa below.
- */
-const ROADMAP_CHANNEL = "";
-/**
  * Whether to run the Discord migration bot (agents/discord-migrate), which copies a
  * Discord server into a fuwa.chat server. It needs two shared variables first; see
  * where it's declared below. False removes the service but keeps its volume. Its
@@ -191,9 +185,7 @@ export default defineRailway((ctx) => {
   // variables, before FEEDBACK_CHANNEL is: FUWAFUWA_TOKEN, its agent token (Settings >
   // Agents on fuwa.chat), FUWAFUWA_GITHUB_TOKEN, a fine-grained GitHub token with Issues:
   // read and write on waifu-devs/fuwa and nothing else, and FUWAFUWA_ANTHROPIC_API_KEY,
-  // for Claude. Before ROADMAP_CHANNEL is set: FUWAFUWA_BOAT_API_KEY, a boat.dev API
-  // key, and FUWAFUWA_ROADMAP_GITHUB_TOKEN, a fine-grained GitHub token with Contents and
-  // Pull requests: read and write on the roadmap's repositories, to merge.
+  // for Claude.
   const fuwafuwa = FEEDBACK_CHANNEL
     ? [
         service("fuwafuwa", {
@@ -215,14 +207,6 @@ export default defineRailway((ctx) => {
             GITHUB_TOKEN: ctx.shared.FUWAFUWA_GITHUB_TOKEN,
             GITHUB_REPO: "waifu-devs/fuwa",
             GITHUB_LABEL: "feedback",
-            ...(ROADMAP_CHANNEL
-              ? {
-                  ROADMAP_CHANNEL,
-                  ROADMAP_REPOS: "waifu-devs/fuwa,waifu-devs/site",
-                  BOAT_API_KEY: ctx.shared.FUWAFUWA_BOAT_API_KEY,
-                  ROADMAP_GITHUB_TOKEN: ctx.shared.FUWAFUWA_ROADMAP_GITHUB_TOKEN,
-                }
-              : {}),
           },
         }),
       ]

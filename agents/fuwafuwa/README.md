@@ -124,9 +124,11 @@ pnpm typecheck && pnpm test
 one replica, declared once `FEEDBACK_CHANNEL` is set there. Railway builds it
 from this folder's Dockerfile on master whenever a commit changes it, after
 the commit's checks pass; fuwa's own image and deploys leave it alone. Its secrets are the project's shared variables `FUWAFUWA_TOKEN`,
-`FUWAFUWA_GITHUB_TOKEN` and `FUWAFUWA_ANTHROPIC_API_KEY`, set by hand. The
-roadmap builder is on once `ROADMAP_CHANNEL` is set there too, after
-`FUWAFUWA_BOAT_API_KEY` and `FUWAFUWA_ROADMAP_GITHUB_TOKEN` are.
+`FUWAFUWA_GITHUB_TOKEN` and `FUWAFUWA_ANTHROPIC_API_KEY`, set by hand. To turn
+the roadmap builder on, add the shared variables `FUWAFUWA_BOAT_API_KEY` and
+`FUWAFUWA_ROADMAP_GITHUB_TOKEN`, then give the service `ROADMAP_CHANNEL`,
+`ROADMAP_REPOS` (`waifu-devs/fuwa,waifu-devs/site`), `BOAT_API_KEY` and
+`ROADMAP_GITHUB_TOKEN` from them in `.railway/railway.ts`.
 
 Railway's GitHub app needs access to `waifu-devs/fuwa`. To set it up: make an agent named `fuwafuwa` on fuwa.chat, add it to the
 servers it should listen in and to the one with the team's channel, set the
