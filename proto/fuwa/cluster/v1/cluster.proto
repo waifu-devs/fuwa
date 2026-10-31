@@ -295,6 +295,7 @@ message Account {
   // Whether it signs in with a password.
   bool has_password = 13;
   string decoration_id = 14;
+  string nameplate_id = 15;
 }
 
 message AuthenticateRequest {

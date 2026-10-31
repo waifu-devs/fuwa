@@ -8,7 +8,7 @@ import { useInstance } from "@/fuwa/hooks";
 import { EmojiImage } from "@/components/EmojiImage";
 import { UserAvatar } from "@/components/Icons";
 import { Count } from "@/components/motion";
-import { DecorationImage } from "@/components/ProfileDecoration";
+import { DecorationImage, NameplateImage } from "@/components/ProfileDecoration";
 import { ProfileEffect } from "@/components/ProfileEffect";
 import { MiniCard } from "@/components/settings/account/EffectPicker";
 import { Chips } from "@/components/settings/account/common";
@@ -18,7 +18,7 @@ import { FALLBACK_ICON, LEDGER_GACHA, ledgerLine, LISTING_PROFILE_ITEM, LISTING_
 import { displayName, formatStamp, toDate } from "@/lib/format";
 import { SPRING } from "@/lib/motion";
 import { cssColor } from "@/lib/permissions";
-import { ITEM_DECORATION, itemEffect } from "@/lib/profile-items";
+import { ITEM_DECORATION, ITEM_NAMEPLATE, isPictureItem, itemEffect } from "@/lib/profile-items";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
@@ -93,7 +93,7 @@ export function ListingVisual({ listing, roles, items, me, className }: { listin
   const item = listing.kind === LISTING_PROFILE_ITEM ? items?.find((i) => i.id === listing.targetId) : undefined;
   if (item && me && hasArt(item))
     return (
-      <span className={cn("grid place-items-center overflow-hidden rounded-2xl bg-muted", item.kind === ITEM_DECORATION ? "p-[20%]" : "p-1", className)} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+      <span className={cn("grid place-items-center overflow-hidden rounded-2xl bg-muted", item.kind === ITEM_DECORATION ? "p-[20%]" : item.kind === ITEM_NAMEPLATE ? "px-1.5 py-[30%]" : "p-1", className)} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
         <ItemArt item={item} me={me} play={hover} />
       </span>
     );
@@ -104,14 +104,15 @@ export function ListingVisual({ listing, roles, items, me, className }: { listin
   );
 }
 
-/** Whether `ItemArt` can draw the item: a decoration with its picture, or an effect that plays. */
+/** Whether `ItemArt` can draw the item: a decoration or nameplate with its picture, or an effect that plays. */
 export function hasArt(item: ProfileItem): boolean {
-  return item.kind === ITEM_DECORATION ? !!shownPicture(item.pictureUrl) : !!itemEffect(item);
+  return isPictureItem(item) ? !!shownPicture(item.pictureUrl) : !!itemEffect(item);
 }
 
 /**
  * A profile item as you'd wear it, as tall as its parent: a decoration over
- * your avatar, or an effect on a tiny card of yours, playing while `play`.
+ * your avatar, a nameplate behind a tiny row of yours, or an effect on a
+ * tiny card of yours, playing while `play`.
  * Nothing for an item `hasArt` turns down.
  */
 export function ItemArt({ item, me, play, className }: { item: ProfileItem; me: User; play: boolean; className?: string }) {
@@ -121,6 +122,15 @@ export function ItemArt({ item, me, play, className }: { item: ProfileItem; me: 
       <span className={cn("relative block aspect-square h-full", className)}>
         <UserAvatar user={me} className="size-full" />
         <DecorationImage item={item} />
+      </span>
+    );
+  }
+  if (item.kind === ITEM_NAMEPLATE) {
+    if (!shownPicture(item.pictureUrl)) return null;
+    return (
+      <span className={cn("group relative isolate flex aspect-[5/2] h-full max-w-full items-center overflow-hidden rounded-[18%/45%] bg-card px-[7%]", className)}>
+        <NameplateImage item={item} className="opacity-100" />
+        <UserAvatar user={me} className="aspect-square h-1/2 w-auto shrink-0 text-[0.5rem]" />
       </span>
     );
   }

@@ -2,7 +2,7 @@ import type { ProfileItem } from "@/gen/fuwa/v1/types_pb";
 import { builtinEffect, sanitizeEffect, type EffectPicture, type ProfileEffectSpec } from "./effects/profile.ts";
 
 /*
- * Profile items (docs/profile-items.md): the effects and decorations an
+ * Profile items (docs/profile-items.md): the effects, decorations and nameplates an
  * instance and its servers offer, beyond the effects the app ships with.
  * Profiles and members name what they wear by id; this turns an id into
  * something to draw, from the lists the app keeps. Pure, so it's tested
@@ -12,6 +12,7 @@ import { builtinEffect, sanitizeEffect, type EffectPicture, type ProfileEffectSp
 /** `ProfileItemKind`'s numbers, so this file needs nothing generated at runtime. */
 export const ITEM_EFFECT = 1;
 export const ITEM_DECORATION = 2;
+export const ITEM_NAMEPLATE = 3;
 
 /** Just what's read of an item, so plain objects work in tests. */
 export type Item = Pick<ProfileItem, "id" | "kind" | "name" | "description" | "effect" | "pictureUrl" | "animated"> & { pictures?: readonly EffectPicture[] };
@@ -144,6 +145,10 @@ export function resolveEffect(id: string | undefined, items: readonly Item[] | u
 export const resolveDecoration = <T extends Item>(id: string | undefined, items: readonly T[] | undefined): T | undefined =>
   id ? find(items, id, ITEM_DECORATION) : undefined;
 
+/** A nameplate by id among the items given. */
+export const resolveNameplate = <T extends Item>(id: string | undefined, items: readonly T[] | undefined): T | undefined =>
+  id ? find(items, id, ITEM_NAMEPLATE) : undefined;
+
 /** Where each list comes from: the instance's, and the server's the person is seen in (if any). */
 export type ItemLists<T extends Item = Item> = { instance: readonly T[] | undefined; server: readonly T[] | undefined };
 
@@ -167,6 +172,19 @@ export function wornDecoration<T extends Item>(
   return resolveDecoration(user?.decorationId, lists.instance);
 }
 
+/** The nameplate someone shows, as `wornDecoration`: their server profile's where they have one, else their own. */
+export function wornNameplate<T extends Item>(
+  user: { nameplateId: string } | undefined,
+  member: { nameplateId: string } | undefined,
+  lists: ItemLists<T>,
+): T | undefined {
+  if (member?.nameplateId) return resolveNameplate(member.nameplateId, lists.server);
+  return resolveNameplate(user?.nameplateId, lists.instance);
+}
+
+/** Items drawn from one picture of their own: decorations and nameplates. */
+export const isPictureItem = (item: Pick<Item, "kind">) => item.kind === ITEM_DECORATION || item.kind === ITEM_NAMEPLATE;
+
 /** A name for an item from a file's name: no extension, separators as spaces, within the 40 characters an item's name may have. */
 export function nameFromFile(file: string): string {
   const base = file.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
@@ -178,6 +196,7 @@ export function nameFromFile(file: string): string {
 /** The docs that explain each kind: the effect format, and what a decoration should look like. */
 export const EFFECT_DOCS = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-effects.md#the-format";
 export const DECORATION_DOCS = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-items.md#decorations";
+export const NAMEPLATE_DOCS = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-items.md#nameplates";
 
 /**
  * A built-in effect as a spec to start from: only its layers (the item gets
@@ -258,6 +277,24 @@ export const DECORATION_PROMPT = `Draw an avatar decoration for fuwa, a chat app
 
 What I want:
 `;
+
+/**
+ * What someone pastes into an AI that makes pictures to have it draw a
+ * nameplate, ending where they describe it. The desktop's
+ * `NAMEPLATE_PROMPT` is this word for word.
+ */
+export const NAMEPLATE_PROMPT = `Draw a nameplate for fuwa, a chat app: a wide decorative strip shown behind someone's name in the member list, like a little banner.
+
+- A PNG, 900 by 150 pixels (six times as wide as it is tall). It may be see-through or fill the whole strip.
+- Someone's avatar and name sit over its left half, and the app fades that half out, so put the art mostly on the right and keep the left calm: soft color, no busy detail.
+- It's shown about 240 by 44 pixels, so use bold shapes and clear colors, and no text, faces or fine detail.
+
+What I want:
+`;
+
+/** A nameplate's size, as the prompt and the docs say. */
+export const NAMEPLATE_WIDTH = 900;
+export const NAMEPLATE_HEIGHT = 150;
 
 /** The template's size and the avatar circle in it, as the decoration prompt and the docs say: the avatar is 1/1.2 of the picture. */
 export const TEMPLATE_SIZE = 600;

@@ -374,9 +374,12 @@
   "signIn.continueTo": "Weiter zu {name}",
   "decorations.label": "Avatar-Dekoration",
   "decorations.hint": "Ein Bild um deinen Avatar, überall, wo er auf dieser Instanz erscheint. Das sind die, die sie anbietet.",
+  "nameplates.label": "Namensschild",
+  "nameplates.hint": "Ein Bild hinter deinem Namen in Mitgliederlisten und DMs, überall auf dieser Instanz. Das sind die, die sie anbietet.",
   "serverProfiles.useMine": "Wie mein Profil",
   "serverProfiles.effectHint": "Läuft auf diesem Server statt des Effekts deines Profils auf deiner Karte. Der Server bietet vielleicht eigene an.",
   "serverProfiles.decorationHint": "Erscheint auf diesem Server statt der deines Profils um deinen Avatar.",
+  "serverProfiles.nameplateHint": "Erscheint in der Mitgliederliste dieses Servers hinter deinem Namen statt dem deines Profils.",
   "serverProfiles.forSale": "{name} gibt es im Shop des Servers zu kaufen",
   "serverProfiles.notForSale": "Nicht zu kaufen"
 }

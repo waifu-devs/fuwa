@@ -364,9 +364,12 @@
   "signIn.continueTo": "{name}に進む",
   "decorations.label": "アバターデコレーション",
   "decorations.hint": "このインスタンスでアバターが表示されるすべての場所で、アバターの周りに表示される画像です。ここで提供されているものから選べます。",
+  "nameplates.label": "ネームプレート",
+  "nameplates.hint": "このインスタンスのどこでも、メンバーリストとDMで名前の後ろに表示される画像です。ここで選べるのはこちら。",
   "serverProfiles.useMine": "プロフィールの設定を使う",
   "serverProfiles.effectHint": "このサーバーでは、プロフィールのエフェクトの代わりにカードで再生されます。サーバー独自のものがある場合もあります。",
   "serverProfiles.decorationHint": "このサーバーでは、プロフィールの代わりにアバターの周りに表示されます。",
+  "serverProfiles.nameplateHint": "このサーバーのメンバーリストで、プロフィールのものの代わりに名前の後ろに表示されます。",
   "serverProfiles.forSale": "{name}はサーバーのショップで販売中です",
   "serverProfiles.notForSale": "非売品"
 }

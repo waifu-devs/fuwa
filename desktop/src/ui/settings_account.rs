@@ -18,7 +18,7 @@ use gpui_kit::{
 use crate::core::account::ProfilePatch;
 use crate::core::i18n::{Arg, t, t_with};
 use crate::core::pictures::PictureKind;
-use crate::core::profile_items::{offered_effects, resolve_decoration, resolve_effect};
+use crate::core::profile_items::{offered_effects, resolve_decoration, resolve_effect, resolve_nameplate};
 use crate::core::store::{Connection, user_name};
 use crate::pb;
 use crate::ui::motion;
@@ -110,6 +110,8 @@ pub(crate) struct Draft {
     effect: String,
     /// One of the instance's decorations, or "" for none.
     decoration: String,
+    /// One of the instance's nameplates, or "" for none.
+    nameplate: String,
 }
 
 /// How you look in one server, for the card's preview: a nickname, an effect and a decoration
@@ -155,6 +157,7 @@ pub struct AccountForm {
     accent: i32,
     effect: String,
     decoration: String,
+    nameplate: String,
     clear: Clear,
     bio_preview: bool,
     links: (bool, bool),
@@ -216,6 +219,7 @@ impl AccountForm {
             accent: -1,
             effect: String::new(),
             decoration: String::new(),
+            nameplate: String::new(),
             clear: Clear::Never,
             bio_preview: false,
             links: (false, false),
@@ -283,6 +287,7 @@ impl SettingsView {
             avatar: me.avatar_url.clone(),
             accent: -1,
             decoration: me.decoration_id.clone(),
+            nameplate: me.nameplate_id.clone(),
             ..Draft::default()
         };
         self.load_draft(&base, window, cx);
@@ -317,6 +322,7 @@ impl SettingsView {
             accent: profile.accent_color.unwrap_or(-1),
             effect: profile.effect.clone(),
             decoration: me.decoration_id.clone(),
+            nameplate: me.nameplate_id.clone(),
         };
         self.account.created_at = ms_of(profile.created_at.as_ref());
         self.load_draft(&base, window, cx);
@@ -336,6 +342,7 @@ impl SettingsView {
         f.accent = d.accent;
         f.effect = d.effect.clone();
         f.decoration = d.decoration.clone();
+        f.nameplate = d.nameplate.clone();
         f.clear = if !d.status.is_empty() && d.expires.is_some() { Clear::Keep } else { Clear::Never };
         f.error = None;
     }
@@ -354,6 +361,7 @@ impl SettingsView {
             accent: f.accent,
             effect: f.effect.clone(),
             decoration: f.decoration.clone(),
+            nameplate: f.nameplate.clone(),
         }
     }
 
@@ -372,6 +380,7 @@ impl SettingsView {
             d.accent != base.accent,
             d.effect != base.effect,
             d.decoration != base.decoration,
+            d.nameplate != base.nameplate,
         ]
         .iter()
         .filter(|x| **x)
@@ -413,12 +422,14 @@ impl SettingsView {
             status: status_changed.then(|| d.status.trim().to_owned()),
             status_expires_at: if status_changed { clears_at(self.account.clear, base.expires) } else { None },
             decoration_id: (d.decoration != base.decoration).then(|| d.decoration.clone()),
+            nameplate_id: (d.nameplate != base.nameplate).then(|| d.nameplate.clone()),
         };
         self.account.saving = true;
         self.account.error = None;
         let picked = (
             patch.effect.as_ref().is_some_and(|e| !e.is_empty()),
             patch.decoration_id.as_ref().is_some_and(|d| !d.is_empty()),
+            patch.nameplate_id.as_ref().is_some_and(|d| !d.is_empty()),
         );
         let core = self.core.clone();
         let rx = self.core.spawn(async move { core.update_profile(&key, patch).await });
@@ -433,6 +444,9 @@ impl SettingsView {
                         }
                         if picked.1 {
                             crate::core::reports::used("profile-decoration/picked");
+                        }
+                        if picked.2 {
+                            crate::core::reports::used("profile-nameplate/picked");
                         }
                         this.take_profile(&profile, window, cx);
                     }
@@ -514,9 +528,9 @@ impl SettingsView {
             self.state.overlay = Some(cropper);
         }
         // Instances from before profile effects (or decorations) don't say, and can't keep one.
-        let (effects_on, decorations_on, items) = self.core.shared.read(|s| match s.instance(&key) {
-            Some(i) => (i.effects_on(), i.decorations_on(), i.profile_items.clone()),
-            None => (false, false, Vec::new()),
+        let (effects_on, decorations_on, nameplates_here, items) = self.core.shared.read(|s| match s.instance(&key) {
+            Some(i) => (i.effects_on(), i.decorations_on(), i.has("nameplates"), i.profile_items.clone()),
+            None => (false, false, false, Vec::new()),
         });
         let ready = self.account.ready;
         let d = self.draft(cx);
@@ -628,6 +642,36 @@ impl SettingsView {
                 t("accountsettings.decorations.label"),
                 Some(hint(about, p)),
                 motion::slide_in(div().child(picker), "avatar-decoration", 12.0).into_any_element(),
+            ));
+        }
+        let nameplates: Vec<pb::ProfileItem> =
+            items.iter().filter(|i| i.kind == pb::ProfileItemKind::Nameplate as i32).cloned().collect();
+        if decorations_on && nameplates_here && (!nameplates.is_empty() || !d.nameplate.is_empty()) {
+            let about = resolve_nameplate(&d.nameplate, &items)
+                .map(|i| i.description.clone())
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| t("accountsettings.nameplates.hint"));
+            let picker = self.nameplate_picker(
+                "profile",
+                &d.nameplate,
+                &me,
+                &nameplates,
+                None,
+                &Default::default(),
+                ready,
+                form_w,
+                p,
+                cx,
+                |this, id, cx| {
+                    this.account.nameplate = id;
+                    cx.notify();
+                },
+            );
+            rows.push((
+                "nameplate",
+                t("accountsettings.nameplates.label"),
+                Some(hint(about, p)),
+                motion::slide_in(div().child(picker), "nameplate", 12.0).into_any_element(),
             ));
         }
         rows.push((

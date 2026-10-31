@@ -8,7 +8,7 @@ import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
-import { AvatarDecoration } from "@/components/ProfileDecoration";
+import { AvatarDecoration, MemberNameplate } from "@/components/ProfileDecoration";
 import { CopyId } from "@/components/CopyId";
 import { Count } from "@/components/motion";
 import { Private } from "@/components/Private";
@@ -244,8 +244,10 @@ const MemberRow = memo(function MemberRow({
           present.has(m.user?.id ?? "") ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, x: 16 },
       }}
       transition={{ type: "spring", stiffness: 500, damping: 36 }}
-      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70 has-[[data-menu-open]]:bg-muted/70"
+      className="row-y group relative isolate flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70 has-[[data-menu-open]]:bg-muted/70"
     >
+      {/* Someone offline is faded, nameplate and all, until pointed at. */}
+      <MemberNameplate instanceKey={instanceKey} user={m.user} member={m} className={tracked && !presence ? "opacity-35" : undefined} />
       <span className={tracked && !presence ? "flex min-w-0 flex-1 items-center opacity-45 transition-opacity duration-300 group-hover:opacity-100" : "flex min-w-0 flex-1 items-center transition-opacity duration-300"}>
       <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
         <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" {...menu}>

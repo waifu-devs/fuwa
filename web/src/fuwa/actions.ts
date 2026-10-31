@@ -426,7 +426,7 @@ export const forget = (key: string) =>
   });
 
 export type ProfilePatch = Partial<
-  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect" | "decorationId">
+  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect" | "decorationId" | "nameplateId">
 > & { statusExpiresAt?: Date | null };
 
 /** Changes your profile; only the fields given change. */
@@ -721,9 +721,9 @@ export const setNickname = (key: string, serverId: string, nickname: string, use
   });
 
 /** What changes on your own profile in a server; unset fields stay. Empty effect or decoration shows your own. */
-export type ServerProfilePatch = { nickname?: string; effect?: string; decorationId?: string };
+export type ServerProfilePatch = { nickname?: string; effect?: string; decorationId?: string; nameplateId?: string };
 
-/** Changes your profile in a server: nickname, effect and decoration, in one call. */
+/** Changes your profile in a server: nickname, effect, decoration and nameplate, in one call. */
 export const updateServerProfile = (key: string, serverId: string, patch: ServerProfilePatch) =>
   Effect.gen(function* () {
     const { member } = yield* call((signal) => api(key).servers.updateMember({ serverId, ...patch }, { signal }));

@@ -1,4 +1,4 @@
-# Profile items: effects and decorations from instances and servers
+# Profile items: effects, decorations and nameplates from instances and servers
 
 Beyond the effects every app ships with (docs/profile-effects.md), an
 instance and each of its servers can offer their own **profile items**:
@@ -9,15 +9,17 @@ instance and each of its servers can offer their own **profile items**:
   together.
 - **Decorations**: a picture around someone's avatar, drawn wherever the
   avatar is: messages, the member list, profile cards.
+- **Nameplates**: a wide picture behind someone's name in the member list
+  and the list of direct messages, like a little banner.
 
-`ProfileItemService` keeps both (`proto/fuwa/v1/profile_item.proto`).
+`ProfileItemService` keeps all three (`proto/fuwa/v1/profile_item.proto`).
 
 ## Who offers what, and where it shows
 
 | | Offered by | Managed by | Worn on | Shows |
 | --- | --- | --- | --- | --- |
-| The instance's | node.db `profile_items` | Instance admins (Instance settings > Profile items) | Your profile (`UpdateProfile`: `effect`, `decoration_id`) | Everywhere on the instance |
-| A server's | The server file's `profile_items` | Manage Server (Server settings > Profile items) | Your profile in that server (`UpdateMember`: `effect`, `decoration_id`) | In that server, instead of your own |
+| The instance's | node.db `profile_items` | Instance admins (Instance settings > Profile items) | Your profile (`UpdateProfile`: `effect`, `decoration_id`, `nameplate_id`) | Everywhere on the instance |
+| A server's | The server file's `profile_items` | Manage Server (Server settings > Profile items) | Your profile in that server (`UpdateMember`: `effect`, `decoration_id`, `nameplate_id`) | In that server, instead of your own |
 
 A member's server profile may also pick a built-in effect. Leaving it empty
 shows their own profile's. Moderators with Manage Nicknames can clear
@@ -27,7 +29,8 @@ someone's server profile but never put anything on it.
 
 Profiles and members name what they wear by id: `Profile.effect` (a
 built-in id or one of the instance's items), `User.decoration_id`,
-`Member.effect` and `Member.decoration_id`. Apps keep each list and draw from
+`User.nameplate_id`, `Member.effect`, `Member.decoration_id` and
+`Member.nameplate_id`. Apps keep each list and draw from
 it:
 
 - The instance's list comes from `ListInstanceProfileItems`, listed again
@@ -39,9 +42,10 @@ An id an app can't find (deleted, or someone from another instance) draws
 nothing. Deleting an item also takes it off everyone wearing it, in the same
 write.
 
-`User.decoration_id` travels with the copy of someone's look each server
-keeps (its `users` table), so a decoration shows on messages and in member
-lists like the avatar does. It never goes to other instances.
+`User.decoration_id` and `User.nameplate_id` travel with the copy of
+someone's look each server keeps (its `users` table), so a decoration shows
+on messages and in member lists like the avatar does, and so does a
+nameplate. It never goes to other instances.
 
 ## Effects
 
@@ -110,13 +114,39 @@ all of the above, which ends where the person describes their decoration.
 A decoration's picture can't be replaced: add another and delete the old
 one. Deleting it deletes the picture, as deleting an effect deletes its.
 
+## Nameplates
+
+A nameplate is a picture uploaded like a decoration's
+(`MEDIA_PURPOSE_DECORATION`, for the instance or a server), made an item of
+kind `PROFILE_ITEM_KIND_NAMEPLATE`. Apps draw it behind someone's row in the
+member list, and behind the conversation in the list of direct messages:
+cropped to fill the row (about 240 × 44 pixels) and lined up on its right
+edge, fading out towards the left so the avatar and name stay readable, a
+little see-through until the row is pointed at. A GIF moves; with reduced
+motion it's held still on its first frame. Apps that know nameplates ask
+for the `nameplates` feature.
+
+### Making one
+
+Make it 900 × 150 pixels, six times as wide as it's tall; PNG, GIF or WebP,
+see-through or filling the strip. The avatar and name sit over its left
+half, which apps fade out, so put the art mostly on the right and keep the
+left calm: soft color, no busy detail. It's shown about 240 × 44 pixels, so
+bold shapes and clear colors read best; skip text, faces and fine detail.
+
+Beside "Add a nameplate" the apps offer a template (that 900 × 150 picture,
+faint where it fades, with the avatar's circle and the name's box marked)
+and a prompt to copy for an AI that makes pictures. Like a decoration's, a
+nameplate's picture can't be replaced: add another and delete the old one.
+
 ## The instance's switches
 
 - `profile_effects` (`FUWA_PROFILE_EFFECTS`, on) covers every effect,
   built-in or offered.
 - `profile_decorations` (`FUWA_PROFILE_DECORATIONS`, on) covers
-  decorations. While it's off, profiles come back without one, picking one is
-  refused (clearing still works), and apps draw none (`Node.profile_decorations`).
+  decorations and nameplates. While it's off, profiles come back without
+  either, picking one is refused (clearing still works), and apps draw none
+  (`Node.profile_decorations`).
 
 Everyone's picks are kept while a switch is off.
 

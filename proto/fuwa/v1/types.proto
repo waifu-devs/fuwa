@@ -51,8 +51,9 @@ message Node {
   // of one (docs/self-hosting.md, "Updating").
   DesktopApp desktop_app = 19;
   // People may wear a decoration around their avatar (User.decoration_id,
-  // Member.decoration_id). While it's off, apps draw none and hide the
-  // pickers.
+  // Member.decoration_id) and a nameplate behind their name
+  // (User.nameplate_id, Member.nameplate_id). While it's off, apps draw
+  // none and hide the pickers.
   bool profile_decorations = 20;
   // When the instance's profile items (ProfileItemService) last changed;
   // unset if it never had any. Apps list them again when it moves.
@@ -288,6 +289,9 @@ message User {
   // (ProfileItemService.ListInstanceProfileItems), or empty for none. Apps
   // that can't find it draw none, as for someone from another instance.
   string decoration_id = 8;
+  // The nameplate behind their name in member lists: one of the instance's
+  // profile items, or empty for none. Drawn like the decoration.
+  string nameplate_id = 9;
 }
 
 // Everything a person shows about themselves on an instance, beyond what
@@ -316,6 +320,8 @@ enum ProfileItemKind {
   PROFILE_ITEM_KIND_EFFECT = 1;
   // A picture around the avatar.
   PROFILE_ITEM_KIND_DECORATION = 2;
+  // A wide picture behind someone's name in member lists and DM lists.
+  PROFILE_ITEM_KIND_NAMEPLATE = 3;
 }
 
 // A profile effect or avatar decoration the instance or a server offers
@@ -336,7 +342,9 @@ message ProfileItem {
   string effect = 6;
   // A decoration's picture: an upload on this instance
   // (MEDIA_PURPOSE_DECORATION), square and see-through in the middle,
-  // drawn centred over the avatar at 1.2 times its size. Empty for an
+  // drawn centred over the avatar at 1.2 times its size. A nameplate's:
+  // the same kind of upload, wide (about 6:1), drawn across the row behind
+  // the name, covering it and fading out towards the name. Empty for an
   // effect.
   string picture_url = 7;
   // A GIF that moves.
@@ -389,6 +397,8 @@ message Member {
   // profile items), shown here instead of their own. Empty for their own.
   string effect = 11;
   string decoration_id = 12;
+  // A nameplate (one of the server's profile items), as decoration_id.
+  string nameplate_id = 13;
 }
 
 // ============================================================================

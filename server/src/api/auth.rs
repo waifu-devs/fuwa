@@ -329,19 +329,25 @@ impl Api {
         if effect.as_deref().is_some_and(|effect| !effect.is_empty()) && !settings.profile_effects {
             return Err(Error::FailedPrecondition("profile effects are off on this instance".into()));
         }
-        let decoration = match req.decoration_id.as_deref().map(str::trim) {
-            Some("") => Some(String::new()),
-            Some(id) => {
-                if !settings.profile_decorations {
-                    return Err(Error::FailedPrecondition("decorations are off on this instance".into()));
+        // A decoration or a nameplate: one of the instance's, while it has them on.
+        let picked =
+            async |id: Option<&str>, kind: pb::ProfileItemKind, what: &'static str| -> Result<Option<String>> {
+                match id.map(str::trim) {
+                    Some("") => Ok(Some(String::new())),
+                    Some(id) => {
+                        if !settings.profile_decorations {
+                            return Err(Error::FailedPrecondition("decorations are off on this instance".into()));
+                        }
+                        if !node.has_profile_item(id, kind).await? {
+                            return Err(Error::NotFound(what));
+                        }
+                        Ok(Some(id.to_string()))
+                    }
+                    None => Ok(None),
                 }
-                if !node.has_profile_item(id, pb::ProfileItemKind::Decoration).await? {
-                    return Err(Error::NotFound("decoration"));
-                }
-                Some(id.to_string())
-            }
-            None => None,
-        };
+            };
+        let decoration = picked(req.decoration_id.as_deref(), pb::ProfileItemKind::Decoration, "decoration").await?;
+        let nameplate = picked(req.nameplate_id.as_deref(), pb::ProfileItemKind::Nameplate, "nameplate").await?;
         // Pictures from other sites come through the instance, so nobody
         // who looks at them is seen by that site.
         let avatar_url = req
@@ -385,11 +391,13 @@ impl Api {
             status,
             effect,
             decoration,
+            nameplate,
         };
         let shows_everywhere = change.display_name.is_some()
             || change.avatar_url.is_some()
             || change.status.is_some()
-            || change.decoration.is_some();
+            || change.decoration.is_some()
+            || change.nameplate.is_some();
         let old_avatar = account.avatar_url.clone();
         self.keep_picture(new_avatar.as_deref(), None).await;
         self.keep_picture(new_banner.as_deref(), None).await;
@@ -411,7 +419,7 @@ impl Api {
         Ok((user, profile))
     }
 
-    /// A profile as apps get it: without its effect or decoration while the
+    /// A profile as apps get it: without its effect, decoration or nameplate while the
     /// instance has them off (the picks stay saved for when they're back on).
     fn shown_profile(&self, mut profile: pb::Profile) -> pb::Profile {
         let settings = self.app.settings();
@@ -422,6 +430,7 @@ impl Api {
             && let Some(user) = profile.user.as_mut()
         {
             user.decoration_id.clear();
+            user.nameplate_id.clear();
         }
         profile
     }

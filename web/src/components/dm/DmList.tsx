@@ -7,6 +7,7 @@ import { isMessage, lineText, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { PartnerDot } from "@/components/Presence";
+import { MemberNameplate } from "@/components/ProfileDecoration";
 import { useLayout } from "@/components/Shell";
 import { Count } from "@/components/motion";
 import { SPRING } from "@/lib/motion";
@@ -152,8 +153,9 @@ const DmLink = memo(function DmLink({ instanceKey, conversation, enter }: { inst
         params={{ instance: instanceKey, conversation: conversation.id }}
         onClick={() => compact && setNavOpen(false)}
         {...menu}
-        className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[menu-open]:bg-muted data-[status=active]:bg-primary/15"
+        className="group relative isolate flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[menu-open]:bg-muted data-[status=active]:bg-primary/15"
       >
+        <MemberNameplate instanceKey={instanceKey} user={other} />
         <span className="relative shrink-0">
           <UserAvatar user={other} className="size-8 text-xs transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3" />
           <span className="absolute -bottom-0.5 -left-0.5 grid size-3.5 place-items-center rounded-full bg-card text-seal-icon ring-2 ring-card">
