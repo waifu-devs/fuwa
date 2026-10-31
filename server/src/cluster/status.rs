@@ -179,12 +179,19 @@ fn busiest_of(parts: &[Value]) -> Vec<Value> {
 }
 
 /// A shard's load, as its directory asks for it.
-async fn shard_load(url: &str, key: &str) -> Option<Value> {
-    let asked = CLIENT.get(format!("{url}/healthz/load")).header(super::KEY_HEADER, key).send().await.ok()?;
+async fn shard_load(url: &str, key: &super::SentKeys) -> Option<Value> {
+    let asked = with_keys(CLIENT.get(format!("{url}/healthz/load")), key).send().await.ok()?;
     if asked.status() != StatusCode::OK {
         return None;
     }
     asked.json::<Value>().await.ok().filter(Value::is_object)
+}
+
+/// A request to another part, carrying the cluster key.
+fn with_keys(request: reqwest::RequestBuilder, key: &super::SentKeys) -> reqwest::RequestBuilder {
+    let mut headers = HeaderMap::new();
+    key.put_headers(&mut headers);
+    request.headers(headers)
 }
 
 /// What this process knows of the instance's parts. A directory's answer
@@ -206,7 +213,8 @@ pub async fn parts(app: &Arc<App>, headers: &HeaderMap) -> Response {
                 return json!({ "parts": [{ "part": "server", "up": true, "load": load }], "busiest": busiest });
             };
             parts.push(json!({ "part": "directory", "up": true }));
-            let key = app.config.cluster.key.as_deref().unwrap_or_default();
+            let Ok(key) = app.config.cluster.key_value() else { return json!({ "parts": parts }) };
+            let key = &key;
             let urls = shards.urls();
             let loads = futures::future::join_all(shards.all().into_iter().map(|(id, client)| {
                 let url = urls.get(&id).filter(|_| client.is_some()).cloned();
@@ -242,11 +250,16 @@ pub async fn parts(app: &Arc<App>, headers: &HeaderMap) -> Response {
 
 /// A gateway's answer: the directory's, or the directory down when it can't
 /// be had, with this gateway's own streams. The busiest servers only for an admin.
-pub async fn from_directory(cache: &Cached, directory_url: &str, key: &str, streams: usize, admin: bool) -> Response {
+pub async fn from_directory(
+    cache: &Cached,
+    directory_url: &str,
+    key: &super::SentKeys,
+    streams: usize,
+    admin: bool,
+) -> Response {
     let mut value = cache
         .get_or_make(|| async {
-            let asked =
-                CLIENT.get(format!("{directory_url}/healthz/parts")).header(super::KEY_HEADER, key).send().await;
+            let asked = with_keys(CLIENT.get(format!("{directory_url}/healthz/parts")), key).send().await;
             match asked {
                 Ok(response) if response.status() == StatusCode::OK => response.json::<Value>().await.ok(),
                 _ => None,

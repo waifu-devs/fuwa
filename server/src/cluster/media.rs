@@ -12,7 +12,6 @@
 
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use axum::routing::get;
 use futures::StreamExt;
@@ -113,7 +112,7 @@ pub async fn start(config: &Config, calls_stop: CancellationToken) -> Result<(ax
     let media = config.media.clone().ok_or("a media part needs FUWA_MEDIA_PORT")?;
     let sfu = Sfu::start(media, calls_stop).await.map_err(|err| err.to_string())?;
     let (_, health) = tonic_health::server::health_reporter();
-    let key: Arc<str> = config.cluster.key.as_deref().unwrap_or_default().into();
+    let key = config.cluster.accepted_keys();
     let router = tonic::service::Routes::new(cpb::media_service_server::MediaServiceServer::new(Internal(sfu.clone())))
         .add_service(health)
         .into_axum_router()

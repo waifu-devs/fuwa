@@ -640,9 +640,18 @@
     webhook post avatars, the waifu.dev picture) is rewritten when stored, with
     `App::picture_link`, to `/media/outside/<hmac>?url=...`, which the instance
     fetches itself (public addresses only, pictures only, 8 MB, cached). The
-    key is from FUWA_CLUSTER_KEY when split, else node.db's `meta`. New
+    key is from FUWA_CLUSTER_KEY when split, else node.db's `meta`; while
+    the cluster key changes, `outside::Key` signs with the current key's and
+    checks with the previous ones' too (`macs`, `each`), and retired ones
+    (FUWA_CLUSTER_KEY_RETIRED) check picture links alone. New
     fields that hold a picture link go through `picture_link` too; the web
     app's `lib/shown.ts` hides any that don't.
+  - Key changes (docs/key-rotation.md): `db::EncryptionKey` carries the keys
+    it replaces (FUWA_ENCRYPTION_KEY_PREVIOUS); `db::open` copies a file under
+    one of them into a new file under the current key (`db::rekey`: Turso
+    can't change a file's key in place) before opening it, `replica::restore_file`
+    replays a snapshot under the key it was made with first, and
+    `recordings::reseal_all` seals recordings again at startup.
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
@@ -670,7 +679,11 @@
     answer the internal protocol; `gateway.rs` routes client calls (by
     service, and by the `server_id` in field 1 for server-scoped ones) and
     merges live streams. `require_key` and `WithKey` are the only places the
-    cluster key is checked and sent. A directory whose folder still has a
+    cluster key is checked and sent: `SentKeys` puts every key a part has on a
+    call (previous ones first, so a part from before a change still finds its
+    own in the first value) and `AcceptedKeys` takes any of them
+    (docs/key-rotation.md; `FUWA_CLUSTER_KEY_PREVIOUS`,
+    `FUWA_MEDIA_KEY_PREVIOUS`). A directory whose folder still has a
     single process's `servers/` hands them to the first shard that asks
     (`TakeServers`, then `HandedOver`; `shard::take_servers` runs before a
     shard opens its servers), keeping its copies in `handed-over/`.
@@ -1186,7 +1199,8 @@
   gateways (which overlap old and new) ride out the directory's restart. A pull request that touches it gets a plan comment and merging
   applies it (`.github/workflows/railway-config.yml`); the root `package.json`
   exists only for this. The encryption key is a shared variable set by hand and
-  must never change; so is the cluster key, which can. Don't edit the project in Railway's dashboard between a
+  changes only through `FUWA_ENCRYPTION_KEY_PREVIOUS` (docs/key-rotation.md);
+  so is the cluster key, which changes through `FUWA_CLUSTER_KEY_PREVIOUS`. Don't edit the project in Railway's dashboard between a
   plan and its apply, or the apply refuses.
 
 ## Rules

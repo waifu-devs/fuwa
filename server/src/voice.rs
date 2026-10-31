@@ -244,7 +244,7 @@ pub enum MediaLink {
 }
 
 impl MediaLink {
-    pub fn remote(urls: &[String], key: tonic::metadata::AsciiMetadataValue) -> Result<Self> {
+    pub fn remote(urls: &[String], key: crate::cluster::SentKeys) -> Result<Self> {
         let mut parts = Vec::new();
         for url in urls {
             let client = cpb::media_service_client::MediaServiceClient::with_interceptor(

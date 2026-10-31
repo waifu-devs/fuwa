@@ -10,6 +10,7 @@ use std::time::Duration;
 use fuwa_server::app::App;
 use fuwa_server::cluster::gateway::Gateway;
 use fuwa_server::config::Config;
+use fuwa_server::db::EncryptionKey;
 use fuwa_server::pb;
 use fuwa_server::pb::event::Payload;
 use tokio::net::TcpListener;
@@ -71,8 +72,11 @@ fn config(dir: &Path, vars: &[(&str, String)]) -> Config {
         "FUWA_TELEMETRY" => Some("off".into()),
         "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
-        "FUWA_CLUSTER_KEY" => Some(KEY.into()),
-        _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
+        _ => vars
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .or_else(|| (key == "FUWA_CLUSTER_KEY").then(|| KEY.into())),
     })
     .unwrap();
     config.cluster.ride_out = RIDE_OUT;
@@ -141,7 +145,18 @@ async fn start_directory(
 }
 
 fn start_gateway(dir: &Path, directory: &Part, listener: TcpListener, addr: SocketAddr) -> (Part, Arc<Gateway>) {
-    let vars = [("FUWA_ROLE", "gateway".to_string()), ("FUWA_DIRECTORY_URL", directory.url())];
+    start_gateway_with(dir, directory, listener, addr, &[])
+}
+
+fn start_gateway_with(
+    dir: &Path,
+    directory: &Part,
+    listener: TcpListener,
+    addr: SocketAddr,
+    more: &[(&str, String)],
+) -> (Part, Arc<Gateway>) {
+    let mut vars = vec![("FUWA_ROLE", "gateway".to_string()), ("FUWA_DIRECTORY_URL", directory.url())];
+    vars.extend(more.iter().cloned());
     let gateway = Gateway::new(config(dir, &vars)).unwrap();
     let shutdown = gateway.shutdown();
     let serving = serve(listener, gateway.router(), shutdown.clone());
@@ -1173,6 +1188,113 @@ async fn one_process_splits_in_place() {
     a.stop().await;
     b.stop().await;
     directory.stop().await;
+}
+
+/// Every key changes on a running split instance, one part at a time: each
+/// part is given the new cluster and encryption keys with the old ones as
+/// previous, then the old ones are taken away, and calls go through the
+/// gateway at every step.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn keys_change_one_part_at_a_time() {
+    const NEW: &str = "new-cluster-key-0123456789abcdef0123456789ab";
+    let root = tempfile::tempdir().unwrap();
+    let (old_data, new_data) = ("ab".repeat(32), "cd".repeat(32));
+    let old = [("FUWA_ENCRYPTION_KEY", old_data.clone())];
+    let changing = [
+        ("FUWA_CLUSTER_KEY", NEW.to_string()),
+        ("FUWA_CLUSTER_KEY_PREVIOUS", KEY.to_string()),
+        ("FUWA_ENCRYPTION_KEY", new_data.clone()),
+        ("FUWA_ENCRYPTION_KEY_PREVIOUS", old_data.clone()),
+    ];
+    let new = [("FUWA_CLUSTER_KEY", NEW.to_string()), ("FUWA_ENCRYPTION_KEY", new_data.clone())];
+
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, directory_addr) = listen().await;
+    let mut directory = start_directory(root.path(), &old, listener, directory_addr, gateway_addr).await;
+    let mut shard = start_shard_with(&root.path().join("shard-a"), "a", &directory, &old).await;
+    let (mut gateway, mut _gateway) =
+        start_gateway_with(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr, &[]);
+    let mut c = clients(&gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Server").await;
+    let channel = general(&mut c, &juan, &server.id).await;
+    send(&mut c, &juan, &server.id, &channel.id, "before").await;
+
+    let mut said = vec!["before".to_string()];
+    let mut step = async |c: &mut Clients, label: &str| {
+        let message = eventually(|| {
+            let (mut messages, juan) = (c.messages.clone(), juan.clone());
+            let request = pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: channel.id.clone(),
+                content: label.to_string(),
+                ..Default::default()
+            };
+            async move { messages.send_message(authed(&juan, request)).await }
+        })
+        .await;
+        said.push(message.into_inner().message.unwrap().content);
+        let request = pb::ListMessagesRequest {
+            server_id: server.id.clone(),
+            channel_id: channel.id.clone(),
+            ..Default::default()
+        };
+        let listed = c.messages.list_messages(authed(&juan, request)).await.unwrap().into_inner().messages;
+        let mut contents: Vec<String> = listed.into_iter().map(|m| m.content).collect();
+        contents.sort();
+        let mut expected = said.clone();
+        expected.sort();
+        assert_eq!(contents, expected, "at {label}");
+    };
+
+    // The shard first: it takes the old key from the directory and the
+    // gateway, and they take its calls (the old key comes first on them).
+    let shard_dir = root.path().join("shard-a");
+    shard.stop().await;
+    shard = start_shard_with(&shard_dir, "a", &directory, &changing).await;
+    step(&mut c, "shard changing").await;
+
+    // Then the directory, then the gateway, with only the new key: it still
+    // reaches both while they take either.
+    directory.stop().await;
+    let listener = TcpListener::bind(directory_addr).await.unwrap();
+    directory = start_directory(root.path(), &changing, listener, directory_addr, gateway_addr).await;
+    step(&mut c, "directory changing").await;
+    gateway.stop().await;
+    let listener = TcpListener::bind(gateway_addr).await.unwrap();
+    (gateway, _gateway) = start_gateway_with(&root.path().join("gateway"), &directory, listener, gateway_addr, &new);
+    let mut c = clients(&gateway).await;
+    step(&mut c, "gateway new").await;
+
+    // The previous keys go: the shard, then the directory.
+    shard.stop().await;
+    shard = start_shard_with(&shard_dir, "a", &directory, &new).await;
+    step(&mut c, "shard new").await;
+    directory.stop().await;
+    let listener = TcpListener::bind(directory_addr).await.unwrap();
+    directory = start_directory(root.path(), &new, listener, directory_addr, gateway_addr).await;
+    step(&mut c, "all new").await;
+
+    // The old key no longer reaches any part directly.
+    let http = reqwest::Client::new();
+    for (part, path) in [(&directory, "/healthz/parts"), (&shard, "/healthz/load")] {
+        let with = |key: &str| http.get(format!("{}{path}", part.url())).header("x-fuwa-cluster-key", key.to_string());
+        // Refused as a gRPC error would be: grpc-status 7 (permission denied).
+        let refused = |response: reqwest::Response| response.headers().get("grpc-status").is_some_and(|s| s == "7");
+        assert!(!refused(with(NEW).send().await.unwrap()), "{path} takes the new key");
+        assert!(refused(with(KEY).send().await.unwrap()), "{path} refuses the old key");
+    }
+
+    gateway.stop().await;
+    shard.stop().await;
+    directory.stop().await;
+
+    // Every database is under the new encryption key alone.
+    let (old_key, new_key) = (EncryptionKey::parse(&old_data).unwrap(), EncryptionKey::parse(&new_data).unwrap());
+    for file in [root.path().join("directory/node.db"), shard_dir.join("servers").join(format!("{}.db", server.id))] {
+        assert!(fuwa_server::db::open(&file, Some(&old_key), &[]).await.is_err(), "{}", file.display());
+        drop(fuwa_server::db::open(&file, Some(&new_key), &[]).await.unwrap());
+    }
 }
 
 mod common;

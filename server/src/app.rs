@@ -197,7 +197,11 @@ impl App {
         // Every part of a split instance signs picture links alike; a single
         // process keeps its own key.
         let picture_key = match (&config.cluster.key, &node) {
-            (Some(cluster_key), _) => crate::outside::Key::from_cluster_key(cluster_key),
+            (Some(cluster_key), _) => crate::outside::Key::from_cluster_keys(
+                cluster_key,
+                &config.cluster.previous_keys,
+                &config.cluster.retired_keys,
+            ),
             (None, Some(node)) => node.picture_key().await?,
             (None, None) => return Err(Error::internal("a shard needs FUWA_CLUSTER_KEY")),
         };
@@ -571,8 +575,8 @@ impl App {
             router = router.layer(axum::middleware::from_fn_with_state(self.clone(), wait));
         }
         // Behind gateways, which serve the web app and answer browsers' CORS.
-        let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
-        router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
+        let keys = self.config.cluster.accepted_keys();
+        router.layer(axum::middleware::from_fn_with_state(keys, crate::cluster::require_key))
     }
 }
 
@@ -781,6 +785,9 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     crate::api::spawn_voice_sweeper(app.clone());
     crate::api::spawn_voice_guard(app.clone());
     crate::recordings::Recordings::spawn(app.clone());
+    // While the encryption key replaces others, recordings sealed under them
+    // are sealed again under it (databases were as they opened).
+    tokio::spawn(crate::recordings::reseal_all(app.clone()));
     if let Some(replica) = &app.replica {
         replica.start();
     }

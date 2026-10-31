@@ -533,7 +533,9 @@ service and copy `/var/lib/private/fuwa` instead (`/var/lib/fuwa` points to it).
 
 Keep the encryption key somewhere other than the backups: a backup of an
 encrypted instance can only be opened with it. To restore, stop fuwa, put the
-files back in the empty data folder, and start it with the same key.
+files back in the empty data folder, and start it with the same key (or,
+for a backup from before the key changed, the new key with the old one as
+`FUWA_ENCRYPTION_KEY_PREVIOUS`; see [key-rotation.md](key-rotation.md)).
 
 An admin can also save one community server as a plain SQLite file from the
 instance settings (Servers). That file is never encrypted.
@@ -557,7 +559,9 @@ version and commit an instance runs on its home page.
 
 - **fuwa won't start, and the log names `FUWA_ENCRYPTION_KEY`.** The key isn't
   the one the data was made with, or the data was made without one (or with
-  one, and the key is missing). Put the original back.
+  one, and the key is missing). Put the original back. To change the key on
+  purpose, give the old one as `FUWA_ENCRYPTION_KEY_PREVIOUS`
+  ([key-rotation.md](key-rotation.md)).
 - **"Continue with waifu.dev" doesn't show.** It needs `FUWA_PUBLIC_URL` to be
   the https address people use.
 - **Pictures don't load.** `FUWA_PUBLIC_URL` isn't the address people use;

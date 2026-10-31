@@ -26,6 +26,9 @@ pub struct Config {
     /// so `*` is safe.
     pub allowed_origins: Vec<String>,
     /// FUWA_ENCRYPTION_KEY: when set, every database is encrypted at rest.
+    /// With FUWA_ENCRYPTION_KEY_PREVIOUS (the keys it replaces, comma
+    /// separated, `none` for data made without one) it carries those too:
+    /// data under them is encrypted again under it (see `db::open`).
     pub encryption_key: Option<EncryptionKey>,
     /// FUWA_LOCAL_ACCOUNTS: open (default) | closed | off.
     pub local_accounts: Accounts,
@@ -419,6 +422,17 @@ impl Config {
         let encryption_key = get("FUWA_ENCRYPTION_KEY")
             .map(|key| EncryptionKey::parse(&key).map_err(|err| format!("FUWA_ENCRYPTION_KEY {err}")))
             .transpose()?;
+        let previous_keys = get("FUWA_ENCRYPTION_KEY_PREVIOUS").unwrap_or_default();
+        let previous_keys: Vec<&str> = previous_keys.split(',').map(str::trim).filter(|key| !key.is_empty()).collect();
+        let encryption_key = match (encryption_key, previous_keys.is_empty()) {
+            (key, true) => key,
+            (None, false) => {
+                return Err("FUWA_ENCRYPTION_KEY_PREVIOUS needs FUWA_ENCRYPTION_KEY: the key the data moves to".into());
+            }
+            (Some(key), false) => {
+                Some(key.replacing(&previous_keys).map_err(|err| format!("FUWA_ENCRYPTION_KEY_PREVIOUS {err}"))?)
+            }
+        };
 
         let accounts = |key: &str| match get(key) {
             None => Ok(Accounts::Open),
@@ -1105,6 +1119,19 @@ mod tests {
         assert!(config(&[("FUWA_LINKED_ACCOUNTS", "maybe")]).unwrap_err().contains("FUWA_LINKED_ACCOUNTS"));
         assert!(config(&[("FUWA_LINKED_ISSUER", "api.waifu.dev")]).unwrap_err().contains("https://"));
         assert!(config(&[("FUWA_ENCRYPTION_KEY", "short")]).unwrap_err().contains("64 hex"));
+        let (previous, next) = ("ab".repeat(32), "cd".repeat(32));
+        let (previous, next) = (previous.as_str(), next.as_str());
+        let alone = [("FUWA_ENCRYPTION_KEY_PREVIOUS", previous)];
+        assert!(config(&alone).unwrap_err().contains("needs FUWA_ENCRYPTION_KEY"));
+        let bad = [("FUWA_ENCRYPTION_KEY", next), ("FUWA_ENCRYPTION_KEY_PREVIOUS", "short")];
+        assert!(config(&bad).unwrap_err().contains("FUWA_ENCRYPTION_KEY_PREVIOUS"));
+        let same = [("FUWA_ENCRYPTION_KEY", previous), ("FUWA_ENCRYPTION_KEY_PREVIOUS", previous)];
+        assert!(config(&same).unwrap_err().contains("in use"));
+        let listed = format!("{previous}, none");
+        let both = [("FUWA_ENCRYPTION_KEY", next), ("FUWA_ENCRYPTION_KEY_PREVIOUS", listed.as_str())];
+        let key = config(&both).unwrap().encryption_key.unwrap();
+        assert_eq!(key.previous().count(), 2);
+        assert!(!format!("{key:?}").contains(previous));
         assert!(config(&[("FUWA_LIMIT_STORAGE", "5 parsecs")]).unwrap_err().contains("unknown unit"));
         assert!(config(&[("FUWA_CALL_RECORDINGS_KEEP_DAYS", "0")]).unwrap_err().contains("1 or more"));
     }

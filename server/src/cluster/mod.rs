@@ -83,6 +83,18 @@ pub struct ClusterConfig {
     /// directory and shards it's what they send to media parts; on a media
     /// part it's the only key it accepts (in place of FUWA_CLUSTER_KEY).
     pub media_key: Option<String>,
+    /// FUWA_CLUSTER_KEY_PREVIOUS: keys this part still takes while the
+    /// cluster key changes (comma separated), and sends ahead of its own so a
+    /// part still on one of them finds it first (see [`SentKeys`]). On a
+    /// media part with its own key, FUWA_MEDIA_KEY_PREVIOUS instead.
+    pub previous_keys: Vec<String>,
+    /// FUWA_MEDIA_KEY_PREVIOUS: the same for the media key, on the parts
+    /// that call media parts.
+    pub previous_media_keys: Vec<String>,
+    /// FUWA_CLUSTER_KEY_RETIRED: old cluster keys taken for nothing but the
+    /// picture links signed under them (`outside.rs`), so pictures stored
+    /// before a change keep loading. Never for internal calls.
+    pub retired_keys: Vec<String>,
     /// FUWA_DIRECTORY_URL: where gateways and shards reach the directory.
     pub directory_url: Option<String>,
     /// FUWA_SHARD_ID: a shard's name. Defaults to one made up on first start
@@ -111,6 +123,9 @@ impl std::fmt::Debug for ClusterConfig {
             .field("role", &self.role)
             .field("key", &crate::config::Secret(&self.key))
             .field("media_key", &crate::config::Secret(&self.media_key))
+            .field("previous_keys", &self.previous_keys.len())
+            .field("previous_media_keys", &self.previous_media_keys.len())
+            .field("retired_keys", &self.retired_keys.len())
             .field("directory_url", &self.directory_url)
             .field("shard_id", &self.shard_id)
             .field("internal_url", &self.internal_url)
@@ -128,6 +143,9 @@ impl ClusterConfig {
             role: Role::All,
             key: None,
             media_key: None,
+            previous_keys: Vec::new(),
+            previous_media_keys: Vec::new(),
+            retired_keys: Vec::new(),
             directory_url: None,
             shard_id: None,
             internal_url: None,
@@ -164,11 +182,19 @@ impl ClusterConfig {
         if let Some(key) = &media_key {
             check_key("FUWA_MEDIA_KEY", key)?;
         }
+        let previous_cluster = key_list(get, "FUWA_CLUSTER_KEY_PREVIOUS")?;
+        let previous_media_keys = key_list(get, "FUWA_MEDIA_KEY_PREVIOUS")?;
+        let retired_keys = key_list(get, "FUWA_CLUSTER_KEY_RETIRED")?;
         // A media part with its own key holds nothing else: it never needs the
-        // cluster key, and accepts only the media key.
-        let key = match (role, &media_key) {
-            (Role::Media, Some(media_key)) => Some(media_key.clone()),
-            _ => get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string()),
+        // cluster key, and accepts only the media key (and its previous ones).
+        let (key, previous_keys) = match (role, &media_key) {
+            (Role::Media, Some(media_key)) => (Some(media_key.clone()), previous_media_keys.clone()),
+            // A media part going over to a key of its own still takes the cluster key's.
+            (Role::Media, None) => (
+                get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string()),
+                [previous_cluster.clone(), previous_media_keys.clone()].concat(),
+            ),
+            _ => (get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string()), previous_cluster),
         };
         match &key {
             Some(key) => check_key("FUWA_CLUSTER_KEY", key)?,
@@ -210,10 +236,18 @@ impl ClusterConfig {
         if let Some(id) = &shard_id {
             check_shard_id(id).map_err(|err| format!("FUWA_SHARD_ID {err}"))?;
         }
+        if let Some(current) = &key
+            && previous_keys.contains(current)
+        {
+            return Err("FUWA_CLUSTER_KEY_PREVIOUS (or FUWA_MEDIA_KEY_PREVIOUS) lists the key in use; list only the ones it replaces".into());
+        }
         Ok(Self {
             role,
             key,
             media_key,
+            previous_keys,
+            previous_media_keys,
+            retired_keys,
             directory_url,
             shard_id,
             internal_url,
@@ -229,19 +263,110 @@ impl ClusterConfig {
         self.role != Role::All
     }
 
-    /// The cluster key as a header value.
-    pub fn key_value(&self) -> Result<AsciiMetadataValue> {
+    /// What this part sends on its calls to the others: the cluster key,
+    /// after any previous ones.
+    pub fn key_value(&self) -> Result<SentKeys> {
         let key = self.key.as_deref().ok_or_else(|| Error::internal("no cluster key"))?;
-        AsciiMetadataValue::try_from(key).map_err(|_| Error::internal("the cluster key isn't a valid header"))
+        SentKeys::new(&self.previous_keys, key)
     }
 
-    /// The key for calls to media parts: FUWA_MEDIA_KEY, or the cluster key.
-    pub fn media_key_value(&self) -> Result<AsciiMetadataValue> {
+    /// What it sends to media parts: FUWA_MEDIA_KEY after its previous ones,
+    /// or the cluster key's.
+    pub fn media_key_value(&self) -> Result<SentKeys> {
         match &self.media_key {
-            Some(key) => AsciiMetadataValue::try_from(key.as_str())
-                .map_err(|_| Error::internal("the media key isn't a valid header")),
-            None => self.key_value(),
+            Some(key) => SentKeys::new(&self.previous_media_keys, key),
+            None => {
+                let key = self.key.as_deref().ok_or_else(|| Error::internal("no cluster key"))?;
+                SentKeys::new(&[self.previous_media_keys.as_slice(), &self.previous_keys].concat(), key)
+            }
         }
+    }
+
+    /// Every key a call to this part may carry: its own, then the previous
+    /// ones.
+    pub fn accepted_keys(&self) -> AcceptedKeys {
+        let keys: Vec<Box<str>> = self.key.iter().chain(&self.previous_keys).map(|key| key.as_str().into()).collect();
+        AcceptedKeys(keys.into())
+    }
+}
+
+/// A comma-separated list of keys from the environment, each checked like
+/// the cluster key.
+fn key_list(get: &impl Fn(&str) -> Option<String>, name: &str) -> std::result::Result<Vec<String>, String> {
+    let Some(value) = get(name) else { return Ok(Vec::new()) };
+    let keys: Vec<String> = value.split(',').map(|key| key.trim().to_string()).filter(|key| !key.is_empty()).collect();
+    for key in &keys {
+        check_key(name, key)?;
+    }
+    Ok(keys)
+}
+
+/// The keys a part sends on every internal call: one header value each,
+/// the previous keys first and its own last.
+///
+/// That order is what lets a key change roll out one part at a time. A
+/// part from before the change takes only the header's first value, its
+/// own key, so it still answers parts that have moved on; parts that have
+/// moved on take a call carrying any key they know.
+#[derive(Clone)]
+pub struct SentKeys(Arc<[AsciiMetadataValue]>);
+
+impl SentKeys {
+    fn new(previous: &[String], current: &str) -> Result<Self> {
+        let values = previous
+            .iter()
+            .map(String::as_str)
+            .chain([current])
+            .map(|key| {
+                AsciiMetadataValue::try_from(key).map_err(|_| Error::internal("a cluster key isn't a valid header"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self(values.into()))
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &AsciiMetadataValue> {
+        self.0.iter()
+    }
+
+    /// Puts the keys on a gRPC call, in place of any it carried.
+    pub fn put_metadata(&self, metadata: &mut MetadataMap) {
+        metadata.remove(KEY_HEADER);
+        for value in self.values() {
+            metadata.append(KEY_HEADER, value.clone());
+        }
+    }
+
+    /// Puts the keys on a plain HTTP request, in place of any it carried.
+    pub fn put_headers(&self, headers: &mut http::HeaderMap) {
+        headers.remove(KEY_HEADER);
+        for value in self.values() {
+            let value = http::HeaderValue::from_bytes(value.as_encoded_bytes()).expect("a key is a valid header");
+            headers.append(http::HeaderName::from_static(KEY_HEADER), value);
+        }
+    }
+}
+
+impl std::fmt::Debug for SentKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SentKeys({} keys)", self.0.len())
+    }
+}
+
+/// The keys a part takes a call with (see [`ClusterConfig::accepted_keys`]).
+#[derive(Clone)]
+pub struct AcceptedKeys(Arc<[Box<str>]>);
+
+impl AcceptedKeys {
+    /// Whether any of a call's key headers holds one of them.
+    pub fn allow(&self, headers: &http::HeaderMap) -> bool {
+        let mut allowed = false;
+        for given in headers.get_all(KEY_HEADER) {
+            for key in self.0.iter() {
+                // Every pair is compared, so the time taken says nothing about which matched.
+                allowed |= crate::auth::constant_time_eq(given.as_bytes(), key.as_bytes());
+            }
+        }
+        allowed && !self.0.is_empty()
     }
 }
 
@@ -329,11 +454,10 @@ pub fn shard_id(config: &ClusterConfig, data_path: &Path) -> Result<String> {
 
 /// Answers only calls that carry the cluster key, and health checks, so the
 /// parts behind the gateways can't be reached around them.
-pub async fn require_key(State(key): State<Arc<str>>, request: Request, next: Next) -> Response {
+pub async fn require_key(State(keys): State<AcceptedKeys>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
     let health = path == "/healthz" || path.starts_with("/grpc.health.v1.Health/");
-    let given = request.headers().get(KEY_HEADER).map(|value| value.as_bytes()).unwrap_or_default();
-    if !health && !crate::auth::constant_time_eq(given, key.as_bytes()) {
+    if !health && !keys.allow(request.headers()) {
         let status = tonic::Status::permission_denied("this is an internal part of a fuwa instance; call a gateway");
         return status.into_http::<axum::body::Body>().into_response();
     }
@@ -360,13 +484,13 @@ pub fn channel(url: &str) -> Result<Channel> {
     Ok(endpoint.connect_lazy())
 }
 
-/// Adds the cluster key to every call.
+/// Adds the cluster key (and any previous ones) to every call.
 #[derive(Clone)]
-pub struct WithKey(pub AsciiMetadataValue);
+pub struct WithKey(pub SentKeys);
 
 impl Interceptor for WithKey {
     fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
-        request.metadata_mut().insert(KEY_HEADER, self.0.clone());
+        self.0.put_metadata(request.metadata_mut());
         Ok(request)
     }
 }
@@ -384,13 +508,13 @@ const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 /// [`MAX_MESSAGE`] however many members a server has.
 pub const MEMBER_PAGE: usize = 50_000;
 
-pub fn directory_client(url: &str, key: AsciiMetadataValue) -> Result<DirectoryClient> {
+pub fn directory_client(url: &str, key: SentKeys) -> Result<DirectoryClient> {
     Ok(cpb::directory_service_client::DirectoryServiceClient::with_interceptor(channel(url)?, WithKey(key))
         .max_decoding_message_size(MAX_MESSAGE)
         .max_encoding_message_size(MAX_MESSAGE))
 }
 
-pub fn shard_client(url: &str, key: AsciiMetadataValue) -> Result<ShardClient> {
+pub fn shard_client(url: &str, key: SentKeys) -> Result<ShardClient> {
     Ok(cpb::shard_service_client::ShardServiceClient::with_interceptor(channel(url)?, WithKey(key))
         .max_decoding_message_size(MAX_MESSAGE)
         .max_encoding_message_size(MAX_MESSAGE))
@@ -613,11 +737,94 @@ mod tests {
         // The directory and shards send it to media parts, and the cluster key everywhere else.
         let directory = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_MEDIA_KEY", MEDIA)]);
         let directory = directory.unwrap();
-        assert_eq!(directory.media_key_value().unwrap().to_str().unwrap(), MEDIA);
-        assert_eq!(directory.key_value().unwrap().to_str().unwrap(), KEY);
+        assert_eq!(sent(&directory.media_key_value().unwrap()), [MEDIA]);
+        assert_eq!(sent(&directory.key_value().unwrap()), [KEY]);
         let plain = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY)]).unwrap();
-        assert_eq!(plain.media_key_value().unwrap().to_str().unwrap(), KEY);
+        assert_eq!(sent(&plain.media_key_value().unwrap()), [KEY]);
         assert!(!format!("{directory:?}").contains(MEDIA));
+    }
+
+    fn sent(keys: &SentKeys) -> Vec<&str> {
+        keys.values().map(|value| value.to_str().unwrap()).collect()
+    }
+
+    fn headers(keys: &[&str]) -> http::HeaderMap {
+        let mut headers = http::HeaderMap::new();
+        for key in keys {
+            headers.append(KEY_HEADER, http::HeaderValue::from_str(key).unwrap());
+        }
+        headers
+    }
+
+    const OLD: &str = "old-cluster-key-0123456789abcdef0123456789";
+
+    #[test]
+    fn a_changing_key_is_sent_after_the_previous_and_either_is_taken() {
+        let directory = [("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_CLUSTER_KEY_PREVIOUS", OLD)];
+        let changing = config(&directory).unwrap();
+        // The previous key first: a part from before the change reads only the first value.
+        assert_eq!(sent(&changing.key_value().unwrap()), [OLD, KEY]);
+        let mut put = http::HeaderMap::new();
+        put.insert(KEY_HEADER, http::HeaderValue::from_static("from a client"));
+        changing.key_value().unwrap().put_headers(&mut put);
+        assert_eq!(put.get_all(KEY_HEADER).iter().map(|v| v.to_str().unwrap()).collect::<Vec<_>>(), [OLD, KEY]);
+        let mut metadata = MetadataMap::new();
+        changing.key_value().unwrap().put_metadata(&mut metadata);
+        assert_eq!(metadata.get_all(KEY_HEADER).iter().count(), 2);
+
+        let accepted = changing.accepted_keys();
+        assert!(accepted.allow(&headers(&[KEY])));
+        assert!(accepted.allow(&headers(&[OLD])));
+        assert!(accepted.allow(&headers(&[OLD, KEY])));
+        assert!(accepted.allow(&headers(&["something else entirely, 32 chars or more", KEY])));
+        assert!(!accepted.allow(&headers(&["something else entirely, 32 chars or more"])));
+        assert!(!accepted.allow(&headers(&[])));
+
+        // A part from before the change (only the old key) and one after it
+        // (only the new) each still talk to one that's changing.
+        let before = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", OLD)]).unwrap();
+        let after = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY)]).unwrap();
+        let first_only = |keys: &SentKeys| headers(&[sent(keys)[0]]);
+        assert!(before.accepted_keys().allow(&first_only(&changing.key_value().unwrap())));
+        assert!(accepted.allow(&headers(&sent(&before.key_value().unwrap()))));
+        assert!(after.accepted_keys().allow(&headers(&sent(&changing.key_value().unwrap()))));
+        assert!(accepted.allow(&headers(&sent(&after.key_value().unwrap()))));
+        assert!(!after.accepted_keys().allow(&headers(&sent(&before.key_value().unwrap()))));
+
+        assert!(!format!("{changing:?}").contains(OLD));
+        assert!(!format!("{:?}", changing.key_value().unwrap()).contains(OLD));
+        let same = [("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_CLUSTER_KEY_PREVIOUS", KEY)];
+        assert!(config(&same).unwrap_err().contains("FUWA_CLUSTER_KEY_PREVIOUS"));
+        let short = [("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_CLUSTER_KEY_PREVIOUS", "short")];
+        assert!(config(&short).unwrap_err().contains("FUWA_CLUSTER_KEY_PREVIOUS"));
+        let retired = [("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_CLUSTER_KEY_RETIRED", OLD)];
+        let retired = config(&retired).unwrap();
+        assert_eq!(retired.retired_keys, [OLD]);
+        assert!(!retired.accepted_keys().allow(&headers(&[OLD])), "retired keys are for picture links alone");
+    }
+
+    #[test]
+    fn a_changing_media_key_is_taken_by_media_parts_and_sent_to_them() {
+        const MEDIA: &str = "media-key-0123456789abcdef0123456789abcdef";
+        const OLD_MEDIA: &str = "old-media-key-0123456789abcdef0123456789";
+        let media =
+            config(&[("FUWA_ROLE", "media"), ("FUWA_MEDIA_KEY", MEDIA), ("FUWA_MEDIA_KEY_PREVIOUS", OLD_MEDIA)]);
+        let accepted = media.unwrap().accepted_keys();
+        assert!(accepted.allow(&headers(&[MEDIA])) && accepted.allow(&headers(&[OLD_MEDIA])));
+        assert!(!accepted.allow(&headers(&[KEY])));
+        let shard = [
+            ("FUWA_ROLE", "directory"),
+            ("FUWA_CLUSTER_KEY", KEY),
+            ("FUWA_MEDIA_KEY", MEDIA),
+            ("FUWA_MEDIA_KEY_PREVIOUS", OLD_MEDIA),
+        ];
+        let shard = config(&shard).unwrap();
+        assert_eq!(sent(&shard.media_key_value().unwrap()), [OLD_MEDIA, MEDIA]);
+        assert_eq!(sent(&shard.key_value().unwrap()), [KEY], "the media key's previous ones stay with media calls");
+        // Media parts given a key of their own, where they used the cluster key.
+        let moving =
+            config(&[("FUWA_ROLE", "media"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_MEDIA_KEY_PREVIOUS", OLD_MEDIA)]);
+        assert!(moving.unwrap().accepted_keys().allow(&headers(&[OLD_MEDIA])));
     }
 
     #[test]
