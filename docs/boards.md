@@ -124,7 +124,8 @@ whenever it's shown.
 - **Agents and MCP**: board events reach agents through their `View` like
   any channel's, and `mcp/manage.rs` has `get_board`,
   `list_archived_cards`, `create_card`, `update_card`, `move_card` and
-  `set_board`.
+  `set_board`. @fuwafuwa builds a roadmap board's approved cards in
+  boat.dev sandboxes (`agents/fuwafuwa/README.md`).
 - **Usage and exports**: bodies and comments are messages, counted and
   exported as such. Deleting an account takes its assignments
   (`forget_assignee`); its cards stay, like its messages.

@@ -36,7 +36,14 @@
   post is then edited with what happened, which is all the state it keeps.
   `src/feedback.ts` (pure) decides what goes out: people's words, no ids,
   pings, names or live links (Claude's titles and summaries too), and how
-  much feedback one account may send an hour. Its service `fuwafuwa` in
+  much feedback one account may send an hour. It also builds the roadmap
+  (`ROADMAP_CHANNEL`, `src/builder.ts`): an `Approved` card in a board's To
+  do column gets a boat.dev sandbox (`src/boat.ts`, its HTTP API) whose
+  Claude Code builds it on a branch and opens a pull request; screenshots it
+  saves go to the card's thread, and dragging the card to a done column
+  merges the pull request. `src/roadmap.ts` (pure) picks cards, words the
+  task and reads the agent's posts in a card's thread back into where the
+  card is, which is all the state it keeps. Its service `fuwafuwa` in
   `.railway/railway.ts` is built by Railway from this repository (its
   Dockerfile, on master, once checks pass); fuwa's image and redeploys don't
   include it.
