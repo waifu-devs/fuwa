@@ -496,7 +496,12 @@ struct Wanted {
 
 impl Wanted {
     fn signature(&self, key: &crate::outside::Key) -> String {
-        let mac = key.mac(&[
+        self.signatures(key).swap_remove(0)
+    }
+
+    /// Its signature under the current key, then any previous ones.
+    fn signatures(&self, key: &crate::outside::Key) -> Vec<String> {
+        let macs = key.macs(&[
             b"fuwa shared file\0",
             self.home.as_bytes(),
             b"\0",
@@ -508,7 +513,7 @@ impl Wanted {
             b"\0",
             self.name.as_bytes(),
         ]);
-        mac[..16].iter().map(|b| format!("{b:02x}")).collect()
+        macs.iter().map(|mac| mac[..16].iter().map(|b| format!("{b:02x}")).collect()).collect()
     }
 
     fn read(query: &str) -> Option<Self> {
@@ -554,7 +559,9 @@ pub fn link(app: &App, home_id: &str, file: &pb::Attachment) -> String {
 /// played, anything else only downloaded. Never cached anywhere.
 async fn serve(app: &Arc<App>, signature: &str, query: &str) -> Response {
     let Some(wanted) = Wanted::read(query) else { return not_found() };
-    let signed = crate::auth::constant_time_eq(signature.as_bytes(), wanted.signature(app.picture_key()).as_bytes());
+    let signed = wanted.signatures(app.picture_key()).iter().fold(false, |signed, expected| {
+        signed | crate::auth::constant_time_eq(signature.as_bytes(), expected.as_bytes())
+    });
     if !signed || wanted.until <= crate::id::now_ms() || wanted.size <= 0 {
         return not_found();
     }

@@ -151,10 +151,15 @@ pub fn read(
         return Err(ran_out());
     }
     let (payload, tag) = bytes.split_at(PAYLOAD);
-    let expected = mac(key, "fuwa sso state", &[trust_key.as_bytes(), b"\0", payload]);
-    if !crate::auth::constant_time_eq(tag, &expected[..MAC]) {
-        return Err(ran_out());
-    }
+    // Under the key that issued it: the current one, or one from before the
+    // cluster key changed.
+    let key = &key
+        .each()
+        .find(|key| {
+            let expected = mac(key, "fuwa sso state", &[trust_key.as_bytes(), b"\0", payload]);
+            crate::auth::constant_time_eq(tag, &expected[..MAC])
+        })
+        .ok_or_else(ran_out)?;
     let mut at = RANDOM;
     let mut seconds = [0u8; 8];
     seconds[3..].copy_from_slice(&payload[at..at + 5]);

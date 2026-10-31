@@ -541,8 +541,10 @@ pub fn result(app: &App, provider: Kind, found: &Found) -> pb::GifResult {
 pub fn open_result(app: &App, id: &str) -> Result<Token> {
     let refused = || Error::invalid("that isn't a GIF from this instance's search");
     let (payload, mac) = id.rsplit_once('.').ok_or_else(refused)?;
-    let expected = hex(&app.picture_key().mac(&[TOKEN_LABEL, payload.as_bytes()])[..16]);
-    if id.len() > 8192 || !crate::auth::constant_time_eq(mac.as_bytes(), expected.as_bytes()) {
+    let genuine = app.picture_key().macs(&[TOKEN_LABEL, payload.as_bytes()]).iter().fold(false, |genuine, expected| {
+        genuine | crate::auth::constant_time_eq(mac.as_bytes(), hex(&expected[..16]).as_bytes())
+    });
+    if id.len() > 8192 || !genuine {
         return Err(refused());
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload).map_err(|_| refused())?;
@@ -554,18 +556,12 @@ fn clip(title: &str) -> String {
     title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_TITLE).collect()
 }
 
-/// The seal on a GIF stored as `media_id`: what SendMessage checks.
-fn seal_of(app: &App, media_id: &str, gif: &pb::MessageGif) -> String {
-    let mac = app.picture_key().mac(&[
-        SEAL_LABEL,
-        media_id.as_bytes(),
-        b"\0",
-        &gif.width.to_le_bytes(),
-        &gif.height.to_le_bytes(),
-        &gif.provider.to_le_bytes(),
-        gif.title.as_bytes(),
-    ]);
-    hex(&mac[..16])
+/// The seals on a GIF stored as `media_id`, under the current key first,
+/// then any previous ones: what SendMessage checks.
+fn seals_of(app: &App, media_id: &str, gif: &pb::MessageGif) -> Vec<String> {
+    let (width, height, provider) = (gif.width.to_le_bytes(), gif.height.to_le_bytes(), gif.provider.to_le_bytes());
+    let parts: [&[u8]; 7] = [SEAL_LABEL, media_id.as_bytes(), b"\0", &width, &height, &provider, gif.title.as_bytes()];
+    app.picture_key().macs(&parts).iter().map(|mac| hex(&mac[..16])).collect()
 }
 
 /// A stored GIF, sealed, at this instance's address.
@@ -578,7 +574,7 @@ pub fn sealed(app: &App, media_id: &str, width: i32, height: i32, title: &str, p
         provider,
         seal: String::new(),
     };
-    gif.seal = seal_of(app, media_id, &gif);
+    gif.seal = seals_of(app, media_id, &gif).swap_remove(0);
     gif
 }
 
@@ -588,7 +584,10 @@ pub fn sealed(app: &App, media_id: &str, width: i32, height: i32, title: &str, p
 pub fn open_seal(app: &App, gif: &pb::MessageGif) -> Result<pb::MessageGif> {
     let refused = || Error::invalid("that GIF didn't come from this instance; pick it again");
     let media_id = crate::media::id_in_url(&gif.url).ok_or_else(refused)?;
-    if !crate::auth::constant_time_eq(seal_of(app, &media_id, gif).as_bytes(), gif.seal.as_bytes()) {
+    let sealed = seals_of(app, &media_id, gif)
+        .iter()
+        .fold(false, |sealed, seal| sealed | crate::auth::constant_time_eq(seal.as_bytes(), gif.seal.as_bytes()));
+    if !sealed {
         return Err(refused());
     }
     Ok(pb::MessageGif {

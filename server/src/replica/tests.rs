@@ -97,6 +97,34 @@ async fn ships_every_commit_and_restores_them() {
 }
 
 #[tokio::test]
+async fn restores_a_replica_from_before_the_key_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, bucket, out) = (dir.path().join("data"), dir.path().join("bucket"), dir.path().join("out"));
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let db = open(&data.join("a.db")).await;
+    let replica = replica(&data, &bucket, CHECKPOINT_BYTES, REBASE_BYTES);
+    replica.track("servers/a", db.clone()).await.unwrap();
+    insert(&db, 0, 30, 10).await;
+    replica.sync_files().await;
+
+    // Only the new key: refused, as with any wrong key.
+    let new = EncryptionKey::parse(&"a5".repeat(32)).unwrap();
+    assert!(restore_file(replica.store(), "servers/a", &out.join("new.db"), Some(&new)).await.is_err());
+    // The new key replacing the old: replayed under the old, then under the new alone.
+    let replacing = new.clone().replacing(&["5a".repeat(32).as_str()]).unwrap();
+    let dest = out.join("restored.db");
+    assert!(restore_file(replica.store(), "servers/a", &dest, Some(&replacing)).await.unwrap());
+    let reopened = db::open(&dest, Some(&new), &[]).await.unwrap();
+    let conn = db::connect(&reopened).unwrap();
+    let count = db::query_one(&conn, "SELECT count(*) FROM t", (), |r| r.get::<i64>(0)).await.unwrap();
+    assert_eq!(count, Some(30));
+    drop(conn);
+    drop(reopened);
+    assert!(db::open(&dest, Some(&key()), &[]).await.is_err(), "no longer under the old key");
+}
+
+#[tokio::test]
 async fn folds_the_log_and_restores_across_epochs() {
     let dir = tempfile::tempdir().unwrap();
     let (data, bucket, out) = (dir.path().join("data"), dir.path().join("bucket"), dir.path().join("out"));

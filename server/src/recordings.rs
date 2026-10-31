@@ -720,7 +720,7 @@ async fn settle(app: &App, sdb: &ServerDb, mut row: RecordingRow) -> Result<Reco
         return Ok(row);
     }
     let dir = server_dir(app, &sdb.id).join(&row.id);
-    let key = app.config.encryption_key.as_ref().map(|k| k.bytes());
+    let keys = unsealing_keys(app);
     let mut by_user: BTreeMap<String, Stored> = BTreeMap::new();
     let mut ended_at = row.started_at;
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -740,7 +740,7 @@ async fn settle(app: &App, sdb: &ServerDb, mut row: RecordingRow) -> Result<Reco
             *stored.bytes_mut(part) = meta.len() as i64;
             if part == Part::Sound {
                 let key_name = part.key_name(user_id);
-                let plain = read_plain(&entry.path(), key.as_ref(), &row.id, &key_name, row.sealed).unwrap_or_default();
+                let plain = read_plain(&entry.path(), &keys, &row.id, &key_name, row.sealed).unwrap_or_default();
                 stored.duration_ms = (last_granule(&plain) * 1000 / RATE) as i64;
             }
         }
@@ -815,8 +815,8 @@ pub async fn download(
             return Err(Error::NotFound("recording file"));
         }
     }
-    let key = app.config.encryption_key.as_ref().map(|k| k.bytes());
-    if row.sealed && key.is_none() {
+    let keys = unsealing_keys(app);
+    if row.sealed && keys.is_empty() {
         return Err(Error::FailedPrecondition(
             "this recording was sealed with an encryption key the instance no longer has".into(),
         ));
@@ -824,7 +824,7 @@ pub async fn download(
     let (tx, rx) = tokio::sync::mpsc::channel(4);
     let (id, user, sealed) = (row.id.clone(), part.key_name(&track.user_id), row.sealed);
     tokio::task::spawn_blocking(move || {
-        let sent = pieces(&path, key.as_ref(), &id, &user, sealed, &mut |piece| tx.blocking_send(Ok(piece)).is_ok());
+        let sent = pieces(&path, &keys, &id, &user, sealed, &mut |piece| tx.blocking_send(Ok(piece)).is_ok());
         if let Err(err) = sent {
             let _ = tx.blocking_send(Err(err));
         }
@@ -1317,12 +1317,149 @@ impl Sealer {
     }
 }
 
+/// The instance's keys a sealed file may be under: its encryption key's,
+/// then those of the keys it replaces (FUWA_ENCRYPTION_KEY_PREVIOUS).
+fn unsealing_keys(app: &App) -> Vec<[u8; 32]> {
+    app.config.encryption_key.as_ref().map(|key| key.all_bytes()).unwrap_or_default()
+}
+
+/// A sealed file's next chunk, or `None` at its end (or a last chunk a
+/// crash cut short).
+fn next_chunk(file: &mut impl Read) -> std::io::Result<Option<Vec<u8>>> {
+    let mut length = [0u8; 4];
+    if read_up_to(file, &mut length)? < 4 {
+        return Ok(None);
+    }
+    let mut chunk = vec![0u8; u32::from_be_bytes(length) as usize];
+    if read_up_to(file, &mut chunk)? < chunk.len() {
+        return Ok(None);
+    }
+    Ok(Some(chunk))
+}
+
+/// Which of `keys` a sealed file is under (by its first chunk), as its own
+/// key and the key's place in `keys`. `None` for a file with no chunks.
+fn which_key(
+    path: &Path,
+    keys: &[[u8; 32]],
+    recording_id: &str,
+    key_name: &str,
+) -> Result<Option<(LessSafeKey, usize)>> {
+    let mut file = std::io::BufReader::new(std::fs::File::open(path)?);
+    let Some(first) = next_chunk(&mut file)? else { return Ok(None) };
+    for (index, master) in keys.iter().enumerate() {
+        let key = file_key(master, recording_id, key_name);
+        let mut chunk = first.clone();
+        if key.open_in_place(nonce(0), Aad::empty(), &mut chunk).is_ok() {
+            return Ok(Some((key, index)));
+        }
+    }
+    Err(Error::internal("a recording's file doesn't unseal with any key the instance has"))
+}
+
+/// Seals a file again under the first of `keys` if it's under one of the
+/// others: whether it was. The file is replaced only once its new copy is
+/// whole on disk.
+fn reseal(path: &Path, keys: &[[u8; 32]], recording_id: &str, key_name: &str) -> Result<bool> {
+    let Some(current) = keys.first() else { return Ok(false) };
+    let Some((old, index)) = which_key(path, keys, recording_id, key_name)? else { return Ok(false) };
+    if index == 0 {
+        return Ok(false);
+    }
+    let mut copy = path.as_os_str().to_owned();
+    copy.push(".resealing");
+    let copy = PathBuf::from(copy);
+    {
+        let mut from = std::io::BufReader::new(std::fs::File::open(path)?);
+        let mut to = std::io::BufWriter::new(std::fs::File::create(&copy)?);
+        let mut sealer = Sealer::new(file_key(current, recording_id, key_name));
+        let mut counter = 0u64;
+        while let Some(mut chunk) = next_chunk(&mut from)? {
+            let plain = old
+                .open_in_place(nonce(counter), Aad::empty(), &mut chunk)
+                .map_err(|_| Error::internal("a recording's file doesn't unseal"))?;
+            counter += 1;
+            to.write_all(&sealer.seal(plain.to_vec()))?;
+        }
+        to.into_inner().map_err(|err| err.into_error())?.sync_all()?;
+    }
+    std::fs::rename(&copy, path)?;
+    Ok(true)
+}
+
+/// Seals every finished recording this part holds under the encryption
+/// key, where it's under one of the keys it replaces: the files here, and
+/// the replica's copies (fetched when they aren't here, and put back). Runs
+/// at startup while FUWA_ENCRYPTION_KEY_PREVIOUS is set, so the previous
+/// keys can go once it has.
+pub async fn reseal_all(app: Arc<App>) {
+    let Some(key) = app.config.encryption_key.as_ref().filter(|key| key.replaces_any()) else { return };
+    let keys = key.all_bytes();
+    let (mut resealed, mut failed) = (0usize, 0usize);
+    for sdb in app.servers.all() {
+        let Ok(rows) = sdb.recordings_ended_before(i64::MAX, i64::MAX).await else {
+            failed += 1;
+            continue;
+        };
+        for row in rows.into_iter().filter(|row| row.sealed) {
+            if app.shutdown.is_cancelled() {
+                return;
+            }
+            let tracks: Vec<Stored> = serde_json::from_str(&row.tracks).unwrap_or_default();
+            for track in &tracks {
+                for part in track.parts() {
+                    match reseal_track(&app, &sdb.id, &row.id, &track.user_id, part, &keys).await {
+                        Ok(true) => resealed += 1,
+                        Ok(false) => {}
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+        }
+    }
+    if failed > 0 {
+        tracing::warn!(resealed, failed, "some recordings couldn't be sealed under the new encryption key");
+    } else {
+        tracing::info!(resealed, "every recording is sealed under the encryption key");
+    }
+}
+
+async fn reseal_track(
+    app: &App,
+    server_id: &str,
+    recording_id: &str,
+    user_id: &str,
+    part: Part,
+    keys: &[[u8; 32]],
+) -> Result<bool> {
+    let file = file_name(user_id, part, true);
+    let dir = server_dir(app, server_id).join(recording_id);
+    let path = dir.join(&file);
+    let copy_key = replica_key(server_id, recording_id, &file);
+    if !path.exists() {
+        let Some(replica) = &app.replica else { return Ok(false) };
+        std::fs::create_dir_all(&dir)?;
+        if !replica.store().get_to_file(&copy_key, &path).await? {
+            return Ok(false);
+        }
+    }
+    let (at, keys, id, name) = (path.clone(), keys.to_vec(), recording_id.to_string(), part.key_name(user_id));
+    let changed = tokio::task::spawn_blocking(move || reseal(&at, &keys, &id, &name))
+        .await
+        .map_err(|err| Error::internal(err.to_string()))??;
+    if changed && let Some(replica) = &app.replica {
+        replica.store().put_file(&copy_key, &path).await?;
+    }
+    Ok(changed)
+}
+
 /// Reads a file as plain Ogg or WebM, handing it on in pieces of about
 /// [`PIECE`] until `send` says stop. A sealed file's last chunk, cut short
-/// by a crash, is left out.
+/// by a crash, is left out. It's unsealed with whichever of `keys` it's
+/// under.
 fn pieces(
     path: &Path,
-    key: Option<&[u8; 32]>,
+    keys: &[[u8; 32]],
     recording_id: &str,
     key_name: &str,
     sealed: bool,
@@ -1342,19 +1479,13 @@ fn pieces(
             }
         }
     }
-    let key =
-        file_key(key.ok_or_else(|| Error::internal("no key to unseal a recording with"))?, recording_id, key_name);
+    if keys.is_empty() {
+        return Err(Error::internal("no key to unseal a recording with"));
+    }
+    let Some((key, _)) = which_key(path, keys, recording_id, key_name)? else { return Ok(()) };
     let mut counter = 0u64;
     let mut piece = Vec::with_capacity(PIECE);
-    loop {
-        let mut length = [0u8; 4];
-        if read_up_to(&mut file, &mut length)? < 4 {
-            break;
-        }
-        let mut chunk = vec![0u8; u32::from_be_bytes(length) as usize];
-        if read_up_to(&mut file, &mut chunk)? < chunk.len() {
-            break;
-        }
+    while let Some(mut chunk) = next_chunk(&mut file)? {
         let plain = key
             .open_in_place(nonce(counter), Aad::empty(), &mut chunk)
             .map_err(|_| Error::internal("a recording's file doesn't unseal"))?;
@@ -1383,15 +1514,9 @@ fn read_up_to(file: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
 }
 
 /// A whole track as plain Ogg.
-fn read_plain(
-    path: &Path,
-    key: Option<&[u8; 32]>,
-    recording_id: &str,
-    key_name: &str,
-    sealed: bool,
-) -> Result<Vec<u8>> {
+fn read_plain(path: &Path, keys: &[[u8; 32]], recording_id: &str, key_name: &str, sealed: bool) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    pieces(path, key, recording_id, key_name, sealed, &mut |piece| {
+    pieces(path, keys, recording_id, key_name, sealed, &mut |piece| {
         out.extend(piece);
         true
     })?;
@@ -1595,6 +1720,31 @@ mod tests {
     }
 
     #[test]
+    fn recordings_seal_again_under_a_new_key() {
+        let dir = temp();
+        let (old, new) = ([7u8; 32], [9u8; 32]);
+        let (mut t, path) = track(&dir, Some(&old));
+        for i in 0..120u32 {
+            t.frame(u64::from(i) * FRAME, i * 960, &[0xFC, i as u8]);
+        }
+        t.finish(120 * FRAME);
+        let (rec, user) = ("01J00000000000000000000001", "01J00000000000000000000000");
+        let plain = read_plain(&path, &[old], rec, user, true).unwrap();
+        // Read with whichever key it's under, while both are known.
+        assert_eq!(read_plain(&path, &[new, old], rec, user, true).unwrap(), plain);
+        assert!(read_plain(&path, &[new], rec, user, true).is_err());
+
+        assert!(reseal(&path, &[new, old], rec, user).unwrap());
+        assert_eq!(read_plain(&path, &[new], rec, user, true).unwrap(), plain);
+        assert!(read_plain(&path, &[old], rec, user, true).is_err());
+        assert!(!reseal(&path, &[new, old], rec, user).unwrap(), "already under the new key");
+        // A file under no key it has is refused, not rewritten.
+        assert!(reseal(&path, &[[1u8; 32], old], rec, user).is_err());
+        assert_eq!(read_plain(&path, &[new], rec, user, true).unwrap(), plain);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn sealed_pictures_read_back_with_their_own_key() {
         let dir = temp();
         let key = [7u8; 32];
@@ -1605,11 +1755,11 @@ mod tests {
         film.finish();
         let sealed = std::fs::read(&path).unwrap();
         assert!(!sealed.windows(13).any(|w| w == b"secret pixels"));
-        let plain = read_plain(&path, Some(&key), rec, &Part::Screen.key_name(user), true).unwrap();
+        let plain = read_plain(&path, &[key], rec, &Part::Screen.key_name(user), true).unwrap();
         assert!(plain.windows(13).any(|w| w == b"secret pixels"));
         // Not with the key of the same person's sound, or camera.
-        assert!(read_plain(&path, Some(&key), rec, &Part::Sound.key_name(user), true).is_err());
-        assert!(read_plain(&path, Some(&key), rec, &Part::Camera.key_name(user), true).is_err());
+        assert!(read_plain(&path, &[key], rec, &Part::Sound.key_name(user), true).is_err());
+        assert!(read_plain(&path, &[key], rec, &Part::Camera.key_name(user), true).is_err());
         assert_eq!(parse_file_name(&format!("{user}.screen.webm.sealed"), true), Some((user, Part::Screen)));
         assert_eq!(parse_file_name(&format!("{user}.opus"), false), Some((user, Part::Sound)));
         assert_eq!(parse_file_name(&format!("{user}.camera.webm"), true), None);
@@ -1628,17 +1778,14 @@ mod tests {
         let sealed = std::fs::read(&path).unwrap();
         assert!(!sealed.windows(4).any(|w| w == b"OggS"), "nothing readable on disk");
         let plain =
-            read_plain(&path, Some(&key), "01J00000000000000000000001", "01J00000000000000000000000", true).unwrap();
+            read_plain(&path, &[key], "01J00000000000000000000001", "01J00000000000000000000000", true).unwrap();
         assert_eq!(&plain[..4], b"OggS");
         assert_eq!(last_granule(&plain), 200 * FRAME);
         // Another key (another recording) doesn't open it.
-        assert!(
-            read_plain(&path, Some(&key), "01J00000000000000000000002", "01J00000000000000000000000", true).is_err()
-        );
+        assert!(read_plain(&path, &[key], "01J00000000000000000000002", "01J00000000000000000000000", true).is_err());
         // Cut short by a crash: what's whole still reads.
         std::fs::write(&path, &sealed[..sealed.len() - 10]).unwrap();
-        let cut =
-            read_plain(&path, Some(&key), "01J00000000000000000000001", "01J00000000000000000000000", true).unwrap();
+        let cut = read_plain(&path, &[key], "01J00000000000000000000001", "01J00000000000000000000000", true).unwrap();
         assert!(last_granule(&cut) > 0 && cut.len() < plain.len() && plain.starts_with(&cut));
         let _ = std::fs::remove_dir_all(dir);
     }

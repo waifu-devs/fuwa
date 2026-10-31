@@ -16,32 +16,85 @@ use turso::{Builder, Connection, Database, IntoParams, Row};
 use crate::error::{Error, Result};
 
 /// A database-at-rest key: 32 bytes as 64 hex characters (AEGIS-256).
+///
+/// It may carry the keys it replaces (FUWA_ENCRYPTION_KEY_PREVIOUS): a file
+/// that doesn't open under it but does under one of them is encrypted again
+/// under it as it's opened ([`open`]), and sealed files that aren't
+/// databases still unseal with them ([`EncryptionKey::all_bytes`]).
 #[derive(Clone)]
-pub struct EncryptionKey(String);
+pub struct EncryptionKey {
+    hex: String,
+    /// The keys it replaces, newest first; `None` for data made without a key.
+    previous: Arc<[Option<String>]>,
+}
 
 impl EncryptionKey {
     pub fn parse(hex: &str) -> std::result::Result<Self, String> {
-        let hex = hex.trim();
-        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err("must be 64 hex characters (32 bytes), e.g. from `openssl rand -hex 32`".into());
+        Ok(Self { hex: parse_hex(hex)?, previous: Arc::new([]) })
+    }
+
+    /// The same key, replacing these: each 64 hex characters, or `none` for
+    /// data made without a key.
+    pub fn replacing(self, previous: &[&str]) -> std::result::Result<Self, String> {
+        let previous = previous
+            .iter()
+            .map(|key| match key.trim() {
+                "none" => Ok(None),
+                key => parse_hex(key).map(Some),
+            })
+            .collect::<std::result::Result<Vec<_>, String>>()?;
+        if previous.iter().any(|key| key.as_deref() == Some(self.hex.as_str())) {
+            return Err("lists the key in use; list only the ones it replaces".into());
         }
-        Ok(Self(hex.to_ascii_lowercase()))
+        Ok(Self { previous: previous.into(), ..self })
+    }
+
+    /// The keys it replaces, each alone (`None` for no key).
+    pub fn previous(&self) -> impl Iterator<Item = Option<EncryptionKey>> + '_ {
+        self.previous.iter().map(|key| key.clone().map(|hex| Self { hex, previous: Arc::new([]) }))
+    }
+
+    pub fn replaces_any(&self) -> bool {
+        !self.previous.is_empty()
+    }
+
+    /// The key alone, without the ones it replaces.
+    pub fn alone(&self) -> Self {
+        Self { hex: self.hex.clone(), previous: Arc::new([]) }
     }
 
     /// The key's 32 bytes, for sealing files that aren't databases (call
     /// recordings), each under a key derived from it.
     pub fn bytes(&self) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&self.0[2 * i..2 * i + 2], 16).unwrap_or_default();
-        }
-        out
+        hex_bytes(&self.hex)
     }
+
+    /// Its bytes, then those of each key it replaces: what a sealed file is
+    /// tried with.
+    pub fn all_bytes(&self) -> Vec<[u8; 32]> {
+        std::iter::once(self.bytes()).chain(self.previous.iter().flatten().map(|hex| hex_bytes(hex))).collect()
+    }
+}
+
+fn parse_hex(hex: &str) -> std::result::Result<String, String> {
+    let hex = hex.trim();
+    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("must be 64 hex characters (32 bytes), e.g. from `openssl rand -hex 32`".into());
+    }
+    Ok(hex.to_ascii_lowercase())
+}
+
+fn hex_bytes(hex: &str) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or_default();
+    }
+    out
 }
 
 impl std::fmt::Debug for EncryptionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("EncryptionKey(***)")
+        write!(f, "EncryptionKey(***, replacing {})", self.previous.len())
     }
 }
 
@@ -384,7 +437,166 @@ impl Fold {
 /// The mode (MVCC) lives in the file's header, so this switches a file once,
 /// including one made before fuwa used it, and is a no-op after. Encryption has
 /// to be set up before the switch, which the builder does.
+///
+/// A file that doesn't open under `key` but does under one of the keys it
+/// replaces is encrypted again under it first ([`rekey`]).
 pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str]) -> Result<Db> {
+    match open_as_is(path, key, migrations).await {
+        Ok(db) => Ok(db),
+        Err(err) => {
+            let Some(key) = key.filter(|key| key.replaces_any() && path.exists()) else { return Err(err) };
+            if !rekey_from_previous(path, key).await? {
+                return Err(err);
+            }
+            open_as_is(path, Some(key), migrations).await
+        }
+    }
+}
+
+/// Encrypts a file under `key` if it's under one of the keys `key` replaces:
+/// whether it was. A file that opens under none of them is left as it is.
+pub async fn rekey_from_previous(path: &Path, key: &EncryptionKey) -> Result<bool> {
+    for previous in key.previous() {
+        // Only the right key opens a file, so trying the others changes nothing.
+        if !opens(path, previous.as_ref()).await {
+            continue;
+        }
+        rekey(path, previous.as_ref(), &key.alone()).await?;
+        tracing::info!(file = %path.file_name().unwrap_or_default().to_string_lossy(), "encrypted a database under the new key");
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// The key a file is under: `key` itself (alone) or one of those it
+/// replaces, `key` alone when none opens it (so the usual error says so).
+pub async fn key_of(path: &Path, key: Option<&EncryptionKey>) -> Option<EncryptionKey> {
+    let key = key?;
+    for candidate in std::iter::once(Some(key.alone())).chain(key.previous()) {
+        if opens(path, candidate.as_ref()).await {
+            return candidate;
+        }
+    }
+    Some(key.alone())
+}
+
+/// Whether a file opens and reads under `key`.
+async fn opens(path: &Path, key: Option<&EncryptionKey>) -> bool {
+    let Ok(db) = build(path, key).await else { return false };
+    let Ok(conn) = connect(&db) else { return false };
+    query_one(&conn, "SELECT count(*) FROM sqlite_schema", (), |r| r.get::<i64>(0)).await.is_ok()
+}
+
+/// Writes a database file again under another key (or none), keeping
+/// everything in it: its log folded in first, then every table, row, index
+/// and trigger copied into a new file under `to`, which takes its place.
+///
+/// Turso can't change a file's key in place, so this is a copy. Nothing
+/// else may have the file open. A crash midway leaves the file as it was
+/// (with its log folded in) and a `.rekey` copy that the next try replaces.
+pub async fn rekey(path: &Path, from: Option<&EncryptionKey>, to: &EncryptionKey) -> Result<()> {
+    let copy = with_suffix(path, ".rekey");
+    for leftover in [copy.clone(), with_suffix(&copy, "-wal"), with_suffix(&copy, "-log")] {
+        remove_if_there(&leftover)?;
+    }
+    {
+        let source = build(path, from).await?;
+        // The log under the old key goes into the file first, so nothing is
+        // left in it once the file's replaced.
+        checkpoint_with(&source, ATTEMPTS, None).await?;
+        let source_conn = connect(&source)?;
+        let target = build(&copy, Some(to)).await?;
+        let target_conn = connect(&target)?;
+        copy_into(&source_conn, &target_conn).await?;
+        checkpoint_with(&target, ATTEMPTS, None).await?;
+    }
+    for side in ["-wal", "-log"] {
+        let leftover = with_suffix(&copy, side);
+        if std::fs::metadata(&leftover).is_ok_and(|meta| meta.len() > 0) {
+            return Err(Error::internal(format!("{} kept a log after its copy was folded", path.display())));
+        }
+        remove_if_there(&leftover)?;
+    }
+    std::fs::File::open(&copy)?.sync_all()?;
+    std::fs::rename(&copy, path)?;
+    // The old file's logs, empty since it was folded.
+    for side in ["-wal", "-log"] {
+        remove_if_there(&with_suffix(path, side))?;
+    }
+    if let Some(dir) = path.parent()
+        && let Ok(dir) = std::fs::File::open(dir)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
+/// Copies a whole database into an empty one: tables, then their rows, then
+/// indexes, views and triggers, then `user_version` (which migrations go by).
+async fn copy_into(from: &Connection, to: &Connection) -> Result<()> {
+    let mut schema =
+        query_all(from, "SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY rowid", (), |r| {
+            Ok((r.get::<String>(0)?, r.get::<String>(1)?, r.get::<String>(2)?))
+        })
+        .await?;
+    // The engine's own tables come with the file.
+    schema.retain(|(_, name, _)| !name.starts_with("sqlite_") && !name.starts_with("__turso_internal_"));
+    for (_, _, sql) in schema.iter().filter(|(kind, _, _)| kind == "table") {
+        to.execute(sql, ()).await?;
+    }
+    for (_, name, _) in schema.iter().filter(|(kind, _, _)| kind == "table") {
+        copy_rows(from, to, name).await?;
+    }
+    for (_, _, sql) in schema.iter().filter(|(kind, _, _)| kind != "table") {
+        to.execute(sql, ()).await?;
+    }
+    let version = query_one(from, "PRAGMA user_version", (), |r| r.get::<i64>(0)).await?.unwrap_or(0);
+    pragma(to, &format!("PRAGMA user_version = {version}")).await?;
+    Ok(())
+}
+
+/// Rows copied in each transaction.
+const COPY_BATCH: usize = 1_000;
+
+async fn copy_rows(from: &Connection, to: &Connection, table: &str) -> Result<()> {
+    let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+    let mut rows = from.query(&format!("SELECT * FROM {quoted}"), ()).await?;
+    let columns = rows.column_count();
+    if columns == 0 {
+        return Ok(());
+    }
+    let marks = (1..=columns).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    let insert = format!("INSERT INTO {quoted} VALUES ({marks})");
+    let mut batch = 0;
+    to.execute("BEGIN", ()).await?;
+    while let Some(row) = rows.next().await? {
+        let values = (0..columns).map(|i| row.get_value(i)).collect::<std::result::Result<Vec<_>, _>>()?;
+        to.execute(&insert, values).await?;
+        batch += 1;
+        if batch == COPY_BATCH {
+            to.execute("COMMIT", ()).await?;
+            to.execute("BEGIN", ()).await?;
+            batch = 0;
+        }
+    }
+    to.execute("COMMIT", ()).await?;
+    Ok(())
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+fn remove_if_there(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
+async fn open_as_is(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str]) -> Result<Db> {
     let db = build(path, key).await.map_err(|err| explain_key(err, path, key.is_some()))?;
     let conn = connect(&db)?;
     let mode = query_one(&conn, "PRAGMA journal_mode = 'mvcc'", (), |r| r.get::<String>(0))
@@ -452,7 +664,7 @@ async fn build(path: &Path, key: Option<&EncryptionKey>) -> Result<Database> {
     if let Some(key) = key {
         builder = builder
             .experimental_encryption(true)
-            .with_encryption(turso::EncryptionOpts { cipher: "aegis256".into(), hexkey: key.0.clone() });
+            .with_encryption(turso::EncryptionOpts { cipher: "aegis256".into(), hexkey: key.hex.clone() });
     }
     Ok(builder.build().await?)
 }
@@ -645,6 +857,112 @@ pub fn is_unique_violation(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(byte: &str) -> EncryptionKey {
+        EncryptionKey::parse(&byte.repeat(32)).unwrap()
+    }
+
+    const KEYED: &[&str] = &[
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT NOT NULL, b BLOB, r REAL); CREATE INDEX t_v ON t (v);",
+        "CREATE TABLE u (k TEXT PRIMARY KEY, n INTEGER);",
+    ];
+
+    async fn fill(db: &Db, count: i64) {
+        for id in 0..count {
+            write(db, async move |conn| {
+                conn.execute(
+                    "INSERT INTO t (id, v, b, r) VALUES (?1, ?2, ?3, ?4)",
+                    (id, format!("secret row {id}"), vec![id as u8, 0, 255], id as f64 / 2.0),
+                )
+                .await?;
+                conn.execute("INSERT INTO u (k, n) VALUES (?1, ?2)", (format!("k{id}"), id)).await?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+    }
+
+    async fn rows(db: &Db) -> Vec<(i64, String, Option<Vec<u8>>, Option<f64>)> {
+        query_all(&connect(db).unwrap(), "SELECT id, v, b, r FROM t ORDER BY id", (), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_key_takes_over_files_under_the_old_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let (old, new) = (key("5a"), key("a5"));
+        let db = open(&path, Some(&old), KEYED).await.unwrap();
+        // More than one copy batch, with some still in the log.
+        fill(&db, 2_500).await;
+        let before = rows(&db).await;
+        drop(db);
+
+        // The new key alone can't open it, as before.
+        assert!(open(&path, Some(&new), KEYED).await.is_err());
+        let replacing = new.clone().replacing(&["a5".repeat(32).as_str()]);
+        assert!(replacing.is_err(), "the key in use isn't one it replaces");
+        let replacing = new.clone().replacing(&["5a".repeat(32).as_str()]).unwrap();
+        let db = open(&path, Some(&replacing), KEYED).await.unwrap();
+        assert_eq!(rows(&db).await, before);
+        let conn = connect(&db).unwrap();
+        let version = query_one(&conn, "PRAGMA user_version", (), |r| r.get::<i64>(0)).await.unwrap();
+        assert_eq!(version, Some(KEYED.len() as i64), "migrations don't run again");
+        let indexes =
+            query_one(&conn, "SELECT count(*) FROM sqlite_schema WHERE name = 't_v'", (), |r| r.get::<i64>(0));
+        assert_eq!(indexes.await.unwrap(), Some(1));
+        let n = query_one(&conn, "SELECT n FROM u WHERE k = 'k2499'", (), |r| r.get::<i64>(0)).await.unwrap();
+        assert_eq!(n, Some(2499));
+        // Still writable, in concurrent mode.
+        fill_more(&db).await;
+        drop(conn);
+        drop(db);
+
+        // Under the new key now, alone; the old one no longer opens it.
+        assert_eq!(rows(&open(&path, Some(&new), &[]).await.unwrap()).await.len(), 2_501);
+        assert!(open(&path, Some(&old), &[]).await.is_err());
+        // Nothing of it in plain text, and no copy left behind.
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!bytes.windows(10).any(|w| w == b"secret row"));
+        assert!(!with_suffix(&path, ".rekey").exists());
+    }
+
+    async fn fill_more(db: &Db) {
+        write(db, async |conn| {
+            conn.execute("INSERT INTO t (id, v) VALUES (5000, 'after')", ()).await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plain_files_are_encrypted_when_the_previous_key_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let db = open(&path, None, KEYED).await.unwrap();
+        fill(&db, 10).await;
+        drop(db);
+        let key = key("5a").replacing(&["none"]).unwrap();
+        assert_eq!(rows(&open(&path, Some(&key), KEYED).await.unwrap()).await.len(), 10);
+        assert!(open(&path, None, &[]).await.is_err(), "no longer plain");
+    }
+
+    #[tokio::test]
+    async fn a_file_under_no_key_it_knows_stays_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let db = open(&path, Some(&key("11")), KEYED).await.unwrap();
+        fill(&db, 3).await;
+        drop(db);
+        let other = key("5a").replacing(&["a5".repeat(32).as_str()]).unwrap();
+        assert!(open(&path, Some(&other), KEYED).await.is_err());
+        assert_eq!(rows(&open(&path, Some(&key("11")), &[]).await.unwrap()).await.len(), 3);
+    }
 
     async fn scratch(migrations: &[&str]) -> (tempfile::TempDir, Db) {
         let dir = tempfile::tempdir().unwrap();

@@ -59,16 +59,40 @@ const CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// The key links are signed with: 32 bytes, the same on every part of a
 /// split instance (from the cluster key) or kept in node.db by a single process.
+///
+/// While the cluster key changes, the keys from the previous ones still
+/// check what they signed (links, tokens, sign-ins), and retired ones still
+/// check picture links alone, so pictures stored before keep loading.
+/// Everything new is signed with the current key.
 #[derive(Clone)]
-pub struct Key([u8; 32]);
+pub struct Key {
+    current: [u8; 32],
+    previous: Arc<[[u8; 32]]>,
+    retired: Arc<[[u8; 32]]>,
+}
 
 impl Key {
+    fn of(current: [u8; 32]) -> Self {
+        Self { current, previous: Arc::new([]), retired: Arc::new([]) }
+    }
+
     /// The key for a split instance, from the cluster key every part has.
     pub fn from_cluster_key(cluster_key: &str) -> Self {
+        Self::of(Self::derive(cluster_key))
+    }
+
+    /// The key for a split instance whose cluster key is changing: signed
+    /// with the current one's, checked with every one's.
+    pub fn from_cluster_keys(current: &str, previous: &[String], retired: &[String]) -> Self {
+        let derive = |keys: &[String]| keys.iter().map(|key| Self::derive(key)).collect::<Vec<_>>().into();
+        Self { current: Self::derive(current), previous: derive(previous), retired: derive(retired) }
+    }
+
+    fn derive(cluster_key: &str) -> [u8; 32] {
         let mut hash = Sha256::new();
         hash.update(b"fuwa picture links\0");
         hash.update(cluster_key.as_bytes());
-        Self(hash.finalize().into())
+        hash.finalize().into()
     }
 
     /// A key kept as hex in node.db.
@@ -77,23 +101,33 @@ impl Key {
             .step_by(2)
             .map(|i| hex.get(i..i + 2).and_then(|pair| u8::from_str_radix(pair, 16).ok()))
             .collect::<Option<Vec<u8>>>()?;
-        Some(Self(bytes.try_into().ok()?))
+        Some(Self::of(bytes.try_into().ok()?))
     }
 
     /// A MAC of `parts` under this key, for other things the instance signs
     /// (each with its own label first, so one can't stand for another).
     pub(crate) fn mac(&self, parts: &[&[u8]]) -> [u8; 32] {
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC takes keys of any length");
-        for part in parts {
-            mac.update(part);
-        }
-        mac.finalize().into_bytes().into()
+        mac_with(&self.current, parts)
+    }
+
+    /// The MACs of `parts` under the current key and the previous ones, for
+    /// checking something signed: it's genuine if it matches any.
+    pub(crate) fn macs(&self, parts: &[&[u8]]) -> Vec<[u8; 32]> {
+        self.signing().map(|key| mac_with(key, parts)).collect()
+    }
+
+    /// The current key and the previous ones, each alone (for what derives
+    /// more from the key that signed it, as sign-ins do).
+    pub(crate) fn each(&self) -> impl Iterator<Item = Key> + '_ {
+        self.signing().map(|key| Self::of(*key))
+    }
+
+    fn signing(&self) -> impl Iterator<Item = &[u8; 32]> {
+        std::iter::once(&self.current).chain(self.previous.iter())
     }
 
     fn sign(&self, url: &str) -> String {
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC takes keys of any length");
-        mac.update(url.as_bytes());
-        mac.finalize().into_bytes()[..16].iter().map(|b| format!("{b:02x}")).collect()
+        sign_with(&self.current, url)
     }
 
     /// The signature of a link fetched only from its own origin: of
@@ -104,13 +138,30 @@ impl Key {
 
     #[cfg(test)]
     fn signed(&self, signature: &str, url: &str) -> bool {
-        crate::auth::constant_time_eq(signature.as_bytes(), self.sign(url).as_bytes())
+        self.signed_for(signature, &Wanted { url: url.to_string(), on_origin: false })
     }
 
     fn signed_for(&self, signature: &str, wanted: &Wanted) -> bool {
-        let expected = if wanted.on_origin { self.sign_on_origin(&wanted.url) } else { self.sign(&wanted.url) };
-        crate::auth::constant_time_eq(signature.as_bytes(), expected.as_bytes())
+        let signed = if wanted.on_origin { format!("on its origin\0{}", wanted.url) } else { wanted.url.clone() };
+        let mut matched = false;
+        // Every key is tried, so the time taken says nothing about which one matched.
+        for key in self.signing().chain(self.retired.iter()) {
+            matched |= crate::auth::constant_time_eq(signature.as_bytes(), sign_with(key, &signed).as_bytes());
+        }
+        matched
     }
+}
+
+fn mac_with(key: &[u8; 32], parts: &[&[u8]]) -> [u8; 32] {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes keys of any length");
+    for part in parts {
+        mac.update(part);
+    }
+    mac.finalize().into_bytes().into()
+}
+
+fn sign_with(key: &[u8; 32], url: &str) -> String {
+    mac_with(key, &[url.as_bytes()])[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl std::fmt::Debug for Key {
@@ -561,10 +612,39 @@ mod tests {
     }
 
     #[test]
+    fn a_changing_cluster_key_still_checks_what_the_old_one_signed() {
+        const OLD: &str = "a cluster key of at least thirty-two characters";
+        const NEW: &str = "the new cluster key, also thirty-two characters";
+        const GONE: &str = "an older cluster key still, thirty-two characters";
+        let old = Key::from_cluster_key(OLD);
+        let changing = Key::from_cluster_keys(NEW, &[OLD.to_string()], &[GONE.to_string()]);
+        let url = "https://pics.example.org/cat.png";
+        let from_old = link(&old, PUBLIC, url);
+        let from_new = link(&changing, PUBLIC, url);
+        assert_ne!(from_old, from_new, "new links are signed with the new key");
+        assert_eq!(from_new, link(&Key::from_cluster_key(NEW), PUBLIC, url));
+        // Links the old key signed still load, and aren't signed again.
+        assert_eq!(link(&changing, PUBLIC, &from_old), from_old);
+        let signature = |link: &str| link[PUBLIC.len() + PATH.len()..].split('?').next().unwrap().to_string();
+        assert!(changing.signed(&signature(&from_old), url));
+        // Retired keys check picture links, and nothing else.
+        let from_gone = link(&Key::from_cluster_key(GONE), PUBLIC, url);
+        assert!(changing.signed(&signature(&from_gone), url));
+        let parts: [&[u8]; 2] = [b"label\0", b"something"];
+        let macs = changing.macs(&parts);
+        assert_eq!(macs[0], changing.mac(&parts));
+        assert!(macs.contains(&old.mac(&parts)));
+        assert!(!macs.contains(&Key::from_cluster_key(GONE).mac(&parts)));
+        assert_eq!(changing.each().count(), 2);
+        // Once the old key is gone, its links no longer load.
+        assert!(!Key::from_cluster_key(NEW).signed(&signature(&from_old), url));
+    }
+
+    #[test]
     fn keys_read_back_from_hex() {
         let hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         let key = Key::from_hex(hex).unwrap();
-        assert_eq!(key.0[1], 0x11);
+        assert_eq!(key.current[1], 0x11);
         assert!(Key::from_hex("abc").is_none());
         assert!(Key::from_hex("zz").is_none());
     }

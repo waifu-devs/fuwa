@@ -19,16 +19,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{FutureExt, Stream, StreamExt};
-use http::{HeaderName, StatusCode, header};
+use http::{StatusCode, header};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tonic::codegen::Service;
-use tonic::metadata::{AsciiMetadataValue, MetadataMap};
+use tonic::metadata::MetadataMap;
 use tonic::transport::Channel;
 use tonic::{Status, Streaming};
 
-use super::{Backoff, DirectoryClient, KEY_HEADER, Keyed, Patience, WithKey, forward_metadata, ride_out};
+use super::{Backoff, DirectoryClient, KEY_HEADER, Keyed, Patience, SentKeys, WithKey, forward_metadata, ride_out};
 use crate::app::{HasSettings, cors};
 use crate::config::Config;
 use crate::cpb;
@@ -176,7 +176,7 @@ struct Placement {
 
 pub struct Gateway {
     config: Config,
-    key: AsciiMetadataValue,
+    key: SentKeys,
     directory_url: String,
     /// Raw calls to the directory, passed on as they came.
     directory_channel: Channel,
@@ -315,7 +315,7 @@ impl Gateway {
                 get(move |headers: http::HeaderMap| {
                     let gateway = parts.clone();
                     async move {
-                        let key = gateway.key.to_str().unwrap_or_default();
+                        let key = &gateway.key;
                         let admin = super::status::is_admin(&headers, gateway.config.admin_token.as_deref());
                         let streams = gateway.followers.count();
                         super::status::from_directory(&gateway.parts, &gateway.directory_url, key, streams, admin).await
@@ -759,7 +759,7 @@ async fn follow_settings(gateway: Arc<Gateway>) {
 
 /// The headers a call is passed on with: the caller's, less those about the
 /// connection it came in on, plus the cluster key.
-fn passed_headers(from: &http::HeaderMap, key: &AsciiMetadataValue) -> http::HeaderMap {
+fn passed_headers(from: &http::HeaderMap, key: &SentKeys) -> http::HeaderMap {
     let mut headers = http::HeaderMap::with_capacity(from.len() + 1);
     for (name, value) in from {
         let hop = matches!(name.as_str(), "host" | "connection" | "keep-alive" | "transfer-encoding" | "upgrade");
@@ -767,8 +767,7 @@ fn passed_headers(from: &http::HeaderMap, key: &AsciiMetadataValue) -> http::Hea
             headers.append(name.clone(), value.clone());
         }
     }
-    let value = http::HeaderValue::from_bytes(key.as_encoded_bytes()).expect("the cluster key is a valid header");
-    headers.insert(HeaderName::from_static(KEY_HEADER), value);
+    key.put_headers(&mut headers);
     headers
 }
 

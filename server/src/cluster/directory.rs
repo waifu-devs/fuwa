@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::metadata::AsciiMetadataValue;
 use tonic::{Request, Response, Status};
 
 use super::{ShardClient, account_to_pb, shard_client};
@@ -26,7 +25,7 @@ use crate::pb;
 /// The shards a directory knows of: every one that has registered, and
 /// which of them are up (following its settings) right now.
 pub struct Shards {
-    key: AsciiMetadataValue,
+    key: super::SentKeys,
     known: RwLock<HashMap<String, Shard>>,
     /// Held while server files left from a single process are promised to a
     /// shard or let go of.

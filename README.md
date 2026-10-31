@@ -152,6 +152,7 @@ the log filter are read only from the environment.
 | `FUWA_GIF_API_KEY` | unset | The GIF provider's key; GIFs stay off without one |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
+| `FUWA_ENCRYPTION_KEY_PREVIOUS` | unset | The keys `FUWA_ENCRYPTION_KEY` replaces (comma-separated, `none` for data made without one): data under them is encrypted again under it. See [docs/key-rotation.md](docs/key-rotation.md) |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
 | `FUWA_LIMIT_MEMBERS` | unlimited | Members per server |
 | `FUWA_LIMIT_CHANNELS` | unlimited | Channels per server |
@@ -472,6 +473,8 @@ the cluster key, apart from `/healthz`.
 | `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
 | `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them  (`https://` for one on the internet) |
 | `FUWA_MEDIA_KEY` | directory, shards, media | Optional: a separate 32+ character key for calls to the media parts only, so a media part on a host of its own ([docs/self-hosting.md](docs/self-hosting.md#the-media-part-on-a-host-of-its-own)) needs no cluster key |
+| `FUWA_CLUSTER_KEY_PREVIOUS`, `FUWA_MEDIA_KEY_PREVIOUS` | as their keys | While a key changes: the old ones, still taken (comma-separated). See [docs/key-rotation.md](docs/key-rotation.md) |
+| `FUWA_CLUSTER_KEY_RETIRED` | every part | Old cluster keys kept only so picture links signed with them still load |
 | `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`), shown publicly by `/healthz/parts`. Defaults to one made up on first start and kept in its data folder as `shard-id` |
 | `FUWA_REGION` | any part | The region it runs in, like `eu` or `us-west` (see [docs/regions.md](docs/regions.md)). The directory's is the home region; unset is the home region |
 | `FUWA_REGION_NAME` | any part | The region's name people see, like `Europe`. Common labels have one built in |

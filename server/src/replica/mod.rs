@@ -927,6 +927,7 @@ pub async fn restore_shard(store: &Store, data: &Path, key: Option<&EncryptionKe
 /// Restores one file from its current generation into `dest`, which must not
 /// exist. Returns false when its log stopped short of where it was shipped to.
 pub async fn restore_file(store: &Store, name: &str, dest: &Path, key: Option<&EncryptionKey>) -> Result<bool> {
+    let wanted = key;
     let objects = store.list(&format!("{name}/")).await?;
     let generation = match current(store, name).await? {
         Some(current) => current.generation,
@@ -962,6 +963,10 @@ pub async fn restore_file(store: &Store, name: &str, dest: &Path, key: Option<&E
         if !store.get_to_file(&snapshot_key(name, &generation), &file).await? {
             return Err(Error::internal(format!("the snapshot of {name} disappeared")));
         }
+        // A snapshot from before the encryption key changed is replayed under
+        // the key it was made with, and only then encrypted under the new one.
+        let made_with = db::key_of(&file, key).await;
+        let key = made_with.as_ref();
         let log = sidecar(&file, "-log");
         let mut whole = true;
         // Epochs must follow each other with none missing; each one's log is
@@ -1002,6 +1007,11 @@ pub async fn restore_file(store: &Store, name: &str, dest: &Path, key: Option<&E
         db::query_one(&db::connect(&db)?, "SELECT count(*) FROM sqlite_schema", (), |r| r.get::<i64>(0)).await?;
         db.checkpoint().await?;
         drop(db);
+        if let Some(wanted) = wanted
+            && made_with.as_ref().map(|k| k.bytes()) != Some(wanted.bytes())
+        {
+            db::rekey(&file, made_with.as_ref(), &wanted.alone()).await?;
+        }
         if dest.exists() {
             return Err(Error::internal(format!("{} appeared while restoring it", dest.display())));
         }
