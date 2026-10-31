@@ -20,6 +20,24 @@
 //                    without it, no triage
 // GITHUB_REPO        where issues go (waifu-devs/fuwa)
 // GITHUB_LABEL       on every issue triage files, and how it finds open ones (feedback)
+//
+// The roadmap builder (builder.ts), on when ROADMAP_CHANNEL and BOAT_API_KEY are set:
+// ROADMAP_CHANNEL    "<server id>/<channel id>" of the roadmap board
+// ROADMAP_LABEL      the label that says a card may be built (Approved)
+// ROADMAP_TODO       the column cards are picked from (To do, Todo or Backlog)
+// ROADMAP_DOING      the column a card moves to while it's built (Doing, In progress...)
+// ROADMAP_REPOS      where cards are built, owner/name, comma separated (waifu-devs/fuwa);
+//                    a card with a label named like another one's goes there
+// ROADMAP_SANDBOXES  how many cards are built at once (2)
+// ROADMAP_HOURS      how long Claude may take on one card (4)
+// ROADMAP_MERGE      squash, merge or rebase (squash)
+// ROADMAP_GITHUB_TOKEN  a fine-grained token with Contents and Pull requests: read and write
+//                    on ROADMAP_REPOS, to merge; without it nothing is merged
+// BOAT_API_KEY       a boat.dev API key, a secret
+// BOAT_ENVIRONMENT   the boat environment sandboxes start with (boat's base)
+// BOAT_SNAPSHOT      a saved snapshot to start them from instead
+// BOAT_TYPE          small, default, large or xlarge (default)
+// BOAT_MODEL, BOAT_EFFORT  Claude Code's model and reasoning effort (boat's defaults)
 import {
   Agent,
   NotFoundError,
@@ -40,7 +58,10 @@ import {
   teamPost,
   withOutcome,
 } from "./feedback.ts";
-import { GitHub } from "./github.ts";
+import { Boat } from "./boat.ts";
+import { Builder, fuwaBoard } from "./builder.ts";
+import { GitHub, Pulls, type MergeMethod } from "./github.ts";
+import { parseRepos } from "./roadmap.ts";
 import { ClaudeGrouper, triage, type Pending } from "./triage.ts";
 
 const env = process.env;
@@ -50,7 +71,7 @@ if (!token) {
   console.error("Set FUWA_TOKEN to the agent's token.");
   process.exit(1);
 }
-const team = parseChannel(env.FEEDBACK_CHANNEL);
+const team = parseChannel(env.FEEDBACK_CHANNEL, "FEEDBACK_CHANNEL", "where feedback is posted");
 const instance = new URL(url).host;
 
 const github = env.GITHUB_TOKEN
@@ -81,6 +102,68 @@ const agent = new Agent({
   token,
   onError: () => console.error("A handler failed."),
 });
+
+const roadmap = env.ROADMAP_CHANNEL
+  ? parseChannel(env.ROADMAP_CHANNEL, "ROADMAP_CHANNEL", "the roadmap board")
+  : undefined;
+const builder = roadmap && env.BOAT_API_KEY ? makeBuilder(roadmap) : undefined;
+if (roadmap && !builder) console.log("ROADMAP_CHANNEL is set, but nothing is built without BOAT_API_KEY.");
+
+function makeBuilder(board: { serverId: string; channelId: string }): Builder {
+  const merge = (env.ROADMAP_MERGE || "squash") as MergeMethod;
+  const max = Number(env.ROADMAP_SANDBOXES || 2);
+  const hours = Number(env.ROADMAP_HOURS || 4);
+  let repos: string[] = [];
+  try {
+    repos = parseRepos(env.ROADMAP_REPOS);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+  if (!["squash", "merge", "rebase"].includes(merge) || !(max >= 1) || !(hours > 0)) {
+    console.error("Set ROADMAP_MERGE to squash, merge or rebase, ROADMAP_SANDBOXES to 1 or more and ROADMAP_HOURS above 0.");
+    process.exit(1);
+  }
+  return new Builder({
+    board: fuwaBoard(agent, board.serverId, board.channelId),
+    boat: new Boat({ apiKey: env.BOAT_API_KEY! }),
+    pulls: env.ROADMAP_GITHUB_TOKEN ? new Pulls({ token: env.ROADMAP_GITHUB_TOKEN }) : undefined,
+    repos,
+    label: env.ROADMAP_LABEL || "Approved",
+    todo: env.ROADMAP_TODO,
+    doing: env.ROADMAP_DOING,
+    maxSandboxes: Math.floor(max),
+    sandbox: {
+      type: env.BOAT_TYPE || undefined,
+      environment: env.BOAT_ENVIRONMENT || undefined,
+      from: env.BOAT_SNAPSHOT || undefined,
+      ttlSeconds: 2 * 60 * 60,
+    },
+    model: env.BOAT_MODEL || undefined,
+    reasoningEffort: env.BOAT_EFFORT || undefined,
+    pollMs: 20_000,
+    maxMs: hours * 60 * 60_000,
+    mergeMethod: merge,
+    log: (line) => console.log(`Roadmap: ${line}`),
+  });
+}
+
+if (builder && roadmap) {
+  // Card events say something moved; the board is read again a moment later.
+  let soon: NodeJS.Timeout | undefined;
+  const sweepSoon = () => {
+    clearTimeout(soon);
+    soon = setTimeout(() => void builder.sweep().catch((err) => report("Looking at the roadmap", err)), 2_000);
+  };
+  agent.on("cardUpdated", (update, event) => {
+    if (event.serverId === roadmap.serverId && update.card?.channelId === roadmap.channelId) sweepSoon();
+  });
+  agent.on("cardDeleted", (deleted, event) => {
+    if (event.serverId === roadmap.serverId && deleted.channelId === roadmap.channelId) builder.forget(deleted.cardId);
+  });
+  agent.on("ready", sweepSoon);
+  setInterval(sweepSoon, 5 * 60_000);
+}
 
 agent.on("mention", async (ctx: MessageContext) => {
   const feedback = feedbackOf(ctx.content, agent.me);
@@ -158,10 +241,10 @@ function schedule() {
   setTimeout(() => void runTriage().finally(schedule), nextRun(Date.now(), hours) - Date.now());
 }
 
-function parseChannel(value: string | undefined): { serverId: string; channelId: string } {
+function parseChannel(value: string | undefined, name: string, what: string): { serverId: string; channelId: string } {
   const [serverId, channelId, extra] = (value ?? "").split("/");
   if (!serverId || !channelId || extra !== undefined) {
-    console.error("Set FEEDBACK_CHANNEL to <server id>/<channel id>, where feedback is posted.");
+    console.error(`Set ${name} to <server id>/<channel id>, ${what}.`);
     process.exit(1);
   }
   return { serverId, channelId };
@@ -179,7 +262,8 @@ agent.on("ready", ({ me, servers }) =>
     `Signed in as @${me.username} in ${servers.length} server(s). ` +
       (triaging
         ? `Triage every ${hours}h into ${github!.repo}.`
-        : "No triage (it needs ANTHROPIC_API_KEY, GITHUB_TOKEN and TRIAGE_HOURS above 0)."),
+        : "No triage (it needs ANTHROPIC_API_KEY, GITHUB_TOKEN and TRIAGE_HOURS above 0).") +
+      (builder ? " Building approved roadmap cards." : ""),
   ),
 );
 agent.on("disconnected", ({ retryInMs }) =>
@@ -188,6 +272,7 @@ agent.on("disconnected", ({ retryInMs }) =>
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
+    builder?.stop();
     await agent.stop();
     process.exit(0);
   });
@@ -215,6 +300,17 @@ try {
     process.exit(1);
   }
   report("Finding FEEDBACK_CHANNEL", err);
+}
+if (roadmap && builder) {
+  try {
+    await agent.api.boards.getBoard(roadmap);
+  } catch (err) {
+    if (err instanceof NotFoundError) {
+      console.error("ROADMAP_CHANNEL isn't a board the agent can see: add it to that server.");
+      process.exit(1);
+    }
+    report("Finding ROADMAP_CHANNEL", err);
+  }
 }
 if (triaging) {
   schedule();

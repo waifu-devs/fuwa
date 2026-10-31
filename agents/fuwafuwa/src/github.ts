@@ -78,3 +78,71 @@ export class GitHub {
     return (await res.json()) as { number: number; html_url: string };
   }
 }
+
+export interface PullRequest {
+  number: number;
+  url: string;
+  state: "open" | "closed";
+  merged: boolean;
+}
+
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+/** Why GitHub wouldn't merge, in its words (they name no secrets). */
+export class MergeRefused extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "MergeRefused";
+  }
+}
+
+export interface PullsOptions {
+  /** A fine-grained token with Contents and Pull requests: read and write on the roadmap's repositories. */
+  token: string;
+  fetch?: typeof fetch;
+}
+
+/** Pull requests the roadmap builder merges, in any repository the token reaches. */
+export class Pulls {
+  #token: string;
+  #fetch: typeof fetch;
+
+  constructor(options: PullsOptions) {
+    this.#token = options.token;
+    this.#fetch = options.fetch ?? fetch;
+  }
+
+  async get(repo: string, number: number): Promise<PullRequest> {
+    const res = await this.#send("GET", repo, `/pulls/${number}`);
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} to GET /pulls`);
+    const pr = (await res.json()) as { number: number; html_url: string; state: "open" | "closed"; merged?: boolean; merged_at?: string | null };
+    return { number: pr.number, url: pr.html_url, state: pr.state, merged: pr.merged === true || !!pr.merged_at };
+  }
+
+  /** Merges it; MergeRefused says why when GitHub won't (conflicts, checks, reviews). */
+  async merge(repo: string, number: number, method: MergeMethod): Promise<void> {
+    const res = await this.#send("PUT", repo, `/pulls/${number}/merge`, { merge_method: method });
+    if (res.ok) return;
+    if (res.status === 405 || res.status === 409 || res.status === 422) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new MergeRefused((body.message ?? "").slice(0, 300) || `GitHub answered ${res.status}`);
+    }
+    throw new Error(`GitHub answered ${res.status} to PUT /pulls/merge`);
+  }
+
+  #send(method: string, repo: string, path: string, body?: unknown): Promise<Response> {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("not a repository");
+    return this.#fetch(`https://api.github.com/repos/${repo}${path}`, {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${this.#token}`,
+        "content-type": "application/json",
+        "user-agent": "fuwafuwa",
+        "x-github-api-version": "2022-11-28",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    });
+  }
+}
