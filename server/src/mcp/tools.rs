@@ -540,7 +540,7 @@ const TOOLS: &[Tool] = &[
         title: "Upload a picture",
         description: "Stores a picture on the instance and returns its URL, for create_emoji (purpose emoji), \
                       update_server's icon_url (server_icon) or banner_url (server_banner), a webhook's avatar_url \
-                      (webhook_avatar), create_profile_item (decoration) or a gacha banner's art_url (shop_art). PNG, JPEG, GIF, WebP or AVIF, at most \
+                      (webhook_avatar), create_profile_item (decoration, also for a nameplate) or a gacha banner's art_url (shop_art). PNG, JPEG, GIF, WebP or AVIF, at most \
                       the instance's picture size limit.",
         properties: || {
             json!({

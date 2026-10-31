@@ -385,13 +385,14 @@
     `lib/live-tiles-store.ts` (each person's switches, on the device) and
     `components/LiveTiles.tsx`.
   - `profile_items.rs` and `api/profile_items.rs` (`ProfileItemService`,
-    docs/profile-items.md): profile effects and avatar decorations the
-    instance offers (node.db's `profile_items`, instance admins; worn on
-    the profile: `Profile.effect`, `User.decoration_id`, which servers'
-    `users` copies carry) and a server offers (its file's `profile_items`,
-    Manage Server; worn on the member's server profile, `members.profile_effect`
-    and `profile_decoration`, set through `UpdateMember`). Effects are specs
-    checked by `check_effect`; decorations are uploads
+    docs/profile-items.md): profile effects, avatar decorations and
+    nameplates the instance offers (node.db's `profile_items`, instance
+    admins; worn on the profile: `Profile.effect`, `User.decoration_id`,
+    `User.nameplate_id`, which servers' `users` copies carry) and a server
+    offers (its file's `profile_items`, Manage Server; worn on the member's
+    server profile, `members.profile_effect`, `profile_decoration` and
+    `profile_nameplate`, set through `UpdateMember`). Effects are specs
+    checked by `check_effect`; decorations and nameplates are uploads
     (`MEDIA_PURPOSE_DECORATION`). Profiles and members name items by id and
     apps draw from the lists (`Node.profile_items_at`, `ProfileItemsUpdated`).
     An effect may carry its own pictures (`ProfileItem.pictures`, uploads
@@ -401,7 +402,8 @@
     deleting an item takes it off its wearers in the same write. Web:
     `lib/profile-items.ts`, `components/ProfileDecoration.tsx`,
     `components/settings/ProfileItems.tsx` (both settings dialogs) and
-    `settings/account/DecorationPicker.tsx`.
+    `settings/account/DecorationPicker.tsx` and `NameplatePicker.tsx`;
+    nameplates are drawn behind member-list and DM rows (`MemberNameplate`).
   - `previews.rs`: link previews (docs/link-previews.md). It finds the links
     in a message's text (`links`, pure: not in code, spoilers or `<...>`, 3
     at most) and reads each page's OpenGraph tags (`read_page`, pure) through

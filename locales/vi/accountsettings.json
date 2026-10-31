@@ -364,9 +364,12 @@
   "signIn.continueTo": "Tiếp tục đến {name}",
   "decorations.label": "Trang trí ảnh đại diện",
   "decorations.hint": "Một hình bao quanh ảnh đại diện của bạn, ở mọi nơi nó hiển thị trên instance này. Đây là những mẫu có sẵn.",
+  "nameplates.label": "Bảng tên",
+  "nameplates.hint": "Một hình phía sau tên bạn trong danh sách thành viên và tin nhắn riêng, ở mọi nơi trên instance này. Đây là những cái nó có.",
   "serverProfiles.useMine": "Dùng của hồ sơ",
   "serverProfiles.effectHint": "Phát trên thẻ của bạn trong máy chủ này thay cho hiệu ứng hồ sơ. Máy chủ có thể có hiệu ứng riêng.",
   "serverProfiles.decorationHint": "Hiển thị quanh ảnh đại diện trong máy chủ này thay cho trang trí của hồ sơ.",
+  "serverProfiles.nameplateHint": "Hiện phía sau tên bạn trong danh sách thành viên của máy chủ này thay cho cái trong hồ sơ.",
   "serverProfiles.forSale": "{name} đang được bán trong cửa hàng của máy chủ",
   "serverProfiles.notForSale": "Không bán"
 }

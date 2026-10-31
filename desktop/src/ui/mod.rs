@@ -55,6 +55,7 @@ mod menus;
 mod mod_view;
 mod moderate;
 mod motion;
+mod nameplate_picker;
 mod notify;
 mod onboarding;
 pub(crate) mod overlay;

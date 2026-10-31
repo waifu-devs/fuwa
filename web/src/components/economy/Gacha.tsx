@@ -43,7 +43,7 @@ import { setPrefs, usePrefs } from "@/lib/prefs";
 import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { shownPicture } from "@/lib/shown";
 import { gachaCue, RARITY_CUES } from "@/lib/sounds";
-import { ITEM_DECORATION } from "@/lib/profile-items";
+import { ITEM_DECORATION, ITEM_NAMEPLATE } from "@/lib/profile-items";
 import { cn } from "@/lib/utils";
 
 /*
@@ -994,7 +994,7 @@ function Card({
           {"★".repeat(n)}
         </span>
         {worn && me ? (
-          <span className={cn("relative my-auto grid place-items-center", worn.kind === ITEM_DECORATION ? "h-[30%]" : "h-[46%]")}>
+          <span className={cn("relative my-auto grid place-items-center", worn.kind === ITEM_DECORATION ? "h-[30%]" : worn.kind === ITEM_NAMEPLATE ? "h-[22%]" : "h-[46%]")}>
             <ItemArt item={worn} me={me} play={turned} />
           </span>
         ) : (

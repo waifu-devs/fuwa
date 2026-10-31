@@ -1,4 +1,4 @@
-//! Profile items (docs/profile-items.md): effects and avatar decorations an
+//! Profile items (docs/profile-items.md): effects, avatar decorations and nameplates an
 //! instance or one of its servers offers. The store keeps each list; this is
 //! what a person wears, and the calls that list, add, rename and delete them.
 //! Like the web's `fuwa/profile-items.ts`.
@@ -30,6 +30,8 @@ pub enum Scope {
 pub enum NewItem {
     /// A picture from this computer, uploaded first.
     Decoration { content_type: String, bytes: Vec<u8> },
+    /// A wide picture from this computer, uploaded first.
+    Nameplate { content_type: String, bytes: Vec<u8> },
     /// An effect's spec, as JSON, sent as is: the instance checks it. With
     /// its pictures' links, in order, uploaded already (`send_pictures`).
     Effect { spec: String, pictures: Vec<String> },
@@ -196,6 +198,11 @@ pub fn resolve_decoration<'a>(id: &str, items: &'a [pb::ProfileItem]) -> Option<
     find(items, id, pb::ProfileItemKind::Decoration)
 }
 
+/// A nameplate by id among the items given.
+pub fn resolve_nameplate<'a>(id: &str, items: &'a [pb::ProfileItem]) -> Option<&'a pb::ProfileItem> {
+    find(items, id, pb::ProfileItemKind::Nameplate)
+}
+
 /// The effects a list offers, as pickers take them: each one that can play, oldest first.
 pub fn offered_effects(items: &[pb::ProfileItem]) -> Vec<(String, Spec)> {
     items.iter().filter_map(|i| item_effect(i).map(|s| (i.id.clone(), s))).collect()
@@ -211,9 +218,11 @@ pub fn name_from_file(file: &str) -> String {
 
 // ───────────────────────── Helping people make them ─────────────────────────
 
-/// The docs that explain each kind: the effect format, and what a decoration should look like.
+/// The docs that explain each kind: the effect format, and what a decoration
+/// or a nameplate should look like.
 pub const EFFECT_DOCS: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-effects.md#the-format";
 pub const DECORATION_DOCS: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-items.md#decorations";
+pub const NAMEPLATE_DOCS: &str = "https://github.com/waifu-devs/fuwa/blob/master/docs/profile-items.md#nameplates";
 
 /// What someone pastes into an AI chat to have it write a profile effect,
 /// ending where they describe what they want. The web's `EFFECT_PROMPT`, word
@@ -274,6 +283,21 @@ pub const DECORATION_PROMPT: &str = r##"Draw an avatar decoration for fuwa, a ch
 
 What I want:
 "##;
+
+/// What someone pastes into an AI that makes pictures to have it draw a
+/// nameplate. The web's `NAMEPLATE_PROMPT`, word for word.
+pub const NAMEPLATE_PROMPT: &str = r##"Draw a nameplate for fuwa, a chat app: a wide decorative strip shown behind someone's name in the member list, like a little banner.
+
+- A PNG, 900 by 150 pixels (six times as wide as it is tall). It may be see-through or fill the whole strip.
+- Someone's avatar and name sit over its left half, and the app fades that half out, so put the art mostly on the right and keep the left calm: soft color, no busy detail.
+- It's shown about 240 by 44 pixels, so use bold shapes and clear colors, and no text, faces or fine detail.
+
+What I want:
+"##;
+
+/// A nameplate's size, as the prompt and the docs say.
+pub const NAMEPLATE_WIDTH: u32 = 900;
+pub const NAMEPLATE_HEIGHT: u32 = 150;
 
 /// The template's size and the avatar's circle in it: the avatar is 1/1.2 of the picture.
 pub const TEMPLATE_SIZE: u32 = 600;
@@ -342,6 +366,40 @@ pub fn template_pixels() -> Vec<u8> {
             let line = if dashed { 0.9 * (2.0 - (d - r).abs()).clamp(0.0, 1.0) } else { 0.0 };
             let a = line + fill * (1.0 - line);
             let i = (y * size + x) * 4;
+            px[i..i + 4].copy_from_slice(&[128, 128, 128, (a * 255.0).round() as u8]);
+        }
+    }
+    px
+}
+
+/// The nameplate template's pixels, as RGBA, like the web's: a soft gray
+/// that's faint on the left (the app fades it there) and stronger from 80%
+/// across, with a dashed circle where the avatar sits and a dashed box where
+/// the name does.
+pub fn nameplate_template_pixels() -> Vec<u8> {
+    let (w, h) = (NAMEPLATE_WIDTH as usize, NAMEPLATE_HEIGHT as usize);
+    let mid = NAMEPLATE_HEIGHT as f32 / 2.0;
+    let r = NAMEPLATE_HEIGHT as f32 * 0.3;
+    // The name's box: from the avatar's end, 40% of the width across and 44 pixels tall.
+    let (left, right) = (NAMEPLATE_HEIGHT as f32, NAMEPLATE_HEIGHT as f32 + NAMEPLATE_WIDTH as f32 * 0.4);
+    let (top, bottom) = (mid - 22.0, mid + 22.0);
+    let dashed = |along: f32| along.rem_euclid(20.0) < 12.0;
+    let mut px = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let fill = 0.1 + 0.25 * (fx / (NAMEPLATE_WIDTH as f32 * 0.8)).min(1.0);
+            let (dx, dy) = (fx - mid, fy - mid);
+            let d = (dx * dx + dy * dy).sqrt();
+            let ring = (2.0 - (d - r).abs()).clamp(0.0, 1.0)
+                * f32::from(u8::from(dashed((dy.atan2(dx) + std::f32::consts::PI) * r)));
+            let inside = fx >= left - 1.5 && fx <= right + 1.5 && fy >= top - 1.5 && fy <= bottom + 1.5;
+            let near_side = (fx - left).abs().min((fx - right).abs()) < 1.5;
+            let near_edge = (fy - top).abs().min((fy - bottom).abs()) < 1.5;
+            let edge = inside && ((near_side && dashed(fy)) || (near_edge && dashed(fx)));
+            let line = 0.9 * ring.max(f32::from(u8::from(edge)));
+            let a = line + fill * (1.0 - line);
+            let i = (y * w + x) * 4;
             px[i..i + 4].copy_from_slice(&[128, 128, 128, (a * 255.0).round() as u8]);
         }
     }
@@ -420,6 +478,27 @@ impl InstanceState {
         self.decoration_url(server_id, member, self.users.get(user_id))
     }
 
+    /// The picture of the nameplate someone wears, the same way as
+    /// [`InstanceState::decoration_url`]: their pick in a server wins over
+    /// their own, and the decorations switch hides them all.
+    pub fn nameplate_url(
+        &self,
+        server_id: Option<&str>,
+        member: Option<&pb::Member>,
+        user: Option<&pb::User>,
+    ) -> Option<&str> {
+        if !self.decorations_on() {
+            return None;
+        }
+        let user = user.or_else(|| member.and_then(|m| m.user.as_ref()))?;
+        let picked = server_id.zip(member).filter(|(_, m)| !m.nameplate_id.is_empty());
+        let item = match picked {
+            Some((sid, m)) => resolve_nameplate(&m.nameplate_id, self.server_list(sid)),
+            None => resolve_nameplate(&user.nameplate_id, &self.profile_items),
+        };
+        item.filter(|i| !i.picture_url.is_empty()).map(|i| i.picture_url.as_str())
+    }
+
     /// Someone's member row in a server.
     pub fn member(&self, server_id: &str, user_id: &str) -> Option<&pb::Member> {
         self.members.get(server_id)?.iter().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id))
@@ -464,6 +543,15 @@ fn take(i: &mut InstanceState, scope: &Scope, id: &str) {
     }
 }
 
+/// What changes on your profile in one server: `None` keeps it as it is.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ServerLook {
+    pub nickname: Option<String>,
+    pub effect: Option<String>,
+    pub decoration_id: Option<String>,
+    pub nameplate_id: Option<String>,
+}
+
 impl Core {
     /// Lists the instance's items again. An instance from before them has none.
     pub async fn refresh_instance_items(&self, key: &str) {
@@ -496,6 +584,15 @@ impl Core {
                     Scope::Server(id) => id.as_str(),
                 };
                 item.kind = pb::ProfileItemKind::Decoration as i32;
+                item.picture_url =
+                    self.upload_picture_for(key, server_id, pb::MediaPurpose::Decoration, &content_type, bytes).await?;
+            }
+            NewItem::Nameplate { content_type, bytes } => {
+                let server_id = match scope {
+                    Scope::Instance => "",
+                    Scope::Server(id) => id.as_str(),
+                };
+                item.kind = pb::ProfileItemKind::Nameplate as i32;
                 item.picture_url =
                     self.upload_picture_for(key, server_id, pb::MediaPurpose::Decoration, &content_type, bytes).await?;
             }
@@ -596,9 +693,11 @@ impl Core {
             take(i, scope, id);
             // The instance takes it off everyone; ours shows that at once.
             if scope == &Scope::Instance
-                && let Some(me) = i.me.clone().filter(|me| me.decoration_id == id)
+                && let Some(me) = i.me.clone().filter(|me| me.decoration_id == id || me.nameplate_id == id)
             {
-                store::update_user(i, &pb::User { decoration_id: String::new(), ..me });
+                let decoration_id = if me.decoration_id == id { String::new() } else { me.decoration_id.clone() };
+                let nameplate_id = if me.nameplate_id == id { String::new() } else { me.nameplate_id.clone() };
+                store::update_user(i, &pb::User { decoration_id, nameplate_id, ..me });
             }
         });
         Ok(())
@@ -615,16 +714,11 @@ impl Core {
         Ok(())
     }
 
-    /// Your profile in one server: a nickname, and an effect and a decoration
-    /// shown there instead of your own (`None` keeps it, empty goes back to your own).
-    pub async fn set_server_look(
-        &self,
-        key: &str,
-        server_id: &str,
-        nickname: Option<String>,
-        effect: Option<String>,
-        decoration_id: Option<String>,
-    ) -> Result<(), Problem> {
+    /// Your profile in one server: a nickname, and an effect, a decoration and
+    /// a nameplate shown there instead of your own (`None` keeps it, empty goes
+    /// back to your own).
+    pub async fn set_server_look(&self, key: &str, server_id: &str, look: ServerLook) -> Result<(), Problem> {
+        let ServerLook { nickname, effect, decoration_id, nameplate_id } = look;
         let api = self.api(key).ok_or_else(missing)?;
         let user_id = self.shared.read(|s| s.instance(key).and_then(|i| i.me.as_ref().map(|m| m.id.clone())));
         let req = pb::UpdateMemberRequest {
@@ -633,6 +727,7 @@ impl Core {
             nickname,
             effect,
             decoration_id,
+            nameplate_id,
         };
         let res = rpc!(api.servers(), update_member(req)).await?;
         if let Some(member) = res.member {
@@ -667,6 +762,10 @@ mod tests {
         assert!(web.contains(&format!("export const DECORATION_PROMPT = `{DECORATION_PROMPT}`;")));
         assert!(web.contains(&format!("export const EFFECT_DOCS = \"{EFFECT_DOCS}\";")));
         assert!(web.contains(&format!("export const DECORATION_DOCS = \"{DECORATION_DOCS}\";")));
+        assert!(web.contains(&format!("export const NAMEPLATE_PROMPT = `{NAMEPLATE_PROMPT}`;")));
+        assert!(web.contains(&format!("export const NAMEPLATE_DOCS = \"{NAMEPLATE_DOCS}\";")));
+        assert!(web.contains(&format!("export const NAMEPLATE_WIDTH = {NAMEPLATE_WIDTH};")));
+        assert!(web.contains(&format!("export const NAMEPLATE_HEIGHT = {NAMEPLATE_HEIGHT};")));
         assert!(web.contains(&format!("export const TEMPLATE_SIZE = {TEMPLATE_SIZE};")));
         assert!(web.contains(&format!("export const TEMPLATE_AVATAR = {TEMPLATE_AVATAR};")));
     }
@@ -741,6 +840,18 @@ mod tests {
         assert_eq!(at(599, 300), 0);
     }
 
+    #[test]
+    fn the_nameplate_template_fades_in_and_marks_the_avatar() {
+        let px = nameplate_template_pixels();
+        let at = |x: usize, y: usize| px[(y * NAMEPLATE_WIDTH as usize + x) * 4 + 3];
+        assert_eq!(px.len(), (NAMEPLATE_WIDTH * NAMEPLATE_HEIGHT * 4) as usize);
+        // Faint on the left, stronger on the right.
+        assert!(at(5, 5) < at(880, 5), "{} {}", at(5, 5), at(880, 5));
+        assert_eq!(at(880, 140), 89);
+        // The avatar's circle crosses the middle row 45 pixels from its centre.
+        assert!(at(30, 75) > 200);
+    }
+
     fn decoration(id: &str, server: &str) -> pb::ProfileItem {
         pb::ProfileItem {
             id: id.into(),
@@ -795,5 +906,27 @@ mod tests {
         assert_eq!(i.decoration_of(Some("s"), "u"), Some("https://k/media/theirs"));
         i.node = Some(pb::Node { profile_decorations: false, ..Default::default() });
         assert_eq!(i.decoration_of(Some("s"), "u"), None);
+    }
+
+    #[test]
+    fn nameplates_are_worn_like_decorations_and_only_as_nameplates() {
+        let plate = |id: &str, server: &str| pb::ProfileItem {
+            kind: pb::ProfileItemKind::Nameplate as i32,
+            ..decoration(id, server)
+        };
+        let mut i = InstanceState::new("k", "https://k");
+        i.node = Some(pb::Node { profile_decorations: true, ..Default::default() });
+        i.profile_items = vec![plate("mine", ""), decoration("ring", "")];
+        i.server_items.insert("s".into(), vec![plate("theirs", "s")]);
+        let user = pb::User { id: "u".into(), nameplate_id: "mine".into(), ..Default::default() };
+        let mut member = pb::Member { user: Some(user.clone()), ..Default::default() };
+        assert_eq!(i.nameplate_url(None, None, Some(&user)), Some("https://k/media/mine"));
+        member.nameplate_id = "theirs".into();
+        assert_eq!(i.nameplate_url(Some("s"), Some(&member), None), Some("https://k/media/theirs"));
+        // A decoration isn't a nameplate.
+        let ring = pb::User { nameplate_id: "ring".into(), ..user };
+        assert_eq!(i.nameplate_url(None, None, Some(&ring)), None);
+        i.node = Some(pb::Node { profile_decorations: false, ..Default::default() });
+        assert_eq!(i.nameplate_url(Some("s"), Some(&member), None), None);
     }
 }

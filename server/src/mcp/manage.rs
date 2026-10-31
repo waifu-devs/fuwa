@@ -274,17 +274,17 @@ tools! {
     // Profile items the server offers (docs/profile-items.md).
     "list_profile_items" => profile_item_service_client::ProfileItemServiceClient.list_server_profile_items(ListServerProfileItemsRequest), Reads,
         "List profile items",
-        "The profile effects and avatar decorations the server offers its members.";
+        "The profile effects, avatar decorations and nameplates the server offers its members.";
     "create_profile_item" => profile_item_service_client::ProfileItemServiceClient.create_server_profile_item(CreateServerProfileItemRequest), Writes,
         "Create a profile item",
-        "Offers members a profile effect or an avatar decoration (a picture upload_picture returned for \
-         decoration). Needs Manage Server.";
+        "Offers members a profile effect, an avatar decoration or a nameplate (a picture upload_picture \
+         returned for decoration). Needs Manage Server.";
     "update_profile_item" => profile_item_service_client::ProfileItemServiceClient.update_server_profile_item(UpdateServerProfileItemRequest), Writes,
         "Change a profile item",
-        "Changes one of the server's profile effects or decorations. Needs Manage Server.";
+        "Changes one of the server's profile effects, decorations or nameplates. Needs Manage Server.";
     "delete_profile_item" => profile_item_service_client::ProfileItemServiceClient.delete_server_profile_item(DeleteServerProfileItemRequest), Destroys,
         "Delete a profile item",
-        "Deletes one of the server's profile effects or decorations and takes it off everyone wearing it. \
+        "Deletes one of the server's profile effects, decorations or nameplates and takes it off everyone wearing it. \
          Needs Manage Server.";
 
     // Mod View (docs/mod-view.md).

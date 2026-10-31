@@ -157,6 +157,53 @@ pub fn decorated(avatar: Div, size: f32, decoration: Option<&str>) -> Div {
     }
 }
 
+/// A nameplate (docs/profile-items.md) behind a row `h` tall, as the web's
+/// `NameplateImage`: the picture's right end in full, fading out under the
+/// avatar and name on the left, a little see-through until the row (`group`)
+/// is pointed at. GPUI has no masks, so the fade is the row's own color laid
+/// over the picture: `under` as it stands, `hover` while pointed at. Put it
+/// first in the row, so the rest draws over it.
+pub fn nameplate(url: &str, h: f32, radius: gpui_kit::Pixels, under: Rgba, hover: Rgba, group: SharedString) -> Div {
+    use gpui_kit::{linear_color_stop, linear_gradient, relative};
+    // The web's mask: none of the picture at the left edge, 15% by a quarter across, 60% by 60%, all of it at the end.
+    let fade = |c: Rgba, from: f32, to: f32| {
+        linear_gradient(90.0, linear_color_stop(alpha(c, from), 0.0), linear_color_stop(alpha(c, to), 1.0))
+    };
+    let band = |id: &str, at: f32, w: f32, from: f32, to: f32| {
+        div()
+            .id(SharedString::from(format!("{id}|{url}|{group}")))
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(relative(at))
+            .w(relative(w))
+            .bg(fade(under, from, to))
+            .group_hover(group.clone(), move |s| s.bg(fade(hover, from, to)))
+    };
+    div()
+        .absolute()
+        .inset_0()
+        .rounded(radius)
+        .overflow_hidden()
+        .child(
+            div()
+                .id(SharedString::from(format!("nameplate|{url}|{group}")))
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                // Six times as wide as it is tall, as it's drawn: the right end shows whatever the row's width.
+                .w(px(h * 6.0))
+                .min_w(relative(1.0))
+                .opacity(0.8)
+                .group_hover(group.clone(), |s| s.opacity(1.0))
+                .child(picture(url.to_owned()).size_full().object_fit(ObjectFit::Cover)),
+        )
+        .child(band("nameplate-fade", 0.0, 0.25, 1.0, 0.85))
+        .child(band("nameplate-fade-mid", 0.25, 0.35, 0.85, 0.4))
+        .child(band("nameplate-fade-end", 0.6, 0.4, 0.4, 0.0))
+}
+
 /// A server's icon: its picture, or its initials on its color. Round until
 /// it's open or hovered, then a rounded square, like Discord's.
 pub fn server_icon(server: &pb::Server, size: f32, radius: f32, _p: &Palette) -> Div {

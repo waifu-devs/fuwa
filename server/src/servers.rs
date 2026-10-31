@@ -66,6 +66,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0042_boards.sql"),
     include_str!("../migrations/server/0043_gacha.sql"),
     include_str!("../migrations/server/0044_soundboard.sql"),
+    include_str!("../migrations/server/0045_nameplates.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -1499,6 +1500,7 @@ pub async fn add_member(
         onboarded_at: None,
         effect: String::new(),
         decoration_id: String::new(),
+        nameplate_id: String::new(),
     })
 }
 
@@ -1663,7 +1665,7 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
     let updated = conn
         .execute(
             "UPDATE users SET username = ?2, display_name = ?3, avatar_url = ?4, kind = ?5, status = ?6, status_expires_at = ?7,
-               decoration_id = ?8
+               decoration_id = ?8, nameplate_id = ?9
              WHERE id = ?1",
             (
                 user.id.as_str(),
@@ -1674,13 +1676,14 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
                 user.status.as_str(),
                 status_expires_at,
                 user.decoration_id.as_str(),
+                user.nameplate_id.as_str(),
             ),
         )
         .await?;
     if updated == 0 {
         conn.execute(
-            "INSERT INTO users (id, username, display_name, avatar_url, kind, status, status_expires_at, decoration_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO users (id, username, display_name, avatar_url, kind, status, status_expires_at, decoration_id, nameplate_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             (
                 user.id.as_str(),
                 user.username.as_str(),
@@ -1690,6 +1693,7 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
                 user.status.as_str(),
                 status_expires_at,
                 user.decoration_id.as_str(),
+                user.nameplate_id.as_str(),
             ),
         )
         .await?;
@@ -1698,7 +1702,9 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
 }
 
 /// The columns of `users` that make a `pb::User`, in the order [`user_row`] reads them.
-pub const USER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id";
+pub const USER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id, users.nameplate_id";
+/// How many columns [`USER_COLUMNS`] is: a query's own columns after it start here.
+pub const USER_WIDTH: usize = 9;
 
 pub fn user_row(r: &Row) -> turso::Result<pb::User> {
     Ok(pb::User {
@@ -1710,6 +1716,7 @@ pub fn user_row(r: &Row) -> turso::Result<pb::User> {
         status: r.get(5)?,
         status_expires_at: r.get::<Option<i64>>(6)?.map(timestamp),
         decoration_id: r.get(7)?,
+        nameplate_id: r.get(8)?,
     })
 }
 
@@ -1718,9 +1725,9 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
     query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id, members.nickname, members.joined_at, members.timed_out_until, members.pending,
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id, users.nameplate_id, members.nickname, members.joined_at, members.timed_out_until, members.pending,
      (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id), members.onboarded_at,
-     members.profile_effect, members.profile_decoration";
+     members.profile_effect, members.profile_decoration, members.profile_nameplate";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -1728,15 +1735,16 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
         Ok(pb::Member {
             server_id: server_id.to_string(),
             user: Some(user_row(r)?),
-            nickname: r.get(8)?,
-            joined_at: Some(timestamp(r.get(9)?)),
-            timed_out_until: r.get::<Option<i64>>(10)?.map(timestamp),
+            nickname: r.get(USER_WIDTH)?,
+            joined_at: Some(timestamp(r.get(USER_WIDTH + 1)?)),
+            timed_out_until: r.get::<Option<i64>>(USER_WIDTH + 2)?.map(timestamp),
             role_ids: vec![],
-            pending: r.get(11)?,
-            sso_signed_in_at: r.get::<Option<i64>>(12)?.map(timestamp),
-            onboarded_at: r.get::<Option<i64>>(13)?.map(timestamp),
-            effect: r.get(14)?,
-            decoration_id: r.get(15)?,
+            pending: r.get(USER_WIDTH + 3)?,
+            sso_signed_in_at: r.get::<Option<i64>>(USER_WIDTH + 4)?.map(timestamp),
+            onboarded_at: r.get::<Option<i64>>(USER_WIDTH + 5)?.map(timestamp),
+            effect: r.get(USER_WIDTH + 6)?,
+            decoration_id: r.get(USER_WIDTH + 7)?,
+            nameplate_id: r.get(USER_WIDTH + 8)?,
         })
     }
 }
@@ -2057,11 +2065,11 @@ pub async fn save_join_form(conn: &Connection, form: &pb::JoinForm) -> Result<()
     Ok(())
 }
 
-const APPLICATION_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id, applications.answers, applications.status, applications.reason, applications.account_created_at, applications.created_at, applications.reviewed_by, applications.reviewed_at";
+const APPLICATION_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, users.decoration_id, users.nameplate_id, applications.answers, applications.status, applications.reason, applications.account_created_at, applications.created_at, applications.reviewed_by, applications.reviewed_at";
 
 fn application_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Application> + '_ {
     move |r| {
-        let answers: Vec<StoredAnswer> = from_json(&r.get::<String>(8)?, "answers");
+        let answers: Vec<StoredAnswer> = from_json(&r.get::<String>(USER_WIDTH)?, "answers");
         Ok(pb::Application {
             server_id: server_id.to_string(),
             user: Some(user_row(r)?),
@@ -2069,12 +2077,12 @@ fn application_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Applic
                 .into_iter()
                 .map(|a| pb::ApplicationAnswer { question: a.question, answer: a.answer })
                 .collect(),
-            status: r.get(9)?,
-            reason: r.get(10)?,
-            account_created_at: Some(timestamp(r.get(11)?)),
-            created_at: Some(timestamp(r.get(12)?)),
-            reviewed_by_id: r.get::<Option<String>>(13)?.unwrap_or_default(),
-            reviewed_at: r.get::<Option<i64>>(14)?.map(timestamp),
+            status: r.get(USER_WIDTH + 1)?,
+            reason: r.get(USER_WIDTH + 2)?,
+            account_created_at: Some(timestamp(r.get(USER_WIDTH + 3)?)),
+            created_at: Some(timestamp(r.get(USER_WIDTH + 4)?)),
+            reviewed_by_id: r.get::<Option<String>>(USER_WIDTH + 5)?.unwrap_or_default(),
+            reviewed_at: r.get::<Option<i64>>(USER_WIDTH + 6)?.map(timestamp),
         })
     }
 }

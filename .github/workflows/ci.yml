@@ -121,7 +121,9 @@ jobs:
     name: Desktop app (fmt, clippy, tests)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04's libvpx headers come out of env-libvpx-sys's bindgen as
+    # opaque structs, which breaks the system-libvpx steps below; 24.04's work.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: desktop

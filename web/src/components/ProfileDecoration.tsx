@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { Member, ProfileItem, User } from "@/gen/fuwa/v1/types_pb";
 import { FirstFrame } from "@/components/EmojiImage";
 import { useFuwa } from "@/fuwa/store";
-import { ITEM_EFFECT, itemEffect, itemsOfKind, wornDecoration, wornEffect, type ItemLists } from "@/lib/profile-items";
+import { ITEM_EFFECT, itemEffect, itemsOfKind, wornDecoration, wornEffect, wornNameplate, type ItemLists } from "@/lib/profile-items";
 import type { ProfileEffectSpec } from "@/lib/effects/profile";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
@@ -28,6 +28,13 @@ export function useDecoration(instanceKey: string | undefined, user: Pick<User, 
   const on = useDecorationsOn(instanceKey);
   const lists = useItemLists(instanceKey, member?.serverId);
   return on ? wornDecoration(user, member, lists) : undefined;
+}
+
+/** The nameplate someone shows where they're seen, as `useDecoration`. */
+export function useNameplate(instanceKey: string | undefined, user: Pick<User, "nameplateId"> | undefined, member?: Pick<Member, "serverId" | "nameplateId">) {
+  const on = useDecorationsOn(instanceKey);
+  const lists = useItemLists(instanceKey, member?.serverId);
+  return on ? wornNameplate(user, member, lists) : undefined;
 }
 
 /** The effect someone shows where they're seen, from their profile's pick and their server profile's. */
@@ -59,6 +66,57 @@ function Picture({ src, animated, className }: { src: string; animated: boolean;
   } as const;
   if (calm && animated) return <FirstFrame src={src} onBroken={setBroken} {...shared} />;
   return <img src={src} alt="" onError={() => setBroken(true)} {...shared} />;
+}
+
+/**
+ * A nameplate's picture across its row (the parent, `relative isolate` and
+ * rounded), behind everything in it: anchored to the right and faded out
+ * towards the left, where the avatar and name sit, a little stronger while
+ * the row is hovered. Like a decoration, it never takes clicks, readers
+ * skip it, and a moving one holds still under Reduce motion.
+ */
+export function NameplateImage({ item, className }: { item: Pick<ProfileItem, "pictureUrl" | "animated"> | undefined; className?: string }) {
+  const src = shownPicture(item?.pictureUrl);
+  if (!item || !src) return null;
+  return <Plate key={src} src={src} animated={item.animated} className={className} />;
+}
+
+function Plate({ src, animated, className }: { src: string; animated: boolean; className?: string }) {
+  const calm = usePrefs(reduceMotion);
+  const [broken, setBroken] = useState(false);
+  if (broken) return null;
+  const shared = {
+    "aria-hidden": true,
+    draggable: false,
+    className: "size-full max-w-none object-cover object-right select-none",
+  } as const;
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "nameplate pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[inherit] opacity-80 transition-opacity duration-300 group-hover:opacity-100",
+        className,
+      )}
+    >
+      {calm && animated ? <FirstFrame src={src} onBroken={setBroken} {...shared} /> : <img src={src} alt="" onError={() => setBroken(true)} {...shared} />}
+    </span>
+  );
+}
+
+/** Someone's nameplate behind their row, where they're seen (a server, through `member`, or anywhere on the instance). */
+export function MemberNameplate({
+  instanceKey,
+  user,
+  member,
+  className,
+}: {
+  instanceKey: string | undefined;
+  user: Pick<User, "nameplateId"> | undefined;
+  member?: Pick<Member, "serverId" | "nameplateId">;
+  className?: string;
+}) {
+  const item = useNameplate(instanceKey, user, member);
+  return <NameplateImage item={item} className={className} />;
 }
 
 /** Someone's decoration over their avatar, where they're seen (a server, through `member`, or anywhere on the instance). */
