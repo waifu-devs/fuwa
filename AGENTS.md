@@ -28,7 +28,7 @@
   tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
   instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
 - `agents/fuwafuwa/`: @fuwafuwa, fuwa.chat's feedback agent, built on the SDK
-  from npm (its own pnpm package; Node 24 runs its TypeScript as is). Mentioned
+  from npm (its own Bun package; Bun runs its TypeScript as is). Mentioned
   with feedback, it posts it in a team channel (`FEEDBACK_CHANNEL`). Every few
   hours triage (`src/triage.ts`) sends what's waiting there to Claude, which
   groups it into new issues, comments on open `feedback` issues or nothing to
@@ -58,7 +58,7 @@
   (pure) maps permissions, channel order, names and message text.
   `src/soundboard.ts` describes SoundboardService's calls itself until the SDK
   on npm has them, and turns sounds into Ogg Opus (ffmpeg); on an instance
-  without the service, sounds are skipped. Its own pnpm package, from the SDK
+  without the service, sounds are skipped. Its own Bun package, from the SDK
   on npm; `test/instance.test.ts` runs the fuwa side against `FUWA_BIN`.
   fuwa.chat runs it as the `discord-migrate` service in `.railway/railway.ts`
   (`DISCORD_MIGRATE`), with a volume for `DATA_DIR` and its two tokens as

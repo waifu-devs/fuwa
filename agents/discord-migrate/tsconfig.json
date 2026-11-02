@@ -11,7 +11,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["bun"]
   },
   "include": ["src", "test"]
 }

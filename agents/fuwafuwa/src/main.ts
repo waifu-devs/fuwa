@@ -4,7 +4,7 @@
 // Claude group what's come in, files an issue per group worth filing (or adds
 // to one already open), and marks each post with what it did.
 //
-//   FUWA_TOKEN=... FEEDBACK_CHANNEL=<server>/<channel> node src/main.ts
+//   FUWA_TOKEN=... FEEDBACK_CHANNEL=<server>/<channel> bun src/main.ts
 //
 // FUWA_URL           the instance (https://fuwa.chat)
 // FUWA_TOKEN         the agent's token (Settings > Agents), a secret
