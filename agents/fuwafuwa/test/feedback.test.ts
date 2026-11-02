@@ -129,7 +129,7 @@ test("GitHub gets the label, and the token stays out of errors", async () => {
     repo: "waifu-devs/fuwa",
     token: "secret-token",
     label: "feedback",
-    fetch: (async () => new Response("no", { status: 401 })) as typeof fetch,
+    fetch: (async () => new Response("no", { status: 401 })) as unknown as typeof fetch,
   });
   await assert.rejects(failing.createIssue("t", "b"), (err: Error) => !err.message.includes("secret-token"));
   assert.throws(() => new GitHub({ repo: "nope", token: "x", label: "feedback" }));

@@ -57,9 +57,9 @@ on the model Anthropic recommends for it instead of failing.
 ## Running it
 
 ```sh
-pnpm install
-FUWA_TOKEN=... FEEDBACK_CHANNEL=... pnpm start   # Node 24 runs the TypeScript as it is
-pnpm typecheck && pnpm test
+bun install
+FUWA_TOKEN=... FEEDBACK_CHANNEL=... bun start   # Bun runs the TypeScript as it is
+bun run typecheck && bun run test
 ```
 
 ## Where it runs

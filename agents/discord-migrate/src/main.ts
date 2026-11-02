@@ -5,7 +5,7 @@
 // the server, channels to leave out, and how much history. The bot then copies the server (migrate.ts), keeping a
 // progress message up to date on both sides and posting a summary at the end.
 //
-//   DISCORD_TOKEN=... FUWA_TOKEN=... node src/main.ts
+//   DISCORD_TOKEN=... FUWA_TOKEN=... bun src/main.ts
 //
 // DISCORD_TOKEN         the Discord bot's token (Developer Portal > Bot), a secret
 // FUWA_URL              the fuwa instance (https://fuwa.chat)

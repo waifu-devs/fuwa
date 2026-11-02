@@ -162,10 +162,10 @@ place of `1561062906718855388`.
 ## Running it
 
 ```sh
-pnpm install
-DISCORD_TOKEN=... FUWA_TOKEN=... pnpm start   # Node 24 runs the TypeScript as it is
-pnpm typecheck && pnpm test
-FUWA_BIN=../../target/debug/fuwa pnpm test:instance   # the fuwa side against a real instance
+bun install
+DISCORD_TOKEN=... FUWA_TOKEN=... bun start   # Bun runs the TypeScript as it is
+bun run typecheck && bun run test
+FUWA_BIN=../../target/debug/fuwa bun run test:instance   # the fuwa side against a real instance
 ```
 
 `src/migrate.ts` is the migration, over the two sides in `src/model.ts`:
