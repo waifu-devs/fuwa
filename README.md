@@ -4,6 +4,22 @@ A self-hostable, Discord-like chat server. Run it yourself with one command, or
 use the instance Waifu Devs hosts; clients connect to as many instances as they
 like, hosted or self-hosted, over the same protocol.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/chat-dark.png">
+  <img alt="The fuwa web app: a server's #general channel with messages, reactions, a poll and the member list" src="docs/screenshots/chat-light.png">
+</picture>
+
+<table>
+  <tr>
+    <td><img alt="A profile card with the sakura effect, opened from the member list" src="docs/screenshots/profile.png"></td>
+    <td><img alt="Browsing the servers on an instance" src="docs/screenshots/browse.png"></td>
+  </tr>
+  <tr>
+    <td align="center">Profile cards, with effects</td>
+    <td align="center">Browse an instance's servers</td>
+  </tr>
+</table>
+
 - **One database per community server.** Every server lives in its own
   [Turso](https://github.com/tursodatabase/turso) (SQLite-compatible) file, so a
   server can be backed up or moved by copying one file. Writes use Turso's
