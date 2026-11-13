@@ -74,7 +74,7 @@ jobs:
         with:
           toolchain: 1.99.0 # rust-toolchain.toml
       # The version is pinned so a new cargo-packager can't change the installers by surprise.
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
           tool: cargo-packager@0.11.8
       # libvpx (VP8 for cameras) is linked in statically. On Linux and macOS
